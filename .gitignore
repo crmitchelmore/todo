@@ -25,3 +25,5 @@ clients/**/*.xcodeproj/
 clients/**/*.xcworkspace/xcuserdata/
 clients/**/.swiftpm/
 *.xcuserstate
+integrations/.env.local
+integrations/.env
