@@ -1,4 +1,5 @@
 import UIKit
+import CaptureCore
 
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -26,5 +27,16 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.rootViewController = UINavigationController(rootViewController: CaptureViewController())
         window.makeKeyAndVisible()
         self.window = window
+        drainOutbox()
+    }
+
+    /// Flush any captures the Share Extension / App Intent queued offline. Fire-and-forget — the
+    /// drain is idempotent and re-enqueues anything still unreachable.
+    func sceneWillEnterForeground(_ scene: UIScene) {
+        drainOutbox()
+    }
+
+    private func drainOutbox() {
+        Task { await CaptureConfig.fromEnvironment().drainOutbox() }
     }
 }

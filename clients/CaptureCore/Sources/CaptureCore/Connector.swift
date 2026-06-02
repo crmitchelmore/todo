@@ -74,6 +74,34 @@ public struct CaptureConfig: Sendable {
     public func makeIngress(session: URLSession = .shared) -> ResilientCaptureIngress {
         ResilientCaptureIngress(backendURL: backendURL, appGroupId: appGroupId, session: session)
     }
+
+    /// The App Group outbox, when configured. Used by the main app to drain captures that an
+    /// extension/intent enqueued while the backend was unreachable.
+    public func makeOutbox() -> OutboxCaptureIngress? {
+        appGroupId.map { OutboxCaptureIngress(appGroupId: $0) }
+    }
+
+    /// Drains any captures queued by extensions/intents (offline) and re-posts them to the backend.
+    /// Safe to call on every app launch/foreground: idempotent (each capture carries a stable id),
+    /// and anything that still fails is re-enqueued so a capture is never lost. Returns the number
+    /// of captures successfully flushed.
+    @discardableResult
+    public func drainOutbox(session: URLSession = .shared) async -> Int {
+        guard let outbox = makeOutbox() else { return 0 }
+        let pending = (try? outbox.drain()) ?? []
+        guard !pending.isEmpty else { return 0 }
+        let http = HTTPCaptureIngress(backendURL: backendURL, session: session)
+        var flushed = 0
+        for input in pending {
+            do {
+                try await http.capture(input)
+                flushed += 1
+            } catch {
+                try? await outbox.capture(input) // still offline — keep it for next time
+            }
+        }
+        return flushed
+    }
 }
 
 private struct TokenResponse: Decodable {
