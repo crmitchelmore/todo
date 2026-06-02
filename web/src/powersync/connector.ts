@@ -1,7 +1,8 @@
 import type { AbstractPowerSyncDatabase, PowerSyncBackendConnector } from '@powersync/web';
+import { config } from '../config';
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:6060';
-const POWERSYNC_URL = import.meta.env.VITE_POWERSYNC_URL ?? 'http://localhost:8080';
+const BACKEND_URL = config.backendUrl;
+const POWERSYNC_URL = config.powersyncUrl;
 
 /**
  * Connects the local-first SQLite DB to our self-hosted PowerSync + backend.

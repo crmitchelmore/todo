@@ -46,24 +46,40 @@ const CATEGORY_KEYWORDS: Record<string, string[]> = {
 // Phrases that hint urgency; used only to bump confidence (priority stays a human decision).
 const URGENCY_HINTS = ['urgent', 'asap', 'today', 'now', 'immediately', 'deadline', 'eod', 'cob'];
 
-export function enrichDeterministic(title: string, now = new Date()): Enrichment {
-  const lower = title.toLowerCase();
+/**
+ * Match a keyword/phrase on token boundaries so `pr` doesn't fire on "prep" and `run` doesn't
+ * fire on "running errand". Boundaries are any non-alphanumeric char (or string ends), which also
+ * lets phrases like `1:1`, `on-call` and `code review` match naturally. Compiled once per keyword.
+ */
+function boundedMatcher(keyword: string): RegExp {
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i');
+}
 
+const CATEGORY_MATCHERS: ReadonlyArray<{ category: string; patterns: readonly RegExp[] }> =
+  Object.entries(CATEGORY_KEYWORDS).map(([category, words]) => ({
+    category,
+    patterns: words.map(boundedMatcher),
+  }));
+
+const URGENCY_MATCHERS = URGENCY_HINTS.map(boundedMatcher);
+
+export function enrichDeterministic(title: string, now = new Date()): Enrichment {
   let suggestedDueAt: string | null = null;
   const parsed = chrono.parse(title, now, { forwardDate: true });
   if (parsed.length > 0) suggestedDueAt = parsed[0].date().toISOString();
 
   let suggestedCategory: string | null = null;
   let best = 0;
-  for (const [cat, words] of Object.entries(CATEGORY_KEYWORDS)) {
-    const hits = words.filter((w) => lower.includes(w)).length;
+  for (const { category, patterns } of CATEGORY_MATCHERS) {
+    const hits = patterns.reduce((n, re) => (re.test(title) ? n + 1 : n), 0);
     if (hits > best) {
       best = hits;
-      suggestedCategory = cat;
+      suggestedCategory = category;
     }
   }
 
-  const urgent = URGENCY_HINTS.some((h) => lower.includes(h));
+  const urgent = URGENCY_MATCHERS.some((re) => re.test(title));
   const confidence = Math.min(
     1,
     (suggestedDueAt ? 0.55 : 0) + best * 0.2 + (urgent ? 0.15 : 0)
