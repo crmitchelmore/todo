@@ -1,0 +1,19 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Capture">
+  <defs>
+    <linearGradient id="velo" x1="120" y1="360" x2="400" y2="150" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#B8FF2E"/>
+      <stop offset="0.55" stop-color="#3DF5B0"/>
+      <stop offset="1" stop-color="#18E0FF"/>
+    </linearGradient>
+  </defs>
+  <!-- motion trails: chasing the mark up-right -->
+  <g stroke="url(#velo)" stroke-linecap="round" stroke-width="26">
+    <line x1="94" y1="280" x2="146" y2="220" opacity="0.95"/>
+    <line x1="70" y1="320" x2="112" y2="272" opacity="0.6"/>
+    <line x1="52" y1="356" x2="84" y2="320" opacity="0.35"/>
+  </g>
+  <!-- velocity check: short arm into a long forward rip -->
+  <path d="M168 262 L232 330 L398 138"
+        stroke="url(#velo)" stroke-width="48"
+        stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>

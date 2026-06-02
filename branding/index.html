@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Capture — Brand</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,500;0,800;0,900;1,800;1,900&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0A0B0D; --panel:#101317; --ink:#F2F4F3; --mut:#7E8A86; --line:rgba(255,255,255,.07);
+    --lime:#B8FF2E; --mint:#3DF5B0; --cyan:#18E0FF;
+    --grad:linear-gradient(115deg,var(--lime),var(--mint) 55%,var(--cyan));
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:'Archivo',sans-serif; -webkit-font-smoothing:antialiased;
+    background-image:
+      radial-gradient(1200px 700px at 78% -10%, rgba(61,245,176,.10), transparent 60%),
+      radial-gradient(900px 600px at -10% 110%, rgba(24,224,255,.08), transparent 55%);
+    overflow-x:hidden;
+  }
+  /* grain */
+  body::after{
+    content:""; position:fixed; inset:0; pointer-events:none; opacity:.04; z-index:99;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  }
+  .mono{font-family:'JetBrains Mono',monospace}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 32px}
+
+  /* hero */
+  header{padding:90px 0 60px;position:relative}
+  .eyebrow{font-family:'JetBrains Mono',monospace;font-size:13px;letter-spacing:6px;color:var(--mint);
+    text-transform:uppercase;display:flex;align-items:center;gap:14px;opacity:0;animation:rise .7s .05s forwards}
+  .eyebrow::before{content:"";width:46px;height:1px;background:var(--grad)}
+  h1{font-weight:900;font-style:italic;font-size:clamp(64px,12vw,168px);line-height:.86;letter-spacing:-.05em;
+    margin:18px 0 0;opacity:0;animation:rise .8s .12s forwards}
+  h1 .g{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{margin-top:26px;max-width:560px;color:var(--mut);font-size:19px;line-height:1.5;font-weight:500;
+    opacity:0;animation:rise .8s .2s forwards}
+  .lede b{color:var(--ink);font-weight:800}
+
+  /* primary lockup */
+  .stage{margin-top:64px;display:grid;grid-template-columns:340px 1fr;gap:40px;align-items:center;
+    background:linear-gradient(180deg,#0e1115,#0b0d10);border:1px solid var(--line);border-radius:28px;
+    padding:48px;position:relative;overflow:hidden;opacity:0;animation:rise .9s .28s forwards}
+  .stage::before{content:"";position:absolute;inset:0;
+    background:radial-gradient(600px 300px at 22% 30%,rgba(61,245,176,.12),transparent 60%)}
+  .iconbox{width:300px;height:300px;border-radius:68px;position:relative;z-index:1;filter:drop-shadow(0 30px 60px rgba(24,224,255,.18))}
+  .lock h2{font-size:13px;letter-spacing:5px;color:var(--mut);font-family:'JetBrains Mono',monospace;text-transform:uppercase}
+  .wordmark{display:flex;align-items:center;gap:8px;margin-top:14px}
+  .wordmark .t{font-weight:900;font-style:italic;font-size:72px;letter-spacing:-.05em}
+  .wordmark .bar{width:12px;height:58px;border-radius:4px;background:var(--grad)}
+  .tagline{font-family:'JetBrains Mono',monospace;color:var(--mut);letter-spacing:4px;font-size:14px;margin-top:18px}
+  .swatch-row{display:flex;gap:10px;margin-top:26px;flex-wrap:wrap}
+  .chip{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink);background:#0c0f12;
+    border:1px solid var(--line);border-radius:999px;padding:8px 14px;display:flex;align-items:center;gap:9px}
+  .dot{width:12px;height:12px;border-radius:50%}
+
+  /* sections */
+  section{padding:64px 0}
+  .lbl{font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:5px;color:var(--mint);text-transform:uppercase;margin-bottom:24px}
+  .grid{display:grid;gap:20px}
+  .cols-3{grid-template-columns:repeat(3,1fr)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:28px;
+    display:flex;flex-direction:column;align-items:center;gap:18px}
+  .card .cap{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--mut);letter-spacing:2px}
+  .ic{width:132px;height:132px;border-radius:30px}
+  .light{background:#EFEFEA}
+  .light .cap{color:#5a5f5a}
+
+  /* size scale */
+  .scale{display:flex;align-items:flex-end;gap:26px;flex-wrap:wrap;background:var(--panel);
+    border:1px solid var(--line);border-radius:20px;padding:34px}
+  .scale .u{display:flex;flex-direction:column;align-items:center;gap:10px}
+  .scale img{border-radius:22%}
+  .scale .n{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--mut)}
+
+  /* construction / meaning */
+  .twocol{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  .note{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:30px}
+  .note h3{font-size:20px;font-weight:800;margin-bottom:10px}
+  .note p{color:var(--mut);line-height:1.6;font-size:15px}
+  .note .k{color:var(--mint);font-family:'JetBrains Mono',monospace}
+
+  footer{padding:50px 0 80px;color:var(--mut);font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:3px;
+    border-top:1px solid var(--line);margin-top:40px;text-align:center}
+
+  @keyframes rise{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:none}}
+  @media(max-width:820px){.stage{grid-template-columns:1fr}.iconbox{margin:0 auto}.cols-3{grid-template-columns:1fr}.twocol{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Brand System · v0.1</div>
+    <h1>CAP<span class="g">TURE</span></h1>
+    <p class="lede">The fast-capture todo system. A checkmark that <b>moves</b> — done at the
+      speed of thought. Built for engineers who context-switch hard and forget nothing.</p>
+  </header>
+
+  <!-- PRIMARY LOCKUP -->
+  <div class="stage">
+    <img class="iconbox" id="primary" src="capture-icon.svg" alt="Capture icon"/>
+    <div class="lock">
+      <h2>Primary lockup</h2>
+      <div class="wordmark">
+        <span class="t">CAPTURE</span><span class="bar"></span>
+      </div>
+      <div class="tagline">MOVE FAST · FORGET NOTHING</div>
+      <div class="swatch-row">
+        <span class="chip"><span class="dot" style="background:#B8FF2E"></span>#B8FF2E Acid</span>
+        <span class="chip"><span class="dot" style="background:#3DF5B0"></span>#3DF5B0 Mint</span>
+        <span class="chip"><span class="dot" style="background:#18E0FF"></span>#18E0FF Cyan</span>
+        <span class="chip"><span class="dot" style="background:#0A0B0D;border:1px solid #333"></span>#0A0B0D Carbon</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ICON VARIANTS -->
+  <section>
+    <div class="lbl">App icon · variants</div>
+    <div class="grid cols-3">
+      <div class="card"><img class="ic" src="capture-icon.svg" alt=""/><span class="cap">CARBON · PRIMARY</span></div>
+      <div class="card"><img class="ic" src="capture-icon-acid.svg" alt=""/><span class="cap">ACID · ALT</span></div>
+      <div class="card light"><img class="ic" src="capture-icon.svg" alt=""/><span class="cap">ON LIGHT</span></div>
+    </div>
+  </section>
+
+  <!-- SIZE SCALE -->
+  <section>
+    <div class="lbl">Scales clean · 256 → 16</div>
+    <div class="scale">
+      <div class="u"><img src="capture-icon.svg" width="160" height="160" alt=""/><span class="n">256</span></div>
+      <div class="u"><img src="capture-icon.svg" width="96" height="96" alt=""/><span class="n">128</span></div>
+      <div class="u"><img src="capture-icon.svg" width="64" height="64" alt=""/><span class="n">64</span></div>
+      <div class="u"><img src="capture-icon.svg" width="32" height="32" alt=""/><span class="n">32</span></div>
+      <div class="u"><img src="capture-icon.svg" width="16" height="16" alt=""/><span class="n">16</span></div>
+    </div>
+  </section>
+
+  <!-- MEANING -->
+  <section>
+    <div class="lbl">Why it works</div>
+    <div class="twocol">
+      <div class="note"><h3>The mark</h3><p>A <span class="k">checkmark</span> = done. Its long arm
+        rips forward into a sharp point, chased by <span class="k">motion trails</span> — velocity made
+        literal. One glyph says <b style="color:#F2F4F3">capture</b>, <b style="color:#F2F4F3">complete</b>, and <b style="color:#F2F4F3">speed</b>.</p></div>
+      <div class="note"><h3>The system</h3><p>Carbon-black canvas, a single <span class="k">electric gradient</span>,
+        an engineering grid texture, and tight italic <span class="k">Archivo</span> set against
+        <span class="k">JetBrains Mono</span>. Technical, edgy, unmistakably built-by-a-dev.</p></div>
+    </div>
+  </section>
+</div>
+<footer>CAPTURE BRAND SYSTEM — CARBON / ACID-LIME / CYAN — ARCHIVO + JETBRAINS MONO</footer>
+</body>
+</html>

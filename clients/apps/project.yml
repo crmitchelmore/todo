@@ -23,6 +23,7 @@ targets:
     platform: iOS
     sources:
       - CaptureiOS/Sources
+      - CaptureiOS/Assets.xcassets
     dependencies:
       - package: CaptureCore
         product: CaptureCore
@@ -32,6 +33,7 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: CaptureiOS/Info.plist
         TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: CaptureiOS/Info.plist
       properties:
@@ -53,6 +55,7 @@ targets:
     platform: macOS
     sources:
       - CaptureMac/Sources
+      - CaptureMac/Assets.xcassets
     dependencies:
       - package: CaptureCore
         product: CaptureCore
@@ -61,6 +64,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.crmitchelmore.capture.mac
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: CaptureMac/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: CaptureMac/Info.plist
       properties:

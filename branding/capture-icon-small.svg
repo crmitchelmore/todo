@@ -1,0 +1,14 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Capture small icon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#16181C"/><stop offset="1" stop-color="#0A0B0D"/>
+    </linearGradient>
+    <linearGradient id="velo" x1="250" y1="700" x2="780" y2="320" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#B8FF2E"/><stop offset="0.55" stop-color="#3DF5B0"/><stop offset="1" stop-color="#18E0FF"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="230" fill="url(#bg)"/>
+  <path d="M286 528 L452 700 L760 300"
+        stroke="url(#velo)" stroke-width="120"
+        stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>

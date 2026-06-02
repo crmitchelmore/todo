@@ -1,0 +1,23 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Capture app icon (acid variant)">
+  <defs>
+    <linearGradient id="acid" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#CBFF3A"/>
+      <stop offset="1" stop-color="#27E8C4"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="230" fill="url(#acid)"/>
+  <!-- subtle grid -->
+  <g stroke="#06120E" stroke-opacity="0.06" stroke-width="2">
+    <path d="M0 256 H1024 M0 512 H1024 M0 768 H1024 M256 0 V1024 M512 0 V1024 M768 0 V1024"/>
+  </g>
+  <!-- trails -->
+  <g stroke="#0A0B0D" stroke-linecap="round" stroke-width="52">
+    <line x1="188" y1="560" x2="292" y2="440" opacity="0.9"/>
+    <line x1="140" y1="640" x2="224" y2="544" opacity="0.55"/>
+    <line x1="104" y1="712" x2="168" y2="640" opacity="0.3"/>
+  </g>
+  <!-- mark -->
+  <path d="M336 524 L464 660 L796 276"
+        stroke="#0A0B0D" stroke-width="98"
+        stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>

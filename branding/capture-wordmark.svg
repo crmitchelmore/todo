@@ -1,0 +1,31 @@
+<svg width="1400" height="360" viewBox="0 0 1400 360" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Capture wordmark">
+  <defs>
+    <linearGradient id="velo" x1="60" y1="250" x2="300" y2="110" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#B8FF2E"/>
+      <stop offset="0.55" stop-color="#3DF5B0"/>
+      <stop offset="1" stop-color="#18E0FF"/>
+    </linearGradient>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,800;0,900;1,800&amp;family=JetBrains+Mono:wght@600&amp;display=swap');
+      .word { font-family:'Archivo',sans-serif; font-weight:900; font-size:150px; letter-spacing:-7px; fill:#F2F4F3; }
+      .tag  { font-family:'JetBrains Mono',monospace; font-weight:600; font-size:26px; letter-spacing:6px; fill:#7E8A86; }
+    </style>
+  </defs>
+
+  <!-- glyph -->
+  <g transform="translate(40,70) scale(0.46)">
+    <g stroke="url(#velo)" stroke-linecap="round" stroke-width="26">
+      <line x1="94" y1="280" x2="146" y2="220" opacity="0.95"/>
+      <line x1="70" y1="320" x2="112" y2="272" opacity="0.6"/>
+      <line x1="52" y1="356" x2="84" y2="320" opacity="0.35"/>
+    </g>
+    <path d="M168 262 L232 330 L398 138" stroke="url(#velo)" stroke-width="48"
+          stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+
+  <!-- wordmark, italic for forward motion -->
+  <text x="250" y="208" class="word" font-style="italic">CAPTURE</text>
+  <!-- accent terminal on the final stroke -->
+  <rect x="1232" y="96" width="22" height="112" rx="4" fill="url(#velo)"/>
+  <text x="256" y="262" class="tag">MOVE FAST · FORGET NOTHING</text>
+</svg>
