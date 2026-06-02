@@ -5,6 +5,7 @@ import { Connector, ConnectorHealth } from "./types.js";
 export * from "./types.js";
 export * from "./obsidian.js";
 export * from "./gmail.js";
+export * from "./gmail-imap.js";
 
 export interface IntegrationRegistry {
   readonly obsidian: ObsidianConnector;
