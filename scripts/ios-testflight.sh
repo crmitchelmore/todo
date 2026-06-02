@@ -13,7 +13,7 @@
 # Required env:
 #   APP_STORE_CONNECT_ISSUER_ID   App Store Connect API issuer UUID.
 # Optional env (sensible defaults for this machine):
-#   APP_STORE_CONNECT_KEY_ID      Default: SB8RA7B6WG
+#   APP_STORE_CONNECT_KEY_ID      Default: Y6C8R5DA75
 #   APP_STORE_CONNECT_KEY_PATH    Default: ~/.private_keys/AuthKey_<KEY_ID>.p8
 #   APPLE_TEAM_ID                 Default: 8X4ZN58TYH
 #   VERSION                       Default: contents of ./VERSION
@@ -23,7 +23,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APPS_DIR="$ROOT_DIR/clients/apps"
 
-APP_STORE_CONNECT_KEY_ID="${APP_STORE_CONNECT_KEY_ID:-SB8RA7B6WG}"
+APP_STORE_CONNECT_KEY_ID="${APP_STORE_CONNECT_KEY_ID:-Y6C8R5DA75}"
 APP_STORE_CONNECT_KEY_PATH="${APP_STORE_CONNECT_KEY_PATH:-$HOME/.private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8}"
 APPLE_TEAM_ID="${APPLE_TEAM_ID:-8X4ZN58TYH}"
 VERSION="${VERSION:-$(cat "$ROOT_DIR/VERSION")}"

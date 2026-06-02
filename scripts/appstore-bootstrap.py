@@ -9,7 +9,7 @@ Auth: App Store Connect API key (.p8) signed into a short-lived ES256 JWT.
 Required env:
   APP_STORE_CONNECT_ISSUER_ID   issuer UUID
 Optional env:
-  APP_STORE_CONNECT_KEY_ID      default SB8RA7B6WG
+  APP_STORE_CONNECT_KEY_ID      default Y6C8R5DA75
   APP_STORE_CONNECT_KEY_PATH    default ~/.private_keys/AuthKey_<KEY_ID>.p8
   CAPTURE_APP_NAME              default "Capture"
   CAPTURE_PRIMARY_LOCALE        default en-GB
@@ -31,7 +31,7 @@ except ImportError:
 
 API = "https://api.appstoreconnect.apple.com/v1"
 
-KEY_ID = os.environ.get("APP_STORE_CONNECT_KEY_ID", "SB8RA7B6WG")
+KEY_ID = os.environ.get("APP_STORE_CONNECT_KEY_ID", "Y6C8R5DA75")
 KEY_PATH = os.environ.get(
     "APP_STORE_CONNECT_KEY_PATH",
     os.path.expanduser(f"~/.private_keys/AuthKey_{KEY_ID}.p8"),
