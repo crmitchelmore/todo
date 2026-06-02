@@ -12,7 +12,7 @@ final class CaptureViewModel {
     var onChange: (() -> Void)?
     private var tasks: [Task<Void, Never>] = []
 
-    init(store: TaskStore = TaskStore()) {
+    init(store: TaskStore = TaskStore(config: .fromEnvironment())) {
         self.store = store
     }
 

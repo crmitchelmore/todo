@@ -30,34 +30,43 @@ public struct CaptureConfig: Sendable {
         appGroupId: "group.dev.crmitchelmore.capture"
     )
 
-    /// Self-hosted deployment (e.g. the Mac Mini behind Tailscale) fronted by a single HTTPS
-    /// origin via `tailscale serve`. The proxy path-routes `/api/*` to the backend connector and
-    /// everything else (`/sync/*`, `/write-checkpoint*`, `/probes/*`) to the PowerSync service, so
-    /// both URLs share one origin and one TLS cert. See docs/deployment.md.
+    /// Remote deployment where the backend connector and the PowerSync service are reachable on
+    /// two separate HTTPS origins (the Railway model: each service gets its own public domain).
     ///
-    ///   CaptureConfig.selfHosted(host: "mini.tailnet-name.ts.net")
-    public static func selfHosted(
-        host: String,
+    ///   CaptureConfig.remote(
+    ///     backendHost: "backend-production-de2f.up.railway.app",
+    ///     powersyncHost: "powersync-production-e560.up.railway.app")
+    public static func remote(
+        backendHost: String,
+        powersyncHost: String,
         ownerId: String = "00000000-0000-0000-0000-000000000001",
         appGroupId: String? = "group.dev.crmitchelmore.capture"
     ) -> CaptureConfig {
-        let origin = URL(string: "https://\(host)")!
-        return CaptureConfig(
-            backendURL: origin,
-            powersyncURL: origin,
+        CaptureConfig(
+            backendURL: URL(string: "https://\(backendHost)")!,
+            powersyncURL: URL(string: "https://\(powersyncHost)")!,
             ownerId: ownerId,
             appGroupId: appGroupId
         )
     }
 
-    /// Reads `CAPTURE_HOST` from the environment (or Info.plist `CaptureHost`) and returns a
-    /// self-hosted config, falling back to `localDev` when unset. Lets the same build target
-    /// localhost in dev and the tailnet in the field without code changes.
+    /// The live Railway deployment. Each service is fronted by its own Railway public domain.
+    public static let production = CaptureConfig.remote(
+        backendHost: "backend-production-de2f.up.railway.app",
+        powersyncHost: "powersync-production-e560.up.railway.app"
+    )
+
+    /// Reads `CAPTURE_BACKEND_HOST` / `CAPTURE_POWERSYNC_HOST` from the environment (or the
+    /// matching Info.plist keys), falling back to the live Railway `production` deployment when
+    /// unset. Set both to a localhost pair (and run docker-compose) to target the local stack in
+    /// dev without code changes.
     public static func fromEnvironment(
-        host: String? = ProcessInfo.processInfo.environment["CAPTURE_HOST"]
+        backendHost: String? = ProcessInfo.processInfo.environment["CAPTURE_BACKEND_HOST"],
+        powersyncHost: String? = ProcessInfo.processInfo.environment["CAPTURE_POWERSYNC_HOST"]
     ) -> CaptureConfig {
-        guard let host, !host.isEmpty else { return .localDev }
-        return .selfHosted(host: host)
+        guard let backendHost, !backendHost.isEmpty,
+              let powersyncHost, !powersyncHost.isEmpty else { return .production }
+        return .remote(backendHost: backendHost, powersyncHost: powersyncHost)
     }
 
     /// Ingress for out-of-process surfaces (Share Extension, App Intents): backend POST with an
