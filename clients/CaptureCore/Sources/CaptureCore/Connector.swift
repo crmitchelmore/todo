@@ -8,18 +8,63 @@ public struct CaptureConfig: Sendable {
     public var powersyncURL: URL
     /// Single-user dev identity for M1.
     public var ownerId: String
+    /// Shared App Group container id for the offline capture outbox (used by extensions/intents).
+    public var appGroupId: String?
 
-    public init(backendURL: URL, powersyncURL: URL, ownerId: String = "00000000-0000-0000-0000-000000000001") {
+    public init(
+        backendURL: URL,
+        powersyncURL: URL,
+        ownerId: String = "00000000-0000-0000-0000-000000000001",
+        appGroupId: String? = nil
+    ) {
         self.backendURL = backendURL
         self.powersyncURL = powersyncURL
         self.ownerId = ownerId
+        self.appGroupId = appGroupId
     }
 
     /// Sensible default for a simulator/desktop talking to the local stack.
     public static let localDev = CaptureConfig(
         backendURL: URL(string: "http://localhost:6060")!,
-        powersyncURL: URL(string: "http://localhost:8080")!
+        powersyncURL: URL(string: "http://localhost:8080")!,
+        appGroupId: "group.dev.crmitchelmore.capture"
     )
+
+    /// Self-hosted deployment (e.g. the Mac Mini behind Tailscale) fronted by a single HTTPS
+    /// origin via `tailscale serve`. The proxy path-routes `/api/*` to the backend connector and
+    /// everything else (`/sync/*`, `/write-checkpoint*`, `/probes/*`) to the PowerSync service, so
+    /// both URLs share one origin and one TLS cert. See docs/deployment.md.
+    ///
+    ///   CaptureConfig.selfHosted(host: "mini.tailnet-name.ts.net")
+    public static func selfHosted(
+        host: String,
+        ownerId: String = "00000000-0000-0000-0000-000000000001",
+        appGroupId: String? = "group.dev.crmitchelmore.capture"
+    ) -> CaptureConfig {
+        let origin = URL(string: "https://\(host)")!
+        return CaptureConfig(
+            backendURL: origin,
+            powersyncURL: origin,
+            ownerId: ownerId,
+            appGroupId: appGroupId
+        )
+    }
+
+    /// Reads `CAPTURE_HOST` from the environment (or Info.plist `CaptureHost`) and returns a
+    /// self-hosted config, falling back to `localDev` when unset. Lets the same build target
+    /// localhost in dev and the tailnet in the field without code changes.
+    public static func fromEnvironment(
+        host: String? = ProcessInfo.processInfo.environment["CAPTURE_HOST"]
+    ) -> CaptureConfig {
+        guard let host, !host.isEmpty else { return .localDev }
+        return .selfHosted(host: host)
+    }
+
+    /// Ingress for out-of-process surfaces (Share Extension, App Intents): backend POST with an
+    /// App Group outbox fallback. Never opens PowerSync.
+    public func makeIngress(session: URLSession = .shared) -> ResilientCaptureIngress {
+        ResilientCaptureIngress(backendURL: backendURL, appGroupId: appGroupId, session: session)
+    }
 }
 
 private struct TokenResponse: Decodable {

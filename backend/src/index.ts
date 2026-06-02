@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import pg from 'pg';
 import { generateKeyPair, exportJWK, SignJWT, type JWK } from 'jose';
+import { randomUUID } from 'crypto';
 
 /**
  * Capture backend connector (M1, single dev user).
@@ -111,6 +112,44 @@ async function applyOp(client: pg.PoolClient, op: CrudOp): Promise<void> {
     return;
   }
 }
+
+/**
+ * Lightweight capture ingestion for out-of-process clients (iOS Share Extension, Siri/Shortcuts
+ * App Intents, the macOS hotkey when run headless). These cannot safely open the app's PowerSync
+ * SQLite DB, so they POST a raw capture here and the row syncs back to every client as `proposed`.
+ *
+ * Idempotent on the client-generated `id` so retries are safe. Always forced to status=proposed —
+ * extensions can never create or mutate a real (confirmed/active) todo. The enrichment worker
+ * fills in the suggestion fields afterwards.
+ */
+const CAPTURE_SOURCES = new Set(['share-extension', 'app-intent', 'mac-hotkey', 'capture', 'siri']);
+
+app.post('/api/capture', async (req, res) => {
+  const body = req.body ?? {};
+  const id: string = typeof body.id === 'string' && body.id ? body.id : randomUUID();
+  const rawText: string = (body.raw_text ?? body.title ?? '').toString().trim();
+  const url: string | null = typeof body.url === 'string' && body.url ? body.url : null;
+  const source: string = CAPTURE_SOURCES.has(body.source) ? body.source : 'capture';
+
+  const title = rawText || url || '';
+  if (!title) return res.status(400).json({ ok: false, error: 'empty capture' });
+
+  const notes = url && rawText ? url : null; // keep the URL as context when there's also text
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO public.tasks (id, owner_id, title, notes, status, source)
+       VALUES ($1, $2, $3, $4, 'proposed', $5)
+       ON CONFLICT (id) DO NOTHING
+       RETURNING id`,
+      [id, DEV_USER_ID, title, notes, source]
+    );
+    res.json({ ok: true, id, created: (result.rowCount ?? 0) > 0 });
+  } catch (err) {
+    console.error('capture failed:', err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
 
 app.put('/api/data', async (req, res) => {
   const ops: CrudOp[] = req.body?.ops ?? [];
