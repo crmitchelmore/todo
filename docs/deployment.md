@@ -125,3 +125,37 @@ Then run the clients against `localhost` by setting the env/Vite vars to the `lo
 - **Any container host** — the same four images (Postgres, `backend/`, `infra/powersync`,
   `worker/`) run on Fly.io, Render, a single VM with docker-compose, etc. Only the private host
   names and public domains differ.
+
+---
+
+## Client distribution
+
+The backend deploy (above) covers the servers. The three clients ship on their own tracks:
+
+### iOS app + Share Extension + App Intents
+- **TestFlight (recommended)** — archive `CaptureiOS` in Xcode (or `xcodebuild archive`), upload to
+  App Store Connect, distribute to yourself/testers. Requires an Apple Developer Program membership
+  ($99/yr) and the `group.dev.crmitchelmore.capture` App Group + the two bundle IDs
+  (`dev.crmitchelmore.capture.ios`, `…ios.share`) registered. App Intents (Siri/Shortcuts/Action
+  Button) and the Share Extension ship inside the same archive.
+- **Ad-hoc / development** — install directly to a registered device over USB/Wi-Fi from Xcode for
+  personal use without TestFlight.
+
+### macOS app
+- **Developer ID + notarization (recommended for personal use off the App Store)** — archive
+  `CaptureMac`, export with a Developer ID Application cert, `notarytool submit … --wait`, then
+  `stapler staple`. Ship the `.app` in a DMG/zip. The global ⌥Space hotkey + menubar item work
+  outside the sandbox.
+- **Mac App Store** — alternative if you want managed updates; requires sandboxing review.
+- **Unsigned local build** — `xcodebuild … CODE_SIGNING_ALLOWED=NO` for running on your own machine
+  during development (what the repo's build commands use).
+
+### Web app
+- **Static host** — `cd web && npm run build` produces a static bundle; deploy `web/dist` to any
+  static host (Vercel, Netlify, Cloudflare Pages, or a Railway static service). Set
+  `VITE_BACKEND_URL` / `VITE_POWERSYNC_URL` at build time to the Railway domains.
+- **Same-project on Railway** — add a static/Nginx service to the `capture` project so everything
+  lives in one place.
+
+> Whichever track: the clients only need the two public HTTPS domains. No client embeds secrets —
+> the backend mints short-lived JWTs and the capture endpoint is the only write path.
