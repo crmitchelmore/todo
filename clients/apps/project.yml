@@ -88,6 +88,7 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: CaptureMac/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_HARDENED_RUNTIME: YES
     info:
       path: CaptureMac/Info.plist
       properties:

@@ -54,6 +54,9 @@ if [ -n "$LAST_TAG" ]; then
   RELEASE_NOTES=$(git log "$LAST_TAG"..HEAD --pretty=format:"<li>%s</li>" 2>/dev/null | head -20 || echo "")
 fi
 [ -n "${RELEASE_NOTES:-}" ] || RELEASE_NOTES="<li>Improvements and fixes</li>"
+# Guard against a commit subject containing the CDATA terminator, which would
+# otherwise produce invalid appcast XML and break Sparkle feed parsing.
+RELEASE_NOTES=${RELEASE_NOTES//]]>/]]&gt;}
 
 cat << EOF
 <?xml version="1.0" encoding="utf-8"?>

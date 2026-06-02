@@ -46,15 +46,23 @@ The **Release macOS App** workflow (`.github/workflows/release-mac.yml`) then:
 Already configured: `APP_STORE_CONNECT_API_KEY`, `APP_STORE_CONNECT_KEY_ID`,
 `APP_STORE_CONNECT_ISSUER_ID`, `APPLE_TEAM_ID`, `SPARKLE_PRIVATE_KEY`.
 
-### Developer ID certificate
+### Developer ID certificate (required)
 
-Export/signing uses `-allowProvisioningUpdates` with the API key. If the runner cannot
-obtain a **Developer ID Application** certificate that way, add these two secrets to import
-one explicitly (the workflow picks them up automatically):
+Developer ID signing requires a **Developer ID Application** certificate + private key
+in the runner keychain — the App Store Connect API key alone cannot create one, so the
+workflow fails fast if these secrets are absent. Add:
 
 - `APPLE_DEVELOPER_ID_APPLICATION` — base64 of a `.p12` containing the Developer ID
   Application cert + private key.
 - `APPLE_DEVELOPER_ID_APPLICATION_PASSWORD` — the `.p12` password.
 
 To create the `.p12` locally from your keychain: export the "Developer ID Application"
-identity from Keychain Access, then `base64 -i cert.p12 | pbcopy`.
+identity from Keychain Access, then `base64 -i cert.p12 | pbcopy`. (If you don't yet have
+a Developer ID Application cert, create one in the Apple Developer portal → Certificates.)
+
+## Feed URL constraint
+
+`releases/latest/download/appcast.xml` resolves to the repo's latest non-prerelease
+release. Keep the **Mac release the only GitHub Release type** that publishes (iOS ships
+via TestFlight, not GitHub Releases), so `/latest/` always carries a current `appcast.xml`.
+If you later add other GitHub Releases, host the appcast at a fixed URL instead.

@@ -82,8 +82,18 @@ jobs:
           echo "$APP_STORE_CONNECT_API_KEY" | base64 --decode > ~/.private_keys/AuthKey_${KEY_ID}.p8
           cp ~/.private_keys/AuthKey_${KEY_ID}.p8 ~/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8
 
-      - name: Import Developer ID Certificate (optional)
-        if: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION != '' }}
+      - name: Require Developer ID Certificate
+        env:
+          CERT: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
+        run: |
+          if [ -z "$CERT" ]; then
+            echo "::error::Missing secret APPLE_DEVELOPER_ID_APPLICATION (base64 .p12 of a 'Developer ID Application' identity)."
+            echo "Developer ID signing + notarization require this certificate; the App Store Connect API key alone cannot create it."
+            echo "See docs/mac-release.md for how to export and add it (plus APPLE_DEVELOPER_ID_APPLICATION_PASSWORD)."
+            exit 1
+          fi
+
+      - name: Import Developer ID Certificate
         env:
           CERT: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
           CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_PASSWORD }}
@@ -140,6 +150,17 @@ jobs:
             -authenticationKeyIssuerID "$ISSUER_ID" \
             ENABLE_HARDENED_RUNTIME=YES \
             OTHER_CODE_SIGN_FLAGS="--options runtime"
+
+      - name: Verify Signature & Hardened Runtime
+        run: |
+          APP_PATH="$RUNNER_TEMP/export/$PRODUCT_NAME.app"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          codesign -dv --verbose=4 "$APP_PATH" 2>&1 | tee /tmp/cs.txt
+          grep -q "flags=.*runtime" /tmp/cs.txt || { echo "::error::hardened runtime missing on main app"; exit 1; }
+          # Sparkle's nested helpers must also be signed with runtime for notarization.
+          if [ -d "$APP_PATH/Contents/Frameworks/Sparkle.framework" ]; then
+            codesign --verify --strict --verbose=2 "$APP_PATH/Contents/Frameworks/Sparkle.framework"
+          fi
 
       - name: Notarize & Staple
         env:
