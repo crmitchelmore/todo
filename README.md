@@ -27,7 +27,7 @@ Four planes, bridged across **two Apple accounts** (iPhone/laptop = account A; M
 A **self-hosted Postgres + PowerSync** core makes sync **account-agnostic**, so the Mini agent
 shares the same database instead of trying to join iCloud.
 
-1. **Capture & sync** — SwiftUI (iOS+macOS) + React web, one shared data model via PowerSync.
+1. **Capture & sync** — native UIKit (iOS) + AppKit (macOS), no JS-wrapped frameworks, plus a React web app; one shared data model via PowerSync (native Swift SDK on Apple platforms).
    Native fast-capture: Share Sheet, Siri/Shortcuts, widgets, mac global hotkey.
 2. **Brain** — OpenClaw agent on the Mac Mini: enrichment, research, optional execution.
 3. **Enrichment** — on-device instant date/category suggestion; richer LLM enrichment on the Mini.

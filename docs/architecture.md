@@ -29,7 +29,7 @@ Tracked as decision `D-sync`.
 ```
             ┌──────────────────────── Account A (personal) ────────────────────────┐
             │  iOS app        macOS app                         Web app             │
- Capture &  │  (SwiftUI)      (SwiftUI)                         (React)             │
+ Capture &  │  (UIKit)        (AppKit)                          (React)             │
    sync     │     │  Share Sheet / Siri / Shortcuts / widget / hotkey               │
             │     └──────────────┬───────────────┬──────────────┘                  │
             └────────────────────┼───────────────┼─────────────────────────────────┘

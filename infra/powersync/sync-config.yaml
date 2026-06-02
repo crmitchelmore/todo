@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=https://unpkg.com/@powersync/service-sync-rules@latest/schema/sync_rules.json
+# Sync rules for the Capture stack.
+# M1 is single-user (dev): sync the whole tasks table. Per-user bucketing is tracked in bead
+# cap-ale (Backend auth & per-user sync rules).
+#
+# Changes here require a PowerSync service restart to take effect.
+
+config:
+  edition: 3
+
+streams:
+  tasks:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM tasks

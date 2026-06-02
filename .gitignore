@@ -1,5 +1,19 @@
-
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db
 .beads-credential-key
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Env files (local dev defaults live in .env.example)
+.env
+*.local
+
+# Logs / OS
+*.log
+.DS_Store

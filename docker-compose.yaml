@@ -1,0 +1,101 @@
+# Self-hosted PowerSync stack for the Capture todo system.
+# Brings up: Postgres (source) + MongoDB (bucket storage) + PowerSync service + our backend connector.
+# The web client runs on the host via `npm run dev` for the fastest dev loop.
+#
+#   docker compose up -d
+#   (cd web && npm install && npm run dev)
+
+services:
+  pg-db:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${PG_DATABASE_USER}
+      - POSTGRES_DB=${PG_DATABASE_NAME}
+      - POSTGRES_PASSWORD=${PG_DATABASE_PASSWORD}
+      - PGPORT=${PG_DATABASE_PORT}
+    volumes:
+      - pg_data:/var/lib/postgresql
+      - ./db/init:/docker-entrypoint-initdb.d
+    ports:
+      - "${PG_DATABASE_PORT}:${PG_DATABASE_PORT}"
+    command: ["postgres", "-c", "wal_level=logical"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_DATABASE_USER} -d ${PG_DATABASE_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mongo:
+    image: mongo:7.0
+    command: --replSet rs0 --bind_ip_all --quiet
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_storage:/data/db
+
+  mongo-rs-init:
+    image: mongo:7.0
+    depends_on:
+      - mongo
+    restart: on-failure
+    entrypoint:
+      - bash
+      - -c
+      - 'mongosh --host mongo:27017 --eval ''try{rs.status().ok && quit(0)} catch {} rs.initiate({_id: "rs0", version: 1, members: [{ _id: 0, host : "mongo:27017" }]})'''
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      pg-db:
+        condition: service_healthy
+    environment:
+      BACKEND_PORT: ${BACKEND_PORT}
+      BACKEND_DATABASE_URI: ${BACKEND_DATABASE_URI}
+      JWT_ISSUER: ${JWT_ISSUER}
+      JWT_AUDIENCE: ${JWT_AUDIENCE}
+      DEV_USER_ID: ${DEV_USER_ID}
+    ports:
+      - "${BACKEND_PORT}:${BACKEND_PORT}"
+
+  powersync:
+    image: journeyapps/powersync-service:latest
+    restart: unless-stopped
+    command: ["start", "-r", "unified"]
+    depends_on:
+      mongo-rs-init:
+        condition: service_completed_successfully
+      pg-db:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    volumes:
+      - ./infra/powersync:/config
+    environment:
+      POWERSYNC_CONFIG_PATH: /config/service.yaml
+      NODE_OPTIONS: --max-old-space-size=1000
+      PS_DATA_SOURCE_URI: ${PS_DATA_SOURCE_URI}
+      PS_MONGO_URI: ${PS_MONGO_URI}
+      PS_JWKS_URL: ${PS_JWKS_URL}
+      PS_PORT: ${PS_PORT}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:${PS_PORT}/probes/liveness').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
+        ]
+      interval: 5s
+      timeout: 2s
+      retries: 15
+    ports:
+      - "${PS_PORT}:${PS_PORT}"
+
+volumes:
+  pg_data:
+  mongo_storage:
