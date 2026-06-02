@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController?
     private var window: NSWindow!
     private var hotKey: GlobalHotKey?
+    private let updater = UpdaterController.shared   // starts Sparkle scheduled checks
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -61,6 +62,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         quickItem.keyEquivalentModifierMask = [.option]
         appMenu.addItem(withTitle: "Open Capture", action: #selector(newCapture), keyEquivalent: "n")
         appMenu.addItem(.separator())
+        let updateItem = appMenu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        updateItem.target = self
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Capture", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         NSApp.mainMenu = mainMenu
@@ -69,4 +73,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func quickCapture() { quick.show() }
 
     @objc private func newCapture() { showMainWindow() }
+
+    @objc private func checkForUpdates() { updater.checkForUpdates(nil) }
 }

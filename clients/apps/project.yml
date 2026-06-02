@@ -9,6 +9,9 @@ options:
 packages:
   CaptureCore:
     path: ../CaptureCore
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.6.0
 
 settings:
   base:
@@ -27,6 +30,8 @@ targets:
     dependencies:
       - package: CaptureCore
         product: CaptureCore
+      - target: CaptureShare
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.crmitchelmore.capture.ios
@@ -34,6 +39,7 @@ targets:
         INFOPLIST_FILE: CaptureiOS/Info.plist
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_ENTITLEMENTS: CaptureiOS/Capture.entitlements
     info:
       path: CaptureiOS/Info.plist
       properties:
@@ -50,6 +56,21 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
 
+  CaptureShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - CaptureShare
+    dependencies:
+      - package: CaptureCore
+        product: CaptureCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.crmitchelmore.capture.ios.share
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: CaptureShare/Info.plist
+        CODE_SIGN_ENTITLEMENTS: CaptureShare/CaptureShare.entitlements
+
   CaptureMac:
     type: application
     platform: macOS
@@ -59,6 +80,8 @@ targets:
     dependencies:
       - package: CaptureCore
         product: CaptureCore
+      - package: Sparkle
+        product: Sparkle
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.crmitchelmore.capture.mac
@@ -72,5 +95,9 @@ targets:
         LSMinimumSystemVersion: "12.0"
         NSPrincipalClass: NSApplication
         NSHighResolutionCapable: true
+        SUEnableAutomaticChecks: true
+        SUFeedURL: https://github.com/crmitchelmore/todo/releases/latest/download/appcast.xml
+        SUPublicEDKey: HRZfphOJCk8UJTLcguwmJ+BL0ynRJGkiVAZpnsrk1RU=
+        SUScheduledCheckInterval: 86400
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
