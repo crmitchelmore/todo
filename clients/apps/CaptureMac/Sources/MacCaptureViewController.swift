@@ -2,11 +2,19 @@ import AppKit
 import CaptureCore
 
 final class MacCaptureViewController: NSViewController {
-    private let viewModel = MacViewModel()
+    private let viewModel: MacViewModel
     private let captureField = NSTextField()
     private let proposedTable = NSTableView()
     private let activeTable = NSTableView()
     private let proposedHeader = NSTextField(labelWithString: "")
+
+    init(viewModel: MacViewModel) {
+        self.viewModel = viewModel
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override func loadView() {
         view = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 620))
@@ -15,7 +23,7 @@ final class MacCaptureViewController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         buildUI()
-        viewModel.onChange = { [weak self] in self?.reload() }
+        viewModel.addObserver { [weak self] in self?.reload() }
         viewModel.start()
     }
 

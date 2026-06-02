@@ -7,14 +7,25 @@ final class MacViewModel {
     private(set) var proposed: [TaskItem] = []
     private(set) var active: [TaskItem] = []
 
-    var onChange: (() -> Void)?
+    private var observers: [() -> Void] = []
+    private var started = false
     private var tasks: [Task<Void, Never>] = []
 
     init(store: TaskStore = TaskStore()) {
         self.store = store
     }
 
+    /// Register a change observer. Multiple surfaces (main window, quick panel, status item)
+    /// share one store/PowerSync instance, so changes must fan out to all of them.
+    func addObserver(_ observer: @escaping () -> Void) {
+        observers.append(observer)
+    }
+
+    private func notify() { observers.forEach { $0() } }
+
     func start() {
+        guard !started else { return } // single shared store: only connect/watch once
+        started = true
         Task { try? await store.connect() }
         watch({ try self.store.watchProposed() }, assign: { self.proposed = $0 })
         watch({ try self.store.watchActive() }, assign: { self.active = $0 })
@@ -30,7 +41,7 @@ final class MacViewModel {
                 for try await rows in try make() {
                     await MainActor.run {
                         assign(rows)
-                        self.onChange?()
+                        self.notify()
                     }
                 }
             } catch {}
