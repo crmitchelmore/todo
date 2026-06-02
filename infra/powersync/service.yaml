@@ -11,8 +11,12 @@ replication:
       sslmode: disable # OK for local/private (Tailscale) networks; not for public
 
 storage:
-  type: mongodb
-  uri: !env PS_MONGO_URI
+  type: postgresql
+  uri: !env PS_STORAGE_URI
+  # sslmode is NOT read from the URI query string (powersync ignores it there and
+  # defaults to verify-full). Must be set explicitly. Our PG has no TLS on the
+  # private network, so disable it here as we do for replication above.
+  sslmode: disable
 
 port: !env PS_PORT
 

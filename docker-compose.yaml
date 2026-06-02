@@ -1,5 +1,5 @@
-# Self-hosted PowerSync stack for the Capture todo system.
-# Brings up: Postgres (source) + MongoDB (bucket storage) + PowerSync service + our backend connector.
+# Local sync stack for the Capture todo system.
+# Brings up: Postgres (source + PowerSync bucket storage) + PowerSync service + backend connector + worker.
 # The web client runs on the host via `npm run dev` for the fastest dev loop.
 #
 #   docker compose up -d
@@ -25,25 +25,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-
-  mongo:
-    image: mongo:7.0
-    command: --replSet rs0 --bind_ip_all --quiet
-    restart: unless-stopped
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo_storage:/data/db
-
-  mongo-rs-init:
-    image: mongo:7.0
-    depends_on:
-      - mongo
-    restart: on-failure
-    entrypoint:
-      - bash
-      - -c
-      - 'mongosh --host mongo:27017 --eval ''try{rs.status().ok && quit(0)} catch {} rs.initiate({_id: "rs0", version: 1, members: [{ _id: 0, host : "mongo:27017" }]})'''
 
   backend:
     build:
@@ -83,8 +64,6 @@ services:
     restart: unless-stopped
     command: ["start", "-r", "unified"]
     depends_on:
-      mongo-rs-init:
-        condition: service_completed_successfully
       pg-db:
         condition: service_healthy
       backend:
@@ -95,7 +74,7 @@ services:
       POWERSYNC_CONFIG_PATH: /config/service.yaml
       NODE_OPTIONS: --max-old-space-size=1000
       PS_DATA_SOURCE_URI: ${PS_DATA_SOURCE_URI}
-      PS_MONGO_URI: ${PS_MONGO_URI}
+      PS_STORAGE_URI: ${PS_STORAGE_URI}
       PS_JWKS_URL: ${PS_JWKS_URL}
       PS_PORT: ${PS_PORT}
     healthcheck:
@@ -114,4 +93,3 @@ services:
 
 volumes:
   pg_data:
-  mongo_storage:
