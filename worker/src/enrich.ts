@@ -82,6 +82,7 @@ export async function enrich(title: string, now = new Date()): Promise<Enrichmen
 
   try {
     const model = process.env.ENRICH_LLM_MODEL ?? 'gpt-4o-mini';
+    const baseUrl = (process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, '');
     const categories = Object.keys(CATEGORY_KEYWORDS);
     const sys =
       `You organise todo items. Given a raw capture, return strict JSON: ` +
@@ -89,7 +90,7 @@ export async function enrich(title: string, now = new Date()): Promise<Enrichmen
       `"due_at": an ISO-8601 datetime or null, "confidence": 0..1}. ` +
       `Current time is ${now.toISOString()}. Resolve relative dates against it. Only JSON.`;
 
-    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+    const resp = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
