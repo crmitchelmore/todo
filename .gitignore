@@ -17,3 +17,11 @@ build/
 # Logs / OS
 *.log
 .DS_Store
+
+# Swift / Xcode native clients
+clients/**/.build/
+clients/**/DerivedData/
+clients/**/*.xcodeproj/
+clients/**/*.xcworkspace/xcuserdata/
+clients/**/.swiftpm/
+*.xcuserstate

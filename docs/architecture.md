@@ -73,6 +73,13 @@ accept, quick inline edit, and reject. Agent proposals carry **confidence + prov
 2. **Server-side, richer** (Mac Mini): structured LLM output (schema with project, priority, tags,
    due, recurrence, confidence, provenance); recurrence via Recognizers-Text / Duckling sidecar.
 
+> **Implemented (M2 foundation):** `worker/` is a background enrichment service that polls Postgres
+> for `proposed` rows, computes a richer suggestion (broader categories, urgency hints, full
+> chrono date parsing; LLM-upgradable via `OPENAI_API_KEY`) and patches the `suggested_*` fields
+> only — it never changes `status`. Running it on the Mini against the same Postgres over Tailscale
+> is exactly the "server-side" step above. The on-device pass writes `suggestion_source='on-device'`;
+> the worker upgrades it to `'server'` (or `'llm'`), and the patch syncs back to every client live.
+
 ## Agent & HITL
 
 OpenClaw agent on the Mini runs LangGraph flows with `interrupt_before` on risky nodes and a

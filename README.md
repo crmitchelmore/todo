@@ -6,7 +6,10 @@ Apple Calendar, web, location), and uses an **autonomous agent running on your O
 to research and optionally *do* tasks — with a **mandatory, quick human confirmation** of every
 item's structure before anything is saved.
 
-> Status: design + planning. Work is tracked in [beads](#issue-tracking-beads) (`bd`).
+> Status: **M1 (capture→suggest→confirm→sync) and M2 foundation (background enrichment worker)
+> are built and verified** on a self-hosted PowerSync stack, with native UIKit/AppKit clients and a
+> React web client. See [Build & run](#build--run) and [Review steps](#review-steps). Remaining
+> milestones (Mini agent, Obsidian, Gmail, EventKit) are tracked in [beads](#issue-tracking-beads).
 
 ## Why build instead of buy
 
@@ -73,3 +76,73 @@ bd close <id>       # complete
 ```
 
 Prefix is `cap-`. The full plan is seeded as 11 epics + decisions + tasks with dependencies.
+
+## Build & run
+
+Prerequisites: Docker/Podman (`docker compose`), Node 20+, Xcode 26 (for native apps).
+
+```bash
+# 1. Bring up the self-hosted sync stack (Postgres + Mongo + PowerSync + backend + enrichment worker)
+cp .env.example .env            # dev defaults; optionally set OPENAI_API_KEY to upgrade enrichment
+docker compose up -d --build
+curl -s localhost:8080/probes/liveness   # PowerSync healthy
+
+# 2. Web client (fastest dev loop)
+cd web && npm install && npm run dev      # http://localhost:5173
+
+# 3. macOS app (AppKit)
+cd clients/apps && GIT_CONFIG_COUNT=0 xcodegen generate
+GIT_CONFIG_COUNT=0 xcodebuild -project Capture.xcodeproj -scheme CaptureMac \
+  -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+
+# 4. Shared Swift core: unit tests + end-to-end data-path probe
+cd clients/CaptureCore && GIT_CONFIG_COUNT=0 swift test        # 7/7
+GIT_CONFIG_COUNT=0 swift run CaptureProbe                      # captures+confirms a row via the Swift SDK
+```
+
+> `GIT_CONFIG_COUNT=0` is required so SwiftPM can fetch tagged deps in this environment.
+> The generated `Capture.xcodeproj` is git-ignored — regenerate it with `xcodegen generate`.
+> The iOS UIKit target builds from the same `CaptureCore`; full compile needs an installed iOS
+> simulator platform.
+
+### What runs in the background (M2 enrichment)
+
+Capture is a single instant local write (`status=proposed`) with a cheap on-device suggestion.
+The `worker/` service then polls Postgres, computes a **richer** suggestion (more categories,
+urgency, better date parsing — LLM-upgradable via `OPENAI_API_KEY`) and patches the
+`suggested_*` fields. It **never** changes status: the human still confirms structure before save.
+The patch syncs straight back to every client.
+
+## Review steps
+
+A reviewer can verify the system end-to-end:
+
+1. **Stack health** — `docker compose ps` (pg-db, mongo, powersync, backend, worker up);
+   `curl -s localhost:8080/probes/liveness`.
+2. **Web capture→confirm→sync** — open the web app, type
+   `email Kate the report tomorrow 2pm`, see an instant proposed row with a suggested
+   `Tomorrow 14:00` / `work`; confirm; then
+   `docker compose exec -T pg-db psql -U postgres -d postgres -c "select title,status,due_at,category from tasks order by created_at desc limit 3;"`
+   shows it `active` in Postgres.
+3. **Background enrichment** — capture something with no obvious category client-side (e.g.
+   `dentist appointment next tuesday`); within a couple of seconds the proposed row's
+   `suggestion_source` flips to `server` with an improved category/date (worker logs:
+   `docker compose logs worker`).
+4. **Native data path** — `cd clients/CaptureCore && GIT_CONFIG_COUNT=0 swift run CaptureProbe`
+   prints a `PROBE_ID`; confirm that row landed:
+   `docker compose exec -T pg-db psql -U postgres -d postgres -c "select id,status,category from tasks where id='<PROBE_ID>';"`.
+5. **macOS app** — build (command above), launch, capture with the in-window field or ⌥Space
+   global hotkey; verify the proposed row appears and confirm moves it to the active list.
+6. **Unit tests** — `cd clients/CaptureCore && GIT_CONFIG_COUNT=0 swift test` (suggester) and
+   `cd web && npm run build` (web typechecks/builds).
+7. **Code review focus** — write-path allowlist `backend/src/index.ts` (`ALLOWED_COLUMNS`);
+   capture-first instant write `clients/CaptureCore/Sources/CaptureCore/TaskStore.swift` and
+   `web/src/lib/tasks.ts`; enrichment never mutates status `worker/src/index.ts`.
+
+### Needs your credentials / hardware (not runnable here)
+
+These milestones are scaffolded in beads and the architecture but require your accounts/Mac Mini:
+Mini OpenClaw agent over Tailscale (`cap-myy`, `cap-9ph`), Obsidian Local REST API (`cap-ue0`),
+Gmail OAuth2 extraction (`cap-nes`, `cap-cmc`), Apple Calendar EventKit (`cap-l20`). The
+enrichment worker is the local stand-in for the Mini's server-side enrichment — point it at the
+same Postgres over Tailscale to run it on the Mini.

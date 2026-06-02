@@ -1,0 +1,72 @@
+name: Capture
+options:
+  bundleIdPrefix: dev.crmitchelmore.capture
+  deploymentTarget:
+    iOS: "15.0"
+    macOS: "12.0"
+  createIntermediateGroups: true
+
+packages:
+  CaptureCore:
+    path: ../CaptureCore
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  CaptureiOS:
+    type: application
+    platform: iOS
+    sources:
+      - CaptureiOS/Sources
+    dependencies:
+      - package: CaptureCore
+        product: CaptureCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.crmitchelmore.capture.ios
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: CaptureiOS/Info.plist
+        TARGETED_DEVICE_FAMILY: "1,2"
+    info:
+      path: CaptureiOS/Info.plist
+      properties:
+        CFBundleDisplayName: Capture
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Default
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).SceneDelegate
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+
+  CaptureMac:
+    type: application
+    platform: macOS
+    sources:
+      - CaptureMac/Sources
+    dependencies:
+      - package: CaptureCore
+        product: CaptureCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.crmitchelmore.capture.mac
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: CaptureMac/Info.plist
+    info:
+      path: CaptureMac/Info.plist
+      properties:
+        CFBundleDisplayName: Capture
+        LSMinimumSystemVersion: "12.0"
+        NSPrincipalClass: NSApplication
+        NSHighResolutionCapable: true
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true

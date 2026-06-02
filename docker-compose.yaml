@@ -62,6 +62,22 @@ services:
     ports:
       - "${BACKEND_PORT}:${BACKEND_PORT}"
 
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      pg-db:
+        condition: service_healthy
+    environment:
+      WORKER_DATABASE_URI: ${BACKEND_DATABASE_URI}
+      ENRICH_POLL_MS: ${ENRICH_POLL_MS:-2000}
+      ENRICH_BATCH: ${ENRICH_BATCH:-20}
+      # Optional: set OPENAI_API_KEY to upgrade suggestions from deterministic to LLM.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ENRICH_LLM_MODEL: ${ENRICH_LLM_MODEL:-gpt-4o-mini}
+
   powersync:
     image: journeyapps/powersync-service:latest
     restart: unless-stopped
