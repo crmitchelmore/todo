@@ -70,7 +70,7 @@ public struct TaskItem: Identifiable, Sendable, Equatable {
 }
 
 public let CAPTURE_CATEGORIES = [
-    "work", "errands", "health", "finance", "home", "social", "inbox"
+    "engineering", "leadership", "home", "errands", "health", "finance", "personal", "inbox"
 ]
 
 enum ISO8601 {

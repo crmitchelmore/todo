@@ -3,7 +3,7 @@ import type { TaskRecord } from '../powersync/schema';
 import { confirm, reject } from '../lib/tasks';
 import { formatDue } from '../lib/format';
 
-const CATEGORIES = ['work', 'errands', 'health', 'finance', 'home', 'social', 'inbox'];
+const CATEGORIES = ['engineering', 'leadership', 'home', 'errands', 'health', 'finance', 'personal', 'inbox'];
 
 // A proposed item awaiting the mandatory quick human confirmation.
 // Pre-filled with on-device suggestions; Enter accepts, Esc rejects.

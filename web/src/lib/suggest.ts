@@ -2,12 +2,13 @@ import * as chrono from 'chrono-node';
 
 // Lightweight, fully on-device category guesser. Deliberately cheap so it never delays capture.
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
-  work: ['email', 'meeting', 'report', 'deck', 'client', 'invoice', 'slack', 'jira', 'pr', 'deploy', 'standup'],
-  errands: ['buy', 'pick up', 'grocery', 'shop', 'post office', 'pharmacy', 'return', 'collect'],
-  health: ['gym', 'run', 'doctor', 'dentist', 'workout', 'meds', 'appointment'],
-  finance: ['pay', 'bill', 'tax', 'bank', 'transfer', 'budget', 'renew'],
-  home: ['clean', 'fix', 'laundry', 'cook', 'tidy', 'bin', 'water plants'],
-  social: ['call', 'text', 'birthday', 'dinner', 'meet', 'party', 'rsvp']
+  engineering: ['pr', 'pull request', 'code review', 'review', 'deploy', 'bug', 'incident', 'on-call', 'architecture', 'spec', 'refactor', 'test', 'ci', 'build', 'infra', 'api', 'jira'],
+  leadership: ['1:1', 'one-on-one', 'performance review', 'hiring', 'interview', 'strategy', 'roadmap', 'planning', 'okr', 'team sync', 'standup', 'retro', 'stakeholder', 'mentor'],
+  home: ['clean', 'fix', 'laundry', 'cook', 'tidy', 'bin', 'water plants', 'repair', 'garden', 'kids', 'family'],
+  errands: ['buy', 'pick up', 'grocery', 'shop', 'post office', 'pharmacy', 'return', 'collect', 'drop off'],
+  health: ['gym', 'run', 'doctor', 'dentist', 'workout', 'meds', 'appointment', 'physio'],
+  finance: ['pay', 'bill', 'tax', 'bank', 'transfer', 'budget', 'renew', 'subscription'],
+  personal: ['call', 'text', 'birthday', 'dinner', 'meet', 'party', 'rsvp', 'friend', 'mum', 'dad']
 };
 
 export interface Suggestion {

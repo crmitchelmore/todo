@@ -2,8 +2,12 @@ import XCTest
 @testable import CaptureCore
 
 final class SuggesterTests: XCTestCase {
-    func testCategoryWork() {
-        XCTAssertEqual(Suggester.category(for: "email Kate the report").category, "work")
+    func testCategoryEngineering() {
+        XCTAssertEqual(Suggester.category(for: "review the PR before deploy").category, "engineering")
+    }
+
+    func testCategoryLeadership() {
+        XCTAssertEqual(Suggester.category(for: "prepare roadmap for hiring strategy 1:1").category, "leadership")
     }
 
     func testCategoryHealth() {
@@ -26,7 +30,7 @@ final class SuggesterTests: XCTestCase {
     func testConfidenceCombines() {
         // category hit (0.25) only, no date
         let s = Suggester.suggest("call mum")
-        XCTAssertEqual(s.category, "social")
+        XCTAssertEqual(s.category, "personal")
         XCTAssertGreaterThan(s.confidence, 0)
         XCTAssertLessThanOrEqual(s.confidence, 1)
     }
