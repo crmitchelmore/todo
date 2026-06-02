@@ -11,10 +11,10 @@
 - **LLM/privacy:** cloud LLMs acceptable.
 - **Autonomy:** auto-execute low-risk/reversible actions; approval for consequential ones.
 
-## Key decision: self-hosted sync core (not CloudKit)
+## Key decision: a hosted sync core (not CloudKit)
 
-Because of the web client and the two-account split, the todo data lives in a **self-hosted
-Postgres + PowerSync** backend rather than iCloud/CloudKit. This:
+Because of the web client and the two-account split, the todo data lives in a **hosted
+Postgres + PowerSync** backend (deployed to Railway) rather than iCloud/CloudKit. This:
 
 - Gives **native Swift + web SDKs** over one shared SQL data model (offline-first).
 - Is **account-agnostic** — removes the cross-Apple-account bridge entirely.
@@ -35,7 +35,7 @@ Tracked as decision `D-sync`.
             └────────────────────┼───────────────┼─────────────────────────────────┘
                                  │  PowerSync (offline-first SQLite)
                           ┌──────▼───────────────▼──────┐
-            Sync core     │  Postgres + PowerSync service │  (self-hosted: Mac Mini behind Tailscale)
+            Sync core     │  Postgres + PowerSync service │  (hosted on Railway)
                           └──────▲───────────────▲──────┘
             ┌────────────────────┼───────────────┼──────────── Account B (Mac Mini) ┐
    Brain    │  OpenClaw agent  ──┘   shares DB    │                                  │
@@ -76,8 +76,8 @@ accept, quick inline edit, and reject. Agent proposals carry **confidence + prov
 > **Implemented (M2 foundation):** `worker/` is a background enrichment service that polls Postgres
 > for `proposed` rows, computes a richer suggestion (broader categories, urgency hints, full
 > chrono date parsing; LLM-upgradable via `OPENAI_API_KEY`) and patches the `suggested_*` fields
-> only — it never changes `status`. Running it on the Mini against the same Postgres over Tailscale
-> is exactly the "server-side" step above. The on-device pass writes `suggestion_source='on-device'`;
+> only — it never changes `status`. It currently runs as a Railway service against the shared
+> Postgres; running it on the Mini against the same database is exactly the "server-side" step above. The on-device pass writes `suggestion_source='on-device'`;
 > the worker upgrades it to `'server'` (or `'llm'`), and the patch syncs back to every client live.
 
 ## Agent & HITL

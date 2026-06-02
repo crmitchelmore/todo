@@ -7,7 +7,7 @@ to research and optionally *do* tasks — with a **mandatory, quick human confir
 item's structure before anything is saved.
 
 > Status: **M1 (capture→suggest→confirm→sync) and M2 foundation (background enrichment worker)
-> are built and verified** on a self-hosted PowerSync stack, with native UIKit/AppKit clients and a
+> are built and verified** on a PowerSync stack (deployed to Railway), with native UIKit/AppKit clients and a
 > React web client. See [Build & run](#build--run) and [Review steps](#review-steps). Remaining
 > milestones (Mini agent, Obsidian, Gmail, EventKit) are tracked in [beads](#issue-tracking-beads).
 
@@ -27,7 +27,7 @@ open-source patterns we will copy rather than reinvent.
 ## Architecture (summary)
 
 Four planes, bridged across **two Apple accounts** (iPhone/laptop = account A; Mac Mini = account B).
-A **self-hosted Postgres + PowerSync** core makes sync **account-agnostic**, so the Mini agent
+A **hosted Postgres + PowerSync** core (deployed to Railway) makes sync **account-agnostic**, so the Mini agent
 shares the same database instead of trying to join iCloud.
 
 1. **Capture & sync** — native UIKit (iOS) + AppKit (macOS), no JS-wrapped frameworks, plus a React web app; one shared data model via PowerSync (native Swift SDK on Apple platforms).
@@ -82,7 +82,7 @@ Prefix is `cap-`. The full plan is seeded as 11 epics + decisions + tasks with d
 Prerequisites: Docker/Podman (`docker compose`), Node 20+, Xcode 26 (for native apps).
 
 ```bash
-# 1. Bring up the self-hosted sync stack (Postgres + Mongo + PowerSync + backend + enrichment worker)
+# 1. Bring up the sync stack locally (Postgres source + Postgres bucket storage + PowerSync + backend + enrichment worker)
 cp .env.example .env            # dev defaults; optionally set OPENAI_API_KEY to upgrade enrichment
 docker compose up -d --build
 curl -s localhost:8080/probes/liveness   # PowerSync healthy
@@ -117,7 +117,7 @@ The patch syncs straight back to every client.
 
 A reviewer can verify the system end-to-end:
 
-1. **Stack health** — `docker compose ps` (pg-db, mongo, powersync, backend, worker up);
+1. **Stack health** — `docker compose ps` (pg-db, powersync, backend, worker up);
    `curl -s localhost:8080/probes/liveness`.
 2. **Web capture→confirm→sync** — open the web app, type
    `email Kate the report tomorrow 2pm`, see an instant proposed row with a suggested
@@ -146,3 +146,15 @@ Mini OpenClaw agent over Tailscale (`cap-myy`, `cap-9ph`), Obsidian Local REST A
 Gmail OAuth2 extraction (`cap-nes`, `cap-cmc`), Apple Calendar EventKit (`cap-l20`). The
 enrichment worker is the local stand-in for the Mini's server-side enrichment — point it at the
 same Postgres over Tailscale to run it on the Mini.
+
+## Deploy
+
+The backend, PowerSync, Postgres (source + bucket storage) and enrichment worker are deployed to
+**[Railway](https://railway.app)** (project `capture`, four services on one private network).
+Clients reach two public domains — `backend-production-de2f.up.railway.app` and
+`powersync-production-e560.up.railway.app`. Native apps default to these via
+`CaptureConfig.production`; the web client reads `VITE_BACKEND_URL` / `VITE_POWERSYNC_URL`.
+
+See [`docs/deployment.md`](docs/deployment.md) for the full runbook, env-var table, `railway up`
+commands, verification curls, and the Railway gotchas (private-domain suffix, PowerSync `sslmode`,
+first-init Postgres password).
