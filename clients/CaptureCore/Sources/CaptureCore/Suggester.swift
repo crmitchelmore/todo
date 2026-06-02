@@ -26,13 +26,31 @@ public enum Suggester {
 
     private static let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
 
+    /// Precompiled word-boundary matchers, one per keyword, so short keywords
+    /// like "pr"/"run"/"ci" match whole tokens and not substrings ("prep",
+    /// "running", "special"). Boundaries are non-alphanumeric or string ends,
+    /// which still allows multi-word/punctuated keywords ("1:1", "on-call").
+    private static let categoryMatchers: [(String, [NSRegularExpression])] = categoryKeywords.map { cat, words in
+        (cat, words.map { boundedMatcher($0) })
+    }
+
+    private static func boundedMatcher(_ keyword: String) -> NSRegularExpression {
+        let escaped = NSRegularExpression.escapedPattern(for: keyword.lowercased())
+        // swiftlint:disable:next force_try
+        return try! NSRegularExpression(
+            pattern: "(^|[^a-z0-9])\(escaped)([^a-z0-9]|$)",
+            options: [.caseInsensitive]
+        )
+    }
+
     /// Pure and deterministic category guess — used directly in tests.
     public static func category(for text: String) -> (category: String?, hits: Int) {
         let lower = text.lowercased()
+        let range = NSRange(lower.startIndex..<lower.endIndex, in: lower)
         var category: String?
         var best = 0
-        for (cat, words) in categoryKeywords {
-            let hits = words.filter { lower.contains($0) }.count
+        for (cat, matchers) in categoryMatchers {
+            let hits = matchers.filter { $0.firstMatch(in: lower, options: [], range: range) != nil }.count
             if hits > best {
                 best = hits
                 category = cat

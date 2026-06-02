@@ -18,6 +18,11 @@ final class SuggesterTests: XCTestCase {
         XCTAssertNil(Suggester.category(for: "ponder the universe").category)
     }
 
+    func testShortKeywordsDoNotMatchSubstrings() {
+        // "prep"/"running" must not trigger engineering via "pr"/"run".
+        XCTAssertNil(Suggester.category(for: "prep running shoes").category)
+    }
+
     func testDetectsAbsoluteDate() {
         let date = Suggester.detectDate(in: "submit taxes on January 31 2027")
         XCTAssertNotNil(date)
