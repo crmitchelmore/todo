@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/components/capturebar.tsx","./src/components/confirmcard.tsx","./src/components/taskrow.tsx","./src/lib/format.ts","./src/lib/suggest.ts","./src/lib/tasks.ts","./src/powersync/connector.ts","./src/powersync/db.ts","./src/powersync/schema.ts","./vite.config.ts"],"version":"5.9.3"}
