@@ -106,6 +106,15 @@ export async function setTags(id: string, tags: string[]): Promise<void> {
   ]);
 }
 
+/** Set or clear the due date on any task (used by inline date editing on a row). */
+export async function setDue(id: string, dueIso: string | null): Promise<void> {
+  await db.execute(`UPDATE tasks SET due_at = ?, updated_at = ? WHERE id = ?`, [
+    dueIso,
+    new Date().toISOString(),
+    id
+  ]);
+}
+
 export async function reject(id: string): Promise<void> {
   await db.execute(`DELETE FROM tasks WHERE id = ?`, [id]);
 }

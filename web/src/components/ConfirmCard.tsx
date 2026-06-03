@@ -4,6 +4,7 @@ import { confirm, reject } from '../lib/tasks';
 import { decodeTags } from '../lib/tags';
 import { formatDue } from '../lib/format';
 import { TagEditor } from './TagChips';
+import { DueEditor } from './DueEditor';
 
 const CATEGORIES = ['engineering', 'leadership', 'home', 'errands', 'health', 'finance', 'personal', 'inbox'];
 
@@ -43,15 +44,14 @@ export function ConfirmCard({ task }: { task: TaskRecord }) {
       <div className="card-row">
         <label>Due</label>
         <span className="due">{due ? formatDue(due) : 'none'}</span>
-        <input
-          type="datetime-local"
-          value={due ? toLocalInput(due) : ''}
-          onChange={(e) => {
-            setTouchedDue(true);
-            setDue(e.target.value ? new Date(e.target.value).toISOString() : null);
-          }}
-        />
       </div>
+      <DueEditor
+        value={due}
+        onChange={(iso) => {
+          setTouchedDue(true);
+          setDue(iso);
+        }}
+      />
 
       <div className="card-row chips">
         {CATEGORIES.map((c) => (
@@ -90,10 +90,3 @@ export function ConfirmCard({ task }: { task: TaskRecord }) {
   );
 }
 
-function toLocalInput(iso: string): string {
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(
-    d.getMinutes()
-  )}`;
-}

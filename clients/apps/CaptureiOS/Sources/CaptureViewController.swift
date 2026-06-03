@@ -16,15 +16,21 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
     private let viewModel = CaptureViewModel()
     private let captureField = CapturePasteTextField()
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
+    private let filterBar = UIScrollView()
+    private let filterStack = UIStackView()
 
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Capture"
         view.backgroundColor = .systemBackground
         setupCaptureBar()
+        setupFilterBar()
         setupTable()
 
-        viewModel.onChange = { [weak self] in self?.tableView.reloadData() }
+        viewModel.onChange = { [weak self] in
+            self?.rebuildFilterBar()
+            self?.tableView.reloadData()
+        }
         viewModel.start()
     }
 
@@ -51,6 +57,54 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         ])
     }
 
+    /// Horizontal scrolling chip bar to "slice by tag or multiple tags" (AND filter).
+    private func setupFilterBar() {
+        filterBar.showsHorizontalScrollIndicator = false
+        filterBar.translatesAutoresizingMaskIntoConstraints = false
+        filterStack.axis = .horizontal
+        filterStack.spacing = 8
+        filterStack.translatesAutoresizingMaskIntoConstraints = false
+        filterBar.addSubview(filterStack)
+        view.addSubview(filterBar)
+        NSLayoutConstraint.activate([
+            filterBar.topAnchor.constraint(equalTo: captureField.bottomAnchor, constant: 8),
+            filterBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            filterBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            filterStack.topAnchor.constraint(equalTo: filterBar.topAnchor),
+            filterStack.bottomAnchor.constraint(equalTo: filterBar.bottomAnchor),
+            filterStack.leadingAnchor.constraint(equalTo: filterBar.leadingAnchor),
+            filterStack.trailingAnchor.constraint(equalTo: filterBar.trailingAnchor),
+            filterStack.heightAnchor.constraint(equalTo: filterBar.heightAnchor)
+        ])
+        rebuildFilterBar()
+    }
+
+    private func rebuildFilterBar() {
+        filterStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let tags = viewModel.allTags
+        filterBar.isHidden = tags.isEmpty
+        guard !tags.isEmpty else { return }
+        for tag in tags {
+            let on = viewModel.isFiltering(tag.name)
+            let tint = UIColor(hex: viewModel.color(forTag: tag.name)) ?? .systemGray
+            var cfg = on ? UIButton.Configuration.filled() : UIButton.Configuration.tinted()
+            cfg.title = tag.name
+            cfg.buttonSize = .small
+            cfg.baseBackgroundColor = tint
+            cfg.baseForegroundColor = on ? .white : tint
+            let b = UIButton(configuration: cfg)
+            b.addAction(UIAction { [weak self] _ in self?.viewModel.toggleFilter(tag.name) }, for: .touchUpInside)
+            filterStack.addArrangedSubview(b)
+        }
+        if !viewModel.tagFilter.isEmpty {
+            let clear = UIButton(configuration: .plain())
+            clear.configuration?.title = "Clear"
+            clear.configuration?.buttonSize = .small
+            clear.addAction(UIAction { [weak self] _ in self?.viewModel.clearFilter() }, for: .touchUpInside)
+            filterStack.addArrangedSubview(clear)
+        }
+    }
+
     private func setupTable() {
         tableView.dataSource = self
         tableView.delegate = self
@@ -58,7 +112,7 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         tableView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(tableView)
         NSLayoutConstraint.activate([
-            tableView.topAnchor.constraint(equalTo: captureField.bottomAnchor, constant: 8),
+            tableView.topAnchor.constraint(equalTo: filterBar.bottomAnchor, constant: 8),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
@@ -75,19 +129,26 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         return false // keep keyboard up for rapid capture
     }
 
-    // MARK: - Table
+    // MARK: - Table (section 0 = proposed; sections 1… = active date buckets)
 
-    func numberOfSections(in tableView: UITableView) -> Int { 2 }
+    private func activeGroup(for section: Int) -> (bucket: DateBucket, items: [TaskItem]) {
+        viewModel.activeGroups[section - 1]
+    }
+
+    func numberOfSections(in tableView: UITableView) -> Int {
+        1 + viewModel.activeGroups.count
+    }
 
     func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         if section == 0 {
             return viewModel.proposed.isEmpty ? nil : "Needs confirming · \(viewModel.proposed.count)"
         }
-        return "Active · \(viewModel.active.count)"
+        let group = activeGroup(for: section)
+        return "\(group.bucket.label) · \(group.items.count)"
     }
 
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        section == 0 ? viewModel.proposed.count : viewModel.active.count
+        section == 0 ? viewModel.proposed.count : activeGroup(for: section).items.count
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
@@ -100,7 +161,7 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
             config.secondaryTextProperties.color = .systemBlue
             cell.accessoryType = .disclosureIndicator
         } else {
-            let item = viewModel.active[indexPath.row]
+            let item = activeGroup(for: indexPath.section).items[indexPath.row]
             config.text = item.title
             config.secondaryText = activeSubtitle(item)
             cell.accessoryType = item.status == .done ? .checkmark : .none
@@ -123,9 +184,68 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
             }
             present(UINavigationController(rootViewController: vc), animated: true)
         } else {
-            let item = viewModel.active[indexPath.row]
+            let item = activeGroup(for: indexPath.section).items[indexPath.row]
             viewModel.setDone(item, true)
         }
+    }
+
+    /// Trailing swipe on an active row: edit its due date (presets + a picker), or mark done.
+    func tableView(_ tableView: UITableView,
+                   trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        guard indexPath.section > 0 else { return nil }
+        let item = activeGroup(for: indexPath.section).items[indexPath.row]
+        let date = UIContextualAction(style: .normal, title: "Date") { [weak self] _, _, done in
+            self?.presentDateEditor(for: item)
+            done(true)
+        }
+        date.backgroundColor = .systemIndigo
+        return UISwipeActionsConfiguration(actions: [date])
+    }
+
+    private func presentDateEditor(for item: TaskItem) {
+        let sheet = UIAlertController(title: "Set due date", message: nil, preferredStyle: .actionSheet)
+        for preset in DatePreset.settable {
+            sheet.addAction(UIAlertAction(title: preset.label, style: .default) { [weak self] _ in
+                self?.viewModel.setDue(item, preset.date())
+            })
+        }
+        sheet.addAction(UIAlertAction(title: "Pick date…", style: .default) { [weak self] _ in
+            self?.presentDatePicker(for: item)
+        })
+        if item.dueAt != nil {
+            sheet.addAction(UIAlertAction(title: "Clear date", style: .destructive) { [weak self] _ in
+                self?.viewModel.setDue(item, nil)
+            })
+        }
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        sheet.popoverPresentationController?.sourceView = view
+        sheet.popoverPresentationController?.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
+        present(sheet, animated: true)
+    }
+
+    private func presentDatePicker(for item: TaskItem) {
+        let picker = UIDatePicker()
+        picker.datePickerMode = .dateAndTime
+        picker.preferredDatePickerStyle = .inline
+        picker.date = item.dueAt ?? Date()
+        let vc = UIViewController()
+        vc.view.backgroundColor = .systemBackground
+        picker.translatesAutoresizingMaskIntoConstraints = false
+        vc.view.addSubview(picker)
+        NSLayoutConstraint.activate([
+            picker.centerXAnchor.constraint(equalTo: vc.view.centerXAnchor),
+            picker.topAnchor.constraint(equalTo: vc.view.safeAreaLayoutGuide.topAnchor, constant: 16)
+        ])
+        let nav = UINavigationController(rootViewController: vc)
+        vc.title = "Due date"
+        vc.navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .save, primaryAction: UIAction { [weak self, weak nav] _ in
+            self?.viewModel.setDue(item, picker.date)
+            nav?.dismiss(animated: true)
+        })
+        vc.navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .cancel, primaryAction: UIAction { [weak nav] _ in
+            nav?.dismiss(animated: true)
+        })
+        present(nav, animated: true)
     }
 
     private func proposalHint(_ item: TaskItem) -> String {
@@ -142,5 +262,20 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         if let cat = item.category { parts.append(cat) }
         parts.append(contentsOf: item.tags.map { "#\($0)" })
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
+extension UIColor {
+    /// Parse a `#rrggbb` (or `rrggbb`) hex string into a colour; nil if malformed.
+    convenience init?(hex: String) {
+        var s = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, let value = UInt32(s, radix: 16) else { return nil }
+        self.init(
+            red: CGFloat((value >> 16) & 0xFF) / 255,
+            green: CGFloat((value >> 8) & 0xFF) / 255,
+            blue: CGFloat(value & 0xFF) / 255,
+            alpha: 1
+        )
     }
 }

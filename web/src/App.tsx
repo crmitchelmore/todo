@@ -1,14 +1,25 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useStatus, useQuery } from '@powersync/react';
 import type { TaskRecord } from './powersync/schema';
 import { CaptureBar } from './components/CaptureBar';
 import { ConfirmCard } from './components/ConfirmCard';
 import { TaskRow } from './components/TaskRow';
 import { TagManager } from './components/TagManager';
+import { TagFilter } from './components/TagFilter';
+import { dateBucket, type DateBucketKey } from './lib/dates';
+import { decodeTags, tagKey } from './lib/tags';
+
+/** AND/intersection: a task matches only if it carries every selected tag. */
+function matchesTags(task: TaskRecord, selected: string[]): boolean {
+  if (selected.length === 0) return true;
+  const have = new Set(decodeTags(task.tags).map(tagKey));
+  return selected.every((s) => have.has(tagKey(s)));
+}
 
 export default function App() {
   const status = useStatus();
   const [showTags, setShowTags] = useState(false);
+  const [filter, setFilter] = useState<string[]>([]);
 
   const { data: proposed } = useQuery<TaskRecord>(
     `SELECT * FROM tasks WHERE status = 'proposed' ORDER BY created_at DESC`
@@ -19,6 +30,21 @@ export default function App() {
   const { data: done } = useQuery<TaskRecord>(
     `SELECT * FROM tasks WHERE status = 'done' ORDER BY completed_at DESC LIMIT 20`
   );
+
+  const filteredActive = useMemo(() => active.filter((t) => matchesTags(t, filter)), [active, filter]);
+  const filteredDone = useMemo(() => done.filter((t) => matchesTags(t, filter)), [done, filter]);
+
+  // Group the active list by date bucket (already sorted by due_at from the query).
+  const groups = useMemo(() => {
+    const map = new Map<DateBucketKey, { label: string; order: number; items: TaskRecord[] }>();
+    for (const t of filteredActive) {
+      const b = dateBucket(t.due_at);
+      const g = map.get(b.key) ?? { label: b.label, order: b.order, items: [] };
+      g.items.push(t);
+      map.set(b.key, g);
+    }
+    return [...map.values()].sort((a, b) => a.order - b.order);
+  }, [filteredActive]);
 
   return (
     <div className="app">
@@ -53,20 +79,35 @@ export default function App() {
       )}
 
       <section>
-        <h2>Active · {active.length}</h2>
-        <div className="rows">
-          {active.map((t) => (
-            <TaskRow key={t.id} task={t} />
+        <h2>
+          Active · {filteredActive.length}
+          {filter.length > 0 && <span className="filtered-of"> of {active.length}</span>}
+        </h2>
+        <TagFilter selected={filter} onChange={setFilter} />
+        <div className="groups">
+          {groups.map((g) => (
+            <div className="date-group" key={g.label}>
+              <h3 className={`group-head group-${g.order}`}>
+                {g.label} <span className="group-count">{g.items.length}</span>
+              </h3>
+              <div className="rows">
+                {g.items.map((t) => (
+                  <TaskRow key={t.id} task={t} />
+                ))}
+              </div>
+            </div>
           ))}
-          {active.length === 0 && <p className="empty">Nothing active yet.</p>}
+          {filteredActive.length === 0 && (
+            <p className="empty">{filter.length > 0 ? 'No items match this filter.' : 'Nothing active yet.'}</p>
+          )}
         </div>
       </section>
 
-      {done.length > 0 && (
+      {filteredDone.length > 0 && (
         <section>
           <h2>Done</h2>
           <div className="rows">
-            {done.map((t) => (
+            {filteredDone.map((t) => (
               <TaskRow key={t.id} task={t} />
             ))}
           </div>

@@ -7,6 +7,8 @@ final class MacCaptureViewController: NSViewController {
     private let proposedTable = NSTableView()
     private let activeTable = NSTableView()
     private let proposedHeader = NSTextField(labelWithString: "")
+    private let activeHeader = NSTextField(labelWithString: "ACTIVE")
+    private let filterBar = NSStackView()
 
     init(viewModel: MacViewModel) {
         self.viewModel = viewModel
@@ -60,17 +62,20 @@ final class MacCaptureViewController: NSViewController {
         proposedHeader.textColor = .secondaryLabelColor
         proposedHeader.translatesAutoresizingMaskIntoConstraints = false
 
-        let activeHeader = NSTextField(labelWithString: "ACTIVE")
         activeHeader.font = .systemFont(ofSize: 11, weight: .semibold)
         activeHeader.textColor = .secondaryLabelColor
         activeHeader.translatesAutoresizingMaskIntoConstraints = false
+
+        filterBar.orientation = .horizontal
+        filterBar.spacing = 6
+        filterBar.translatesAutoresizingMaskIntoConstraints = false
 
         configure(table: proposedTable, identifier: "proposed")
         configure(table: activeTable, identifier: "active")
         let proposedScroll = scroll(proposedTable)
         let activeScroll = scroll(activeTable)
 
-        [captureField, proposedHeader, proposedScroll, activeHeader, activeScroll].forEach {
+        [captureField, proposedHeader, proposedScroll, activeHeader, filterBar, activeScroll].forEach {
             view.addSubview($0)
         }
 
@@ -90,7 +95,11 @@ final class MacCaptureViewController: NSViewController {
             activeHeader.topAnchor.constraint(equalTo: proposedScroll.bottomAnchor, constant: 16),
             activeHeader.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 18),
 
-            activeScroll.topAnchor.constraint(equalTo: activeHeader.bottomAnchor, constant: 4),
+            filterBar.topAnchor.constraint(equalTo: activeHeader.bottomAnchor, constant: 6),
+            filterBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            filterBar.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -16),
+
+            activeScroll.topAnchor.constraint(equalTo: filterBar.bottomAnchor, constant: 6),
             activeScroll.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             activeScroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             activeScroll.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -16)
@@ -119,13 +128,53 @@ final class MacCaptureViewController: NSViewController {
         return s
     }
 
+    /// Rebuild the tag filter chip row from the synced tags ("slice by tag or multiple tags").
+    private func rebuildFilterBar() {
+        filterBar.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        guard !viewModel.allTags.isEmpty else { filterBar.isHidden = true; return }
+        filterBar.isHidden = false
+        let label = NSTextField(labelWithString: "Filter")
+        label.font = .systemFont(ofSize: 11)
+        label.textColor = .tertiaryLabelColor
+        filterBar.addArrangedSubview(label)
+        for tag in viewModel.allTags {
+            let on = viewModel.isFiltering(tag.name)
+            let b = NSButton(title: tag.name, target: self, action: #selector(filterTapped(_:)))
+            b.bezelStyle = .badge
+            b.controlSize = .small
+            b.font = .systemFont(ofSize: 11, weight: on ? .semibold : .regular)
+            b.contentTintColor = on ? NSColor(hex: viewModel.color(forTag: tag.name)) : .secondaryLabelColor
+            b.state = on ? .on : .off
+            b.identifier = NSUserInterfaceItemIdentifier(tag.name)
+            filterBar.addArrangedSubview(b)
+        }
+        if !viewModel.tagFilter.isEmpty {
+            let clear = NSButton(title: "Clear", target: self, action: #selector(clearFilterTapped))
+            clear.bezelStyle = .inline
+            clear.controlSize = .small
+            filterBar.addArrangedSubview(clear)
+        }
+    }
+
     private func reload() {
         proposedHeader.stringValue = viewModel.proposed.isEmpty
             ? "NOTHING TO CONFIRM"
             : "NEEDS CONFIRMING · \(viewModel.proposed.count)"
+        let filtered = viewModel.filteredActiveCount
+        activeHeader.stringValue = viewModel.tagFilter.isEmpty
+            ? "ACTIVE · \(filtered)"
+            : "ACTIVE · \(filtered) of \(viewModel.active.count)"
+        rebuildFilterBar()
         proposedTable.reloadData()
         activeTable.reloadData()
     }
+
+    @objc private func filterTapped(_ sender: NSButton) {
+        guard let name = sender.identifier?.rawValue else { return }
+        viewModel.toggleFilter(name)
+    }
+
+    @objc private func clearFilterTapped() { viewModel.clearFilter() }
 
     @objc private func captureSubmit() {
         let text = captureField.stringValue
@@ -137,7 +186,13 @@ final class MacCaptureViewController: NSViewController {
 
 extension MacCaptureViewController: NSTableViewDataSource, NSTableViewDelegate {
     func numberOfRows(in tableView: NSTableView) -> Int {
-        tableView == proposedTable ? viewModel.proposed.count : viewModel.active.count
+        tableView == proposedTable ? viewModel.proposed.count : viewModel.activeRows.count
+    }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        if tableView == proposedTable { return 78 }
+        if case .header = viewModel.activeRows[row] { return 24 }
+        return 36
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -149,11 +204,21 @@ extension MacCaptureViewController: NSTableViewDataSource, NSTableViewDelegate {
             } onReject: { [weak self] in
                 self?.viewModel.reject(item)
             }
-        } else {
-            let item = viewModel.active[row]
+        }
+        switch viewModel.activeRows[row] {
+        case let .header(label, count):
+            return DateBucketHeaderView(label: label, count: count)
+        case let .task(item):
             return ActiveRowView(item: item, color: color) { [weak self] done in
                 self?.viewModel.setDone(item, done)
+            } onSetDue: { [weak self] date in
+                self?.viewModel.setDue(item, date)
             }
         }
+    }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        if tableView == activeTable, case .header = viewModel.activeRows[row] { return false }
+        return true
     }
 }

@@ -3,6 +3,7 @@ import { setDone } from '../lib/tasks';
 import { decodeTags } from '../lib/tags';
 import { formatDue } from '../lib/format';
 import { TagChips } from './TagChips';
+import { RowDue } from './DueEditor';
 
 export function TaskRow({ task }: { task: TaskRecord }) {
   const done = task.status === 'done';
@@ -17,7 +18,9 @@ export function TaskRow({ task }: { task: TaskRecord }) {
       <span className="row-title">{task.title}</span>
       {task.category && <span className="tag">{task.category}</span>}
       <TagChips tags={tags} />
-      {task.due_at && <span className="row-due">{formatDue(task.due_at)}</span>}
+      {done
+        ? task.due_at && <span className="row-due row-due-static">{formatDue(task.due_at)}</span>
+        : <RowDue taskId={task.id} due={task.due_at ?? null} />}
     </div>
   );
 }

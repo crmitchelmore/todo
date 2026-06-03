@@ -241,3 +241,39 @@ input[type='checkbox'] { width: 18px; height: 18px; accent-color: var(--accent-2
   line-height: 1;
 }
 .tag-del:hover { color: var(--accent); }
+
+/* --- Date grouping, due editor, tag filter --- */
+.tag-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 12px; }
+.tag-filter-label { font-size: 12px; color: var(--muted, #888); margin-right: 2px; }
+.filter-chip {
+  font-size: 12px; padding: 3px 10px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--border, #d0d0d0); background: transparent; color: inherit;
+}
+.filter-chip.on { color: #fff; font-weight: 600; }
+.filter-chip.clear { border-style: dashed; opacity: 0.8; }
+
+.date-group { margin-bottom: 14px; }
+.group-head {
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--muted, #888); margin: 8px 0 4px; display: flex; align-items: center; gap: 6px;
+}
+.group-count { font-weight: 400; opacity: 0.6; }
+.group-head.group-0 { color: #E5484D; } /* Overdue */
+.group-head.group-1 { color: #3E63DD; } /* Today */
+.filtered-of { font-weight: 400; opacity: 0.6; font-size: 0.8em; }
+
+.row-due-wrap { position: relative; display: inline-flex; }
+.row-due {
+  font-size: 12px; padding: 2px 8px; border-radius: 6px; cursor: pointer;
+  border: 1px solid transparent; background: rgba(127,127,127,0.12); color: inherit; white-space: nowrap;
+}
+.row-due-empty { opacity: 0.5; border-style: dashed; border-color: var(--border, #ccc); background: transparent; }
+.row-due-static { background: transparent; cursor: default; opacity: 0.7; }
+.due-popover {
+  position: absolute; top: 100%; right: 0; z-index: 20; margin-top: 4px; padding: 10px;
+  background: var(--card, #fff); border: 1px solid var(--border, #ddd); border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.18); min-width: 220px;
+}
+.due-editor { display: flex; flex-direction: column; gap: 8px; }
+.due-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip-clear { border-style: dashed; }

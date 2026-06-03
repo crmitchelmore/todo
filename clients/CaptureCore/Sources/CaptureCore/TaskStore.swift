@@ -144,6 +144,15 @@ public final class TaskStore: @unchecked Sendable {
         )
     }
 
+    /// Set or clear the due date on any task (used by inline date editing on a row).
+    public func setDue(id: String, dueAt: Date?) async throws {
+        let now = ISO8601.string(Date())
+        try await db.execute(
+            sql: "UPDATE \(TASKS_TABLE) SET due_at = ?, updated_at = ? WHERE id = ?",
+            parameters: [dueAt.map(ISO8601.string), now, id]
+        )
+    }
+
     public func reject(id: String) async throws {
         try await db.execute(sql: "DELETE FROM \(TASKS_TABLE) WHERE id = ?", parameters: [id])
     }
