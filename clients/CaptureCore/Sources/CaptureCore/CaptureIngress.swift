@@ -40,12 +40,12 @@ public enum CaptureIngressError: Error {
 /// and the enrichment worker fills in suggestions, so the row syncs back to every client.
 public struct HTTPCaptureIngress: CaptureIngress {
     private let backendURL: URL
-    private let apiSecret: String?
+    private let token: TokenProviding?
     private let session: URLSession
 
-    public init(backendURL: URL, apiSecret: String? = nil, session: URLSession = .shared) {
+    public init(backendURL: URL, token: TokenProviding? = nil, session: URLSession = .shared) {
         self.backendURL = backendURL
-        self.apiSecret = apiSecret
+        self.token = token
         self.session = session
     }
 
@@ -53,7 +53,7 @@ public struct HTTPCaptureIngress: CaptureIngress {
         var req = URLRequest(url: backendURL.appendingPathComponent("api/capture"))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.applyAPISecret(apiSecret)
+        req.applyBearer(token?.currentToken())
         req.timeoutInterval = 8
         let body: [String: Any] = [
             "id": input.id,
@@ -120,8 +120,8 @@ public struct ResilientCaptureIngress: CaptureIngress {
     private let http: HTTPCaptureIngress
     private let outbox: OutboxCaptureIngress?
 
-    public init(backendURL: URL, appGroupId: String?, apiSecret: String? = nil, session: URLSession = .shared) {
-        self.http = HTTPCaptureIngress(backendURL: backendURL, apiSecret: apiSecret, session: session)
+    public init(backendURL: URL, appGroupId: String?, token: TokenProviding? = nil, session: URLSession = .shared) {
+        self.http = HTTPCaptureIngress(backendURL: backendURL, token: token, session: session)
         self.outbox = appGroupId.map { OutboxCaptureIngress(appGroupId: $0) }
     }
 

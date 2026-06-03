@@ -1,12 +1,14 @@
 import type { AbstractPowerSyncDatabase, PowerSyncBackendConnector } from '@powersync/web';
 import { config } from '../config';
+import { getToken, clearSession } from '../lib/auth';
 
 const BACKEND_URL = config.backendUrl;
 const POWERSYNC_URL = config.powersyncUrl;
 
-/** Authorization header for the backend shared-secret gate (omitted when no secret is configured). */
+/** Bearer header carrying the opaque Sign in with Apple session token (omitted when signed out). */
 function authHeaders(): Record<string, string> {
-  return config.apiSecret ? { Authorization: `Bearer ${config.apiSecret}` } : {};
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 /**
@@ -18,6 +20,10 @@ function authHeaders(): Record<string, string> {
 export class BackendConnector implements PowerSyncBackendConnector {
   async fetchCredentials() {
     const res = await fetch(`${BACKEND_URL}/api/auth/token`, { headers: authHeaders() });
+    if (res.status === 401) {
+      clearSession();
+      throw new Error('session expired');
+    }
     if (!res.ok) throw new Error(`auth token request failed: ${res.status}`);
     const { token, powersync_url } = await res.json();
     return { endpoint: POWERSYNC_URL || powersync_url, token };
@@ -39,6 +45,10 @@ export class BackendConnector implements PowerSyncBackendConnector {
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ ops })
     });
+    if (res.status === 401) {
+      clearSession();
+      throw new Error('session expired');
+    }
     if (!res.ok) throw new Error(`upload failed: ${res.status} ${await res.text()}`);
 
     await tx.complete();

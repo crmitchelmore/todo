@@ -20,7 +20,4 @@ const defaults = import.meta.env.DEV ? LOCAL : PRODUCTION;
 export const config = {
   backendUrl: import.meta.env.VITE_BACKEND_URL ?? defaults.backendUrl,
   powersyncUrl: import.meta.env.VITE_POWERSYNC_URL ?? defaults.powersyncUrl,
-  // Shared-secret bearer for the backend gate. Injected at build (VITE_CAPTURE_API_SECRET),
-  // never committed. Empty in local dev (the backend runs open when no secret is set).
-  apiSecret: import.meta.env.VITE_CAPTURE_API_SECRET ?? '',
 } as const;

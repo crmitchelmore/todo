@@ -8,12 +8,20 @@ public final class TaskStore: @unchecked Sendable {
     public let db: PowerSyncDatabaseProtocol
     private let connector: BackendConnector
     private let config: CaptureConfig
+    private let auth: AuthStore?
 
-    public init(config: CaptureConfig = .localDev) {
+    public init(config: CaptureConfig = .localDev, auth: AuthStore? = nil) {
         self.config = config
+        self.auth = auth
         self.db = PowerSyncDatabase(schema: AppSchema, dbFilename: "capture.sqlite")
-        self.connector = BackendConnector(config: config)
+        self.connector = BackendConnector(config: config, token: auth ?? AnonymousToken())
     }
+
+    /// The owner id stamped on locally-created rows: the signed-in user when authenticated, else the
+    /// config fallback (used by the offline probe/tests). Keeping this aligned with the server's
+    /// owner-scoped writes and the per-user sync filter is what stops a fresh local row from being
+    /// filtered straight back out on the next sync round-trip.
+    private var ownerId: String { auth?.ownerId ?? config.ownerId }
 
     public func connect() async throws {
         try await db.connect(connector: connector)
@@ -21,6 +29,13 @@ public final class TaskStore: @unchecked Sendable {
 
     public func disconnect() async throws {
         try await db.disconnect()
+    }
+
+    /// Wipe the local SQLite DB and pending upload queue. Call on every auth boundary (sign-in and
+    /// sign-out) so one account's optimistic, not-yet-uploaded writes can never replay or leak into
+    /// another account's synced view.
+    public func resetLocalData() async throws {
+        try await db.disconnectAndClear()
     }
 
     // MARK: - Capture (hot path)
@@ -32,7 +47,8 @@ public final class TaskStore: @unchecked Sendable {
         let title = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let id = UUID().uuidString.lowercased()
         guard !title.isEmpty else { return id }
-        Task.detached { [db, config] in
+        let ownerId = self.ownerId
+        Task.detached { [db] in
             let now = ISO8601.string(Date())
             _ = try? await db.execute(
                 sql: """
@@ -40,7 +56,7 @@ public final class TaskStore: @unchecked Sendable {
                     (id, owner_id, title, status, source, created_at, updated_at)
                 VALUES (?, ?, ?, 'proposed', 'capture', ?, ?)
                 """,
-                parameters: [id, config.ownerId, title, now, now]
+                parameters: [id, ownerId, title, now, now]
             )
             await Self.enrich(db: db, id: id, title: title)
         }
@@ -82,8 +98,9 @@ public final class TaskStore: @unchecked Sendable {
             .filter { !$0.1.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         guard !prepared.isEmpty else { return [] }
         let allTags = TagsCodec.normalize(prepared.flatMap { $0.item.tags })
-        Task.detached { [db, config] in
-            await Self.ensureTags(db: db, ownerId: config.ownerId, names: allTags)
+        let ownerId = self.ownerId
+        Task.detached { [db] in
+            await Self.ensureTags(db: db, ownerId: ownerId, names: allTags)
             for (id, item) in prepared {
                 let now = ISO8601.string(Date())
                 let tagsJSON = TagsCodec.encode(item.tags)
@@ -95,7 +112,7 @@ public final class TaskStore: @unchecked Sendable {
                              created_at, updated_at, confirmed_at, completed_at)
                         VALUES (?, ?, ?, 'done', NULL, ?, 'paste', ?, ?, ?, ?)
                         """,
-                        parameters: [id, config.ownerId, item.title, tagsJSON, now, now, now, now]
+                        parameters: [id, ownerId, item.title, tagsJSON, now, now, now, now]
                     )
                 } else {
                     _ = try? await db.execute(
@@ -104,7 +121,7 @@ public final class TaskStore: @unchecked Sendable {
                             (id, owner_id, title, status, tags, source, created_at, updated_at)
                         VALUES (?, ?, ?, 'proposed', ?, 'paste', ?, ?)
                         """,
-                        parameters: [id, config.ownerId, item.title, tagsJSON, now, now]
+                        parameters: [id, ownerId, item.title, tagsJSON, now, now]
                     )
                     await Self.enrich(db: db, id: id, title: item.title)
                 }
@@ -118,7 +135,7 @@ public final class TaskStore: @unchecked Sendable {
     /// Promote a proposed item to an active todo after the human confirms its structure.
     public func confirm(id: String, title: String?, dueAt: Date?, category: String?, tags: [String]? = nil) async throws {
         let now = ISO8601.string(Date())
-        if let tags { await Self.ensureTags(db: db, ownerId: config.ownerId, names: TagsCodec.normalize(tags)) }
+        if let tags { await Self.ensureTags(db: db, ownerId: ownerId, names: TagsCodec.normalize(tags)) }
         try await db.execute(
             sql: """
             UPDATE \(TASKS_TABLE)
@@ -136,7 +153,7 @@ public final class TaskStore: @unchecked Sendable {
     /// Replace the tag set on an existing task (used by inline tag editing on a row).
     public func setTags(id: String, tags: [String]) async throws {
         let normalized = TagsCodec.normalize(tags)
-        await Self.ensureTags(db: db, ownerId: config.ownerId, names: normalized)
+        await Self.ensureTags(db: db, ownerId: ownerId, names: normalized)
         let now = ISO8601.string(Date())
         try await db.execute(
             sql: "UPDATE \(TASKS_TABLE) SET tags = ?, updated_at = ? WHERE id = ?",
@@ -242,7 +259,7 @@ public final class TaskStore: @unchecked Sendable {
             INSERT INTO \(TAGS_TABLE) (id, owner_id, name, color, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            parameters: [id, config.ownerId, trimmed, color ?? TagPalette.color(for: trimmed), now, now]
+            parameters: [id, ownerId, trimmed, color ?? TagPalette.color(for: trimmed), now, now]
         )
         return id
     }

@@ -30,7 +30,8 @@ struct CaptureTodoIntent: AppIntent {
         guard !trimmed.isEmpty else {
             return .result(dialog: "Nothing to capture.")
         }
-        let ingress = CaptureConfig.fromEnvironment().makeIngress()
+        let config = CaptureConfig.fromEnvironment()
+        let ingress = config.makeIngress(token: AuthStore(config: config))
         let input = CaptureInput(rawText: trimmed, source: "app-intent")
         try await ingress.capture(input)
         return .result(dialog: "Captured. I'll suggest a date and category for you to confirm.")

@@ -6,6 +6,7 @@ import CaptureCore
 @MainActor
 final class CaptureViewModel {
     let store: TaskStore
+    let auth: AuthStore
     private(set) var proposed: [TaskItem] = []
     private(set) var active: [TaskItem] = []
     private(set) var allTags: [Tag] = []
@@ -15,8 +16,9 @@ final class CaptureViewModel {
     var onChange: (() -> Void)?
     private var tasks: [Task<Void, Never>] = []
 
-    init(store: TaskStore = TaskStore(config: .fromEnvironment())) {
-        self.store = store
+    init(auth: AuthStore, config: CaptureConfig = .fromEnvironment()) {
+        self.auth = auth
+        self.store = TaskStore(config: config, auth: auth)
     }
 
     func start() {

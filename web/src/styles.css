@@ -277,3 +277,30 @@ input[type='checkbox'] { width: 18px; height: 18px; accent-color: var(--accent-2
 .due-editor { display: flex; flex-direction: column; gap: 8px; }
 .due-presets { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip-clear { border-style: dashed; }
+
+/* Sign in with Apple gate */
+.signin {
+  max-width: 360px;
+  margin: 18vh auto 0;
+  text-align: center;
+  padding: 0 24px;
+}
+.signin h1 { font-size: 40px; margin: 0 0 8px; }
+.signin-sub { color: var(--muted, #888); margin: 0 0 28px; }
+.apple-signin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 240px;
+  height: 48px;
+  border: none;
+  border-radius: 8px;
+  background: #000;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.apple-signin:disabled { opacity: 0.6; cursor: default; }
+.signin-error { color: #e5484d; margin-top: 16px; font-size: 14px; }

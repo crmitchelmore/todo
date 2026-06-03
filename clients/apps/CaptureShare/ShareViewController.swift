@@ -7,7 +7,8 @@ import CaptureCore
 final class ShareViewController: UIViewController {
     private let textView = UITextView()
     private let spinner = UIActivityIndicatorView(style: .medium)
-    private let ingress = CaptureConfig.fromEnvironment().makeIngress()
+    private let config = CaptureConfig.fromEnvironment()
+    private lazy var ingress = config.makeIngress(token: AuthStore(config: config))
 
     private var sharedURL: String?
 

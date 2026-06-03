@@ -1,9 +1,12 @@
 import { PowerSyncDatabase } from '@powersync/web';
 import { AppSchema } from './schema';
 import { BackendConnector } from './connector';
+import { ownerId as sessionOwnerId } from '../lib/auth';
 
-// Single-user dev identity for M1. The backend overrides owner_id server-side anyway.
-export const OWNER_ID = '00000000-0000-0000-0000-000000000001';
+/** Owner id for local optimistic writes: the signed-in user (the backend re-asserts it anyway). */
+export function ownerId(): string {
+  return sessionOwnerId();
+}
 
 export const db = new PowerSyncDatabase({
   schema: AppSchema,
@@ -15,4 +18,10 @@ export async function initPowerSync(): Promise<void> {
   if (connected) return;
   connected = true;
   await db.connect(new BackendConnector());
+}
+
+/** Wipe the local DB + upload queue. Called on auth boundaries so accounts never cross-contaminate. */
+export async function resetLocalData(): Promise<void> {
+  connected = false;
+  await db.disconnectAndClear();
 }

@@ -1,4 +1,4 @@
-import { db, OWNER_ID } from '../powersync/db';
+import { db, ownerId } from '../powersync/db';
 import { suggest } from './suggest';
 import { parseMarkdownList, type ParsedCaptureItem } from './markdownList';
 import { encodeTags, ensureTags, normalizeTags } from './tags';
@@ -15,7 +15,7 @@ export async function capture(raw: string): Promise<string> {
   await db.execute(
     `INSERT INTO tasks (id, owner_id, title, status, source, created_at, updated_at)
      VALUES (?, ?, ?, 'proposed', 'capture', ?, ?)`,
-    [id, OWNER_ID, title, now, now]
+    [id, ownerId(), title, now, now]
   );
   void enrich(id, title);
   return id;
@@ -65,13 +65,13 @@ export async function captureBatch(items: ParsedCaptureItem[]): Promise<string[]
         `INSERT INTO tasks
            (id, owner_id, title, status, category, tags, source, created_at, updated_at, confirmed_at, completed_at)
          VALUES (?, ?, ?, 'done', NULL, ?, 'paste', ?, ?, ?, ?)`,
-        [id, OWNER_ID, item.title, tagsJSON, now, now, now, now]
+        [id, ownerId(), item.title, tagsJSON, now, now, now, now]
       );
     } else {
       await db.execute(
         `INSERT INTO tasks (id, owner_id, title, status, tags, source, created_at, updated_at)
          VALUES (?, ?, ?, 'proposed', ?, 'paste', ?, ?)`,
-        [id, OWNER_ID, item.title, tagsJSON, now, now]
+        [id, ownerId(), item.title, tagsJSON, now, now]
       );
       void enrich(id, item.title);
     }

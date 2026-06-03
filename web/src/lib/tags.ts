@@ -1,4 +1,4 @@
-import { db, OWNER_ID } from '../powersync/db';
+import { db, ownerId } from '../powersync/db';
 
 /** Fixed, pleasant chip palette. New tags get a stable colour derived from their name so
  *  they look consistent across clients (mirrors Swift `TagPalette`). */
@@ -72,7 +72,7 @@ export async function ensureTags(names: string[]): Promise<void> {
     await db.execute(
       `INSERT INTO tags (id, owner_id, name, color, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [crypto.randomUUID(), OWNER_ID, name, colorForTag(name), now, now]
+      [crypto.randomUUID(), ownerId(), name, colorForTag(name), now, now]
     );
   }
 }
@@ -90,7 +90,7 @@ export async function createTag(name: string, color?: string): Promise<string | 
   await db.execute(
     `INSERT INTO tags (id, owner_id, name, color, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?)`,
-    [id, OWNER_ID, trimmed, color ?? colorForTag(trimmed), now, now]
+    [id, ownerId(), trimmed, color ?? colorForTag(trimmed), now, now]
   );
   return id;
 }

@@ -16,6 +16,10 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
 
 final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
+    private let config = CaptureConfig.fromEnvironment()
+    private lazy var auth = AuthStore(config: config)
+    private lazy var viewModel = CaptureViewModel(auth: auth, config: config)
+    private var startedSync = false
 
     func scene(
         _ scene: UIScene,
@@ -24,19 +28,47 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     ) {
         guard let windowScene = scene as? UIWindowScene else { return }
         let window = UIWindow(windowScene: windowScene)
-        window.rootViewController = UINavigationController(rootViewController: CaptureViewController())
-        window.makeKeyAndVisible()
         self.window = window
-        drainOutbox()
+
+        // Swap the root between the sign-in gate and the capture UI as the auth state changes.
+        auth.onChange = { [weak self] in
+            Task { @MainActor in self?.refreshRoot() }
+        }
+        refreshRoot()
+        window.makeKeyAndVisible()
+    }
+
+    @MainActor
+    private func refreshRoot() {
+        guard let window else { return }
+        if auth.isAuthenticated {
+            if !startedSync {
+                startedSync = true
+                Task {
+                    try? await viewModel.store.resetLocalData()
+                    await MainActor.run {
+                        window.rootViewController = UINavigationController(
+                            rootViewController: CaptureViewController(viewModel: viewModel))
+                    }
+                    await drainOutbox()
+                }
+            }
+        } else {
+            startedSync = false
+            window.rootViewController = SignInViewController(auth: auth) { [weak self] in
+                self?.refreshRoot()
+            }
+        }
     }
 
     /// Flush any captures the Share Extension / App Intent queued offline. Fire-and-forget — the
     /// drain is idempotent and re-enqueues anything still unreachable.
     func sceneWillEnterForeground(_ scene: UIScene) {
-        drainOutbox()
+        guard auth.isAuthenticated else { return }
+        Task { await drainOutbox() }
     }
 
-    private func drainOutbox() {
-        Task { await CaptureConfig.fromEnvironment().drainOutbox() }
+    private func drainOutbox() async {
+        await config.drainOutbox(token: auth)
     }
 }

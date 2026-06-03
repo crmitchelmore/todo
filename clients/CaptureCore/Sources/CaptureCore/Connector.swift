@@ -10,37 +10,22 @@ public struct CaptureConfig: Sendable {
     public var ownerId: String
     /// Shared App Group container id for the offline capture outbox (used by extensions/intents).
     public var appGroupId: String?
-    /// Shared-secret bearer for the backend gate. Injected at build (env `CAPTURE_API_SECRET` or the
-    /// matching Info.plist key), never committed. Nil in local dev (the backend runs open then).
-    public var apiSecret: String?
+    /// Keychain access group that lets the main app, Share Extension and App Intents read the same
+    /// Sign in with Apple session. Nil => the process's default access group (main app only).
+    public var keychainAccessGroup: String?
 
     public init(
         backendURL: URL,
         powersyncURL: URL,
         ownerId: String = "00000000-0000-0000-0000-000000000001",
         appGroupId: String? = nil,
-        apiSecret: String? = CaptureConfig.resolveAPISecret()
+        keychainAccessGroup: String? = nil
     ) {
         self.backendURL = backendURL
         self.powersyncURL = powersyncURL
         self.ownerId = ownerId
         self.appGroupId = appGroupId
-        self.apiSecret = apiSecret
-    }
-
-    /// Resolves the backend shared secret from the process environment first (CI/probe/tests), then
-    /// the app bundle's Info.plist (`CAPTURE_API_SECRET`, populated from a build setting so the
-    /// literal never lives in the committed project spec). Guards against an unsubstituted
-    /// `$(CAPTURE_API_SECRET)` placeholder leaking through.
-    public static func resolveAPISecret() -> String? {
-        if let env = ProcessInfo.processInfo.environment["CAPTURE_API_SECRET"], !env.isEmpty {
-            return env
-        }
-        if let plist = Bundle.main.object(forInfoDictionaryKey: "CAPTURE_API_SECRET") as? String,
-           !plist.isEmpty, !plist.hasPrefix("$(") {
-            return plist
-        }
-        return nil
+        self.keychainAccessGroup = keychainAccessGroup
     }
 
     /// Sensible default for a simulator/desktop talking to the local stack.
@@ -90,9 +75,9 @@ public struct CaptureConfig: Sendable {
     }
 
     /// Ingress for out-of-process surfaces (Share Extension, App Intents): backend POST with an
-    /// App Group outbox fallback. Never opens PowerSync.
-    public func makeIngress(session: URLSession = .shared) -> ResilientCaptureIngress {
-        ResilientCaptureIngress(backendURL: backendURL, appGroupId: appGroupId, apiSecret: apiSecret, session: session)
+    /// App Group outbox fallback. Never opens PowerSync. Authenticates with the shared session.
+    public func makeIngress(token: TokenProviding, session: URLSession = .shared) -> ResilientCaptureIngress {
+        ResilientCaptureIngress(backendURL: backendURL, appGroupId: appGroupId, token: token, session: session)
     }
 
     /// The App Group outbox, when configured. Used by the main app to drain captures that an
@@ -106,11 +91,11 @@ public struct CaptureConfig: Sendable {
     /// and anything that still fails is re-enqueued so a capture is never lost. Returns the number
     /// of captures successfully flushed.
     @discardableResult
-    public func drainOutbox(session: URLSession = .shared) async -> Int {
+    public func drainOutbox(token: TokenProviding, session: URLSession = .shared) async -> Int {
         guard let outbox = makeOutbox() else { return 0 }
         let pending = (try? outbox.drain()) ?? []
         guard !pending.isEmpty else { return 0 }
-        let http = HTTPCaptureIngress(backendURL: backendURL, apiSecret: apiSecret, session: session)
+        let http = HTTPCaptureIngress(backendURL: backendURL, token: token, session: session)
         var flushed = 0
         for input in pending {
             do {
@@ -135,19 +120,28 @@ private struct TokenResponse: Decodable {
 public final class BackendConnector: PowerSyncBackendConnectorProtocol, @unchecked Sendable {
     private let config: CaptureConfig
     private let session: URLSession
+    private let token: TokenProviding
 
-    public init(config: CaptureConfig, session: URLSession = .shared) {
+    public init(config: CaptureConfig, token: TokenProviding, session: URLSession = .shared) {
         self.config = config
+        self.token = token
         self.session = session
     }
 
     public func fetchCredentials() async throws -> PowerSyncCredentials? {
         let url = config.backendURL.appendingPathComponent("api/auth/token")
         var request = URLRequest(url: url)
-        request.applyAPISecret(config.apiSecret)
+        request.applyBearer(token.currentToken())
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+        guard let http = response as? HTTPURLResponse else {
             throw CaptureError.auth("token request failed")
+        }
+        if http.statusCode == 401 {
+            token.invalidate()
+            throw CaptureError.auth("session expired")
+        }
+        guard http.statusCode == 200 else {
+            throw CaptureError.auth("token request failed (\(http.statusCode))")
         }
         let decoded = try JSONDecoder().decode(TokenResponse.self, from: data)
         return PowerSyncCredentials(
@@ -177,11 +171,18 @@ public final class BackendConnector: PowerSyncBackendConnectorProtocol, @uncheck
         var request = URLRequest(url: config.backendURL.appendingPathComponent("api/data"))
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.applyAPISecret(config.apiSecret)
+        request.applyBearer(token.currentToken())
         request.httpBody = try JSONSerialization.data(withJSONObject: ["ops": ops])
 
         let (body, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+        guard let http = response as? HTTPURLResponse else {
+            throw CaptureError.upload("upload failed: no response")
+        }
+        if http.statusCode == 401 {
+            token.invalidate()
+            throw CaptureError.auth("session expired")
+        }
+        guard http.statusCode == 200 else {
             let text = String(data: body, encoding: .utf8) ?? ""
             throw CaptureError.upload("upload failed: \(text)")
         }
@@ -196,10 +197,10 @@ public enum CaptureError: Error, Sendable {
 }
 
 extension URLRequest {
-    /// Adds the backend shared-secret bearer when one is configured (no-op in open local dev).
-    mutating func applyAPISecret(_ secret: String?) {
-        if let secret, !secret.isEmpty {
-            setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+    /// Adds the opaque Sign in with Apple session token when one is present (no-op when signed out).
+    mutating func applyBearer(_ token: String?) {
+        if let token, !token.isEmpty {
+            setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
     }
 }

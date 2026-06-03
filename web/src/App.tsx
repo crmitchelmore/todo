@@ -8,6 +8,14 @@ import { TagManager } from './components/TagManager';
 import { TagFilter } from './components/TagFilter';
 import { dateBucket, type DateBucketKey } from './lib/dates';
 import { decodeTags, tagKey } from './lib/tags';
+import { signOut } from './lib/auth';
+import { resetLocalData } from './powersync/db';
+
+/** Sign out and wipe local data so the next account starts clean. */
+async function handleSignOut(): Promise<void> {
+  await signOut();
+  await resetLocalData();
+}
 
 /** AND/intersection: a task matches only if it carries every selected tag. */
 function matchesTags(task: TaskRecord, selected: string[]): boolean {
@@ -52,6 +60,9 @@ export default function App() {
         <h1>Capture</h1>
         <button className="tags-toggle" onClick={() => setShowTags((s) => !s)}>
           {showTags ? 'Close tags' : 'Manage tags'}
+        </button>
+        <button className="tags-toggle" onClick={() => void handleSignOut()}>
+          Sign out
         </button>
         <span className={`sync ${status.connected ? 'on' : 'off'}`}>
           {status.connected ? 'synced' : 'offline'}

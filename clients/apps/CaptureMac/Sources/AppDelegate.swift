@@ -3,7 +3,9 @@ import CaptureCore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
-    private let model = MacViewModel()            // single shared store / PowerSync instance
+    private let config = CaptureConfig.fromEnvironment()
+    private lazy var auth = AuthStore(config: config)
+    private lazy var model = MacViewModel(auth: auth, config: config)  // single shared store / PowerSync instance
     private lazy var captureVC = MacCaptureViewController(viewModel: model)
     private lazy var quick = QuickCaptureController(viewModel: model)
     private var statusItemController: StatusItemController?
@@ -13,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var settingsWindow: SettingsWindowController?
     private var quickAppMenuItem: NSMenuItem?
     private let updater = UpdaterController.shared   // starts Sparkle scheduled checks
+    private var started = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -33,7 +36,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             NSLog("[Capture] global hotkey registration failed; use the menu bar item to capture.")
         }
 
+        // Swap the window between the sign-in gate and the capture UI whenever auth changes
+        // (sign-in success, sign-out, or a backend 401 that revoked our session).
+        auth.onChange = { [weak self] in
+            Task { @MainActor in self?.refreshAuthUI() }
+        }
+        refreshAuthUI()
         showMainWindow()
+    }
+
+    /// Drive the root content from the current auth state. After a fresh sign-in we wipe any local
+    /// data (so a previous account's optimistic writes can't leak) and start syncing.
+    private func refreshAuthUI() {
+        if auth.isAuthenticated {
+            window.contentViewController = captureVC
+            if !started {
+                started = true
+                Task {
+                    try? await model.store.resetLocalData()
+                    model.start()
+                    captureVC.focusCapture()
+                }
+            } else {
+                captureVC.focusCapture()
+            }
+        } else {
+            started = false
+            window.contentViewController = SignInViewController(auth: auth) { [weak self] in
+                self?.refreshAuthUI()
+            }
+        }
     }
 
     private func buildWindow() {
@@ -91,6 +123,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let updateItem = appMenu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
         updateItem.target = self
         appMenu.addItem(.separator())
+        let signOutItem = appMenu.addItem(withTitle: "Sign Out", action: #selector(signOut), keyEquivalent: "")
+        signOutItem.target = self
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Capture", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
 
@@ -118,6 +153,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func newCapture() { showMainWindow() }
 
     @objc private func checkForUpdates() { updater.checkForUpdates(nil) }
+
+    @objc private func signOut() {
+        Task {
+            await auth.signOut()
+            try? await model.store.resetLocalData()
+            refreshAuthUI()
+        }
+    }
 
     @objc private func openSettings() {
         if settingsWindow == nil {

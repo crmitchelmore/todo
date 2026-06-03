@@ -13,11 +13,18 @@ final class CapturePasteTextField: UITextField {
 }
 
 final class CaptureViewController: UIViewController, UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate {
-    private let viewModel = CaptureViewModel()
+    private let viewModel: CaptureViewModel
     private let captureField = CapturePasteTextField()
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
     private let filterBar = UIScrollView()
     private let filterStack = UIStackView()
+
+    init(viewModel: CaptureViewModel) {
+        self.viewModel = viewModel
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -26,12 +33,21 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         setupCaptureBar()
         setupFilterBar()
         setupTable()
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            title: "Sign Out", style: .plain, target: self, action: #selector(signOut))
 
         viewModel.onChange = { [weak self] in
             self?.rebuildFilterBar()
             self?.tableView.reloadData()
         }
         viewModel.start()
+    }
+
+    @objc private func signOut() {
+        Task {
+            await viewModel.auth.signOut()
+            try? await viewModel.store.resetLocalData()
+        }
     }
 
     private func setupCaptureBar() {

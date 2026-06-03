@@ -10,6 +10,7 @@ enum MacActiveRow {
 @MainActor
 final class MacViewModel {
     let store: TaskStore
+    let auth: AuthStore
     private(set) var proposed: [TaskItem] = []
     private(set) var active: [TaskItem] = []
     private(set) var allTags: [Tag] = []
@@ -20,8 +21,9 @@ final class MacViewModel {
     private var started = false
     private var tasks: [Task<Void, Never>] = []
 
-    init(store: TaskStore = TaskStore(config: .fromEnvironment())) {
-        self.store = store
+    init(auth: AuthStore, config: CaptureConfig = .fromEnvironment()) {
+        self.auth = auth
+        self.store = TaskStore(config: config, auth: auth)
     }
 
     /// Register a change observer. Multiple surfaces (main window, quick panel, status item)

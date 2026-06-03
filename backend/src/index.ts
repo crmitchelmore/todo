@@ -29,10 +29,15 @@ const JWT_ISSUER = process.env.JWT_ISSUER ?? 'capture';
 const JWT_AUDIENCE = process.env.JWT_AUDIENCE ?? 'powersync';
 const POWERSYNC_URL = process.env.POWERSYNC_PUBLIC_URL ?? 'http://localhost:8080';
 
-// Accepted audiences for Apple identity tokens: the native app bundle id and the web Services id.
-// Both flows yield the same Apple `sub` for a given user.
+// Accepted audiences for Apple identity tokens. Native tokens carry the app's bundle id as `aud`
+// (one per platform target); the web flow uses the Services id. APPLE_NATIVE_AUD may be a
+// comma-separated list so iOS + macOS builds are both accepted. To get a single shared user
+// across platforms, group the App IDs under one primary App ID for Sign in with Apple in the
+// developer portal so Apple issues the same `sub`.
 const APPLE_AUDIENCES = [
-  process.env.APPLE_NATIVE_AUD ?? 'dev.crmitchelmore.capture',
+  ...(process.env.APPLE_NATIVE_AUD ?? 'dev.crmitchelmore.capture.ios,dev.crmitchelmore.capture.mac')
+    .split(',')
+    .map((s) => s.trim()),
   process.env.APPLE_WEB_AUD ?? 'dev.crmitchelmore.capture.web',
 ].filter(Boolean);
 
