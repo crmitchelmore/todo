@@ -28,6 +28,9 @@ APP_STORE_CONNECT_KEY_PATH="${APP_STORE_CONNECT_KEY_PATH:-$HOME/.private_keys/Au
 APPLE_TEAM_ID="${APPLE_TEAM_ID:-8X4ZN58TYH}"
 VERSION="${VERSION:-$(cat "$ROOT_DIR/VERSION")}"
 BUILD_NUMBER="${BUILD_NUMBER:-$(date +%s)}"
+# Baked into Info.plist via the $(CAPTURE_API_SECRET) build setting so the app can
+# authenticate to the gated backend. Empty in local dev builds (talks to a local backend).
+CAPTURE_API_SECRET="${CAPTURE_API_SECRET:-}"
 
 : "${APP_STORE_CONNECT_ISSUER_ID:?Set APP_STORE_CONNECT_ISSUER_ID (App Store Connect API issuer UUID)}"
 [ -f "$APP_STORE_CONNECT_KEY_PATH" ] || { echo "API key not found: $APP_STORE_CONNECT_KEY_PATH" >&2; exit 1; }
@@ -53,7 +56,8 @@ GIT_CONFIG_COUNT=0 xcodebuild archive \
   -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
   DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
   MARKETING_VERSION="$VERSION" \
-  CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
+  CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+  CAPTURE_API_SECRET="$CAPTURE_API_SECRET"
 
 EXPORT_OPTIONS="$BUILD_DIR/ExportOptions.plist"
 cat > "$EXPORT_OPTIONS" <<PLIST
