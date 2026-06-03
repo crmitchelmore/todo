@@ -27,7 +27,7 @@ client_auth:
   # Allow the locally-hosted backend JWKS endpoint (http) to be used for token verification.
   allow_local_jwks: true
   jwks_uri: !env PS_JWKS_URL
-  audience: ["powersync-dev", "powersync"]
+  audience: ["powersync"]
 
 api:
   tokens:

@@ -1,60 +1,84 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
 import cors from 'cors';
 import pg from 'pg';
-import { generateKeyPair, exportJWK, SignJWT, type JWK } from 'jose';
-import { randomUUID, timingSafeEqual } from 'crypto';
+import { SignJWT } from 'jose';
+import { randomUUID } from 'crypto';
+import {
+  verifyAppleIdentityToken,
+  upsertUserForApple,
+  createSession,
+  lookupSession,
+  revokeSession,
+  loadSigningKey,
+} from './auth.js';
 
 /**
- * Capture backend connector (M1, single dev user).
+ * Capture backend connector (multi-user, Sign in with Apple).
  *
- * Responsibilities:
- *  - GET  /api/auth/keys   JWKS for the PowerSync service to verify client tokens.
- *  - GET  /api/auth/token  Mint a short-lived RS256 JWT + the PowerSync endpoint URL.
- *  - PUT  /api/data        Apply a batch of client CRUD ops to Postgres (the write path).
- *
- * The keypair is generated at startup (dev convenience) so no secrets are committed.
+ *  - POST /api/auth/apple  Exchange a verified Apple identity token for an opaque session token.
+ *  - POST /api/auth/logout Revoke the caller's session.
+ *  - GET  /api/auth/keys   JWKS so the PowerSync service can verify the per-user sync tokens.
+ *  - GET  /api/auth/token  Mint a short-lived per-user RS256 JWT + the PowerSync endpoint URL.
+ *  - PUT  /api/data        Apply a batch of client CRUD ops to Postgres (owner-scoped write path).
+ *  - POST /api/capture     Lightweight ingest for out-of-process surfaces (extensions/intents).
  */
 
 const PORT = Number(process.env.BACKEND_PORT ?? 6060);
 const DATABASE_URI = process.env.BACKEND_DATABASE_URI!;
-const JWT_ISSUER = process.env.JWT_ISSUER ?? 'capture-dev';
-const JWT_AUDIENCE = process.env.JWT_AUDIENCE ?? 'powersync-dev';
-const DEV_USER_ID = process.env.DEV_USER_ID ?? '00000000-0000-0000-0000-000000000001';
+const JWT_ISSUER = process.env.JWT_ISSUER ?? 'capture';
+const JWT_AUDIENCE = process.env.JWT_AUDIENCE ?? 'powersync';
 const POWERSYNC_URL = process.env.POWERSYNC_PUBLIC_URL ?? 'http://localhost:8080';
 
-const KID = 'capture-dev-key';
+// Accepted audiences for Apple identity tokens: the native app bundle id and the web Services id.
+// Both flows yield the same Apple `sub` for a given user.
+const APPLE_AUDIENCES = [
+  process.env.APPLE_NATIVE_AUD ?? 'dev.crmitchelmore.capture',
+  process.env.APPLE_WEB_AUD ?? 'dev.crmitchelmore.capture.web',
+].filter(Boolean);
 
-/**
- * Shared-secret gate. Every mutating / token-minting endpoint requires
- * `Authorization: Bearer <CAPTURE_API_SECRET>`. The secret is injected via env (never committed)
- * and embedded in the personal clients at build time. JWKS + health stay open: the PowerSync
- * service fetches JWKS over the private network to verify client JWTs, and Railway needs health.
- *
- * Fail-closed in production: refuse to boot an open backend if the secret is missing.
- */
-const API_SECRET = process.env.CAPTURE_API_SECRET;
-const IS_PRODUCTION = !!(process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production');
-if (IS_PRODUCTION && !API_SECRET) {
-  throw new Error(
-    'CAPTURE_API_SECRET is required in production — refusing to start with an unauthenticated backend.'
-  );
+const pool = new pg.Pool({ connectionString: DATABASE_URI });
+const { privateKey, publicJwk, kid } = await loadSigningKey();
+
+const app = express();
+app.use(cors());
+app.use(express.json({ limit: '5mb' }));
+
+// --- Auth middleware: opaque session token -> req.ownerId -------------------------------------
+
+interface AuthedRequest extends Request {
+  ownerId?: string;
+  sessionToken?: string;
 }
 
-function bearerMatches(header: string | undefined): boolean {
-  if (!API_SECRET) return true; // local dev: no secret configured => open
-  if (!header || !header.startsWith('Bearer ')) return false;
-  const provided = Buffer.from(header.slice('Bearer '.length));
-  const expected = Buffer.from(API_SECRET);
-  if (provided.length !== expected.length) return false;
-  return timingSafeEqual(provided, expected);
+function bearer(req: Request): string | undefined {
+  const h = req.header('authorization');
+  if (!h || !h.startsWith('Bearer ')) return undefined;
+  const t = h.slice('Bearer '.length).trim();
+  return t || undefined;
 }
 
-function requireSecret(req: Request, res: Response, next: NextFunction): void {
-  if (bearerMatches(req.header('authorization'))) return next();
-  res.status(401).json({ ok: false, error: 'unauthorized' });
+async function requireAuth(req: AuthedRequest, res: Response, next: NextFunction): Promise<void> {
+  const token = bearer(req);
+  if (!token) {
+    res.status(401).json({ ok: false, error: 'unauthorized' });
+    return;
+  }
+  try {
+    const userId = await lookupSession(pool, token);
+    if (!userId) {
+      res.status(401).json({ ok: false, error: 'unauthorized' });
+      return;
+    }
+    req.ownerId = userId;
+    req.sessionToken = token;
+    next();
+  } catch (err) {
+    console.error('session lookup failed:', err);
+    res.status(500).json({ ok: false, error: 'auth error' });
+  }
 }
 
-// --- Write-path safety: only these tables/columns may be mutated by clients. -----------------
+// --- Write-path safety: only these tables/columns may be mutated by clients. ------------------
 const ALLOWED_COLUMNS: Record<string, Set<string>> = {
   tasks: new Set([
     'id', 'owner_id', 'title', 'notes', 'status', 'category', 'tags', 'due_at', 'priority',
@@ -66,25 +90,50 @@ const ALLOWED_COLUMNS: Record<string, Set<string>> = {
   ])
 };
 
-const pool = new pg.Pool({ connectionString: DATABASE_URI });
-
-const { publicKey, privateKey } = await generateKeyPair('RS256', { extractable: true });
-const publicJwk: JWK = { ...(await exportJWK(publicKey)), kid: KID, alg: 'RS256', use: 'sig' };
-
-const app = express();
-app.use(cors());
-app.use(express.json({ limit: '5mb' }));
-
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 app.get('/api/auth/keys', (_req, res) => {
   res.json({ keys: [publicJwk] });
 });
 
-app.get('/api/auth/token', requireSecret, async (_req, res) => {
+/**
+ * Exchange a verified Apple identity token for an opaque session token. Public endpoint: anyone
+ * may attempt, but they must present an Apple-signed token for one of our client audiences.
+ */
+app.post('/api/auth/apple', async (req: Request, res: Response) => {
+  const identityToken: unknown = req.body?.identity_token;
+  const nonce: string | undefined =
+    typeof req.body?.nonce === 'string' ? req.body.nonce : undefined;
+  const client: string | null =
+    typeof req.body?.client === 'string' ? req.body.client.slice(0, 32) : null;
+  if (typeof identityToken !== 'string' || !identityToken) {
+    return res.status(400).json({ ok: false, error: 'identity_token required' });
+  }
+  try {
+    const claims = await verifyAppleIdentityToken(identityToken, APPLE_AUDIENCES, nonce);
+    const userId = await upsertUserForApple(pool, claims.sub, claims.email);
+    const sessionToken = await createSession(pool, userId, client);
+    res.json({ ok: true, session_token: sessionToken, user_id: userId });
+  } catch (err) {
+    console.error('apple auth failed:', err);
+    res.status(401).json({ ok: false, error: 'invalid apple token' });
+  }
+});
+
+app.post('/api/auth/logout', requireAuth, async (req: AuthedRequest, res: Response) => {
+  try {
+    if (req.sessionToken) await revokeSession(pool, req.sessionToken);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('logout failed:', err);
+    res.status(500).json({ ok: false, error: 'logout failed' });
+  }
+});
+
+app.get('/api/auth/token', requireAuth, async (req: AuthedRequest, res: Response) => {
   const token = await new SignJWT({})
-    .setProtectedHeader({ alg: 'RS256', kid: KID })
-    .setSubject(DEV_USER_ID)
+    .setProtectedHeader({ alg: 'RS256', kid })
+    .setSubject(req.ownerId!)
     .setIssuer(JWT_ISSUER)
     .setAudience(JWT_AUDIENCE)
     .setIssuedAt()
@@ -109,39 +158,52 @@ function sanitize(table: string, data: Record<string, unknown>): Record<string, 
   return out;
 }
 
-async function applyOp(client: pg.PoolClient, op: CrudOp): Promise<void> {
+/**
+ * Apply one CRUD op, owner-scoped. Cross-owner ops are denied by the `owner_id` filter, which
+ * makes them a silent no-op rather than an error: throwing here would roll back the whole upload
+ * batch and wedge PowerSync's retry loop (the failure mode behind the earlier confirm-revert bug).
+ * The security guarantee is structural — a client can never overwrite or delete a row it does not
+ * own — without making sync brittle.
+ */
+async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Promise<void> {
   const table = op.type;
   if (!ALLOWED_COLUMNS[table]) throw new Error(`table not allowed: ${table}`);
 
   if (op.op === 'DELETE') {
-    await client.query(`DELETE FROM ${table} WHERE id = $1`, [op.id]);
+    await client.query(`DELETE FROM ${table} WHERE id = $1 AND owner_id = $2`, [op.id, ownerId]);
     return;
   }
 
-  // Force identity fields server-side: client never sets a foreign owner.
-  const data = sanitize(table, { ...(op.data ?? {}), id: op.id, owner_id: DEV_USER_ID });
+  // Identity fields are forced server-side: the client can never set a foreign owner.
+  const data = sanitize(table, { ...(op.data ?? {}), id: op.id, owner_id: ownerId });
 
   if (op.op === 'PUT') {
     const cols = Object.keys(data);
     const vals = Object.values(data);
     const placeholders = cols.map((_, i) => `$${i + 1}`);
+    // owner_id is immutable on update; the WHERE guard prevents overwriting another user's row.
     const updates = cols
-      .filter((c) => c !== 'id')
+      .filter((c) => c !== 'id' && c !== 'owner_id')
       .map((c) => `${c} = EXCLUDED.${c}`);
+    const ownerParam = `$${vals.length + 1}`;
     const sql =
       `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) ` +
-      `ON CONFLICT (id) DO UPDATE SET ${updates.join(', ')}`;
-    await client.query(sql, vals);
+      `ON CONFLICT (id) DO UPDATE SET ${updates.join(', ')} ` +
+      `WHERE ${table}.owner_id = ${ownerParam}`;
+    await client.query(sql, [...vals, ownerId]);
     return;
   }
 
   if (op.op === 'PATCH') {
-    const cols = Object.keys(data).filter((c) => c !== 'id');
+    const cols = Object.keys(data).filter((c) => c !== 'id' && c !== 'owner_id');
     if (cols.length === 0) return;
     const setClause = cols.map((c, i) => `${c} = $${i + 1}`).join(', ');
     const vals = cols.map((c) => data[c]);
-    vals.push(op.id);
-    await client.query(`UPDATE ${table} SET ${setClause} WHERE id = $${vals.length}`, vals);
+    vals.push(op.id, ownerId);
+    await client.query(
+      `UPDATE ${table} SET ${setClause} WHERE id = $${vals.length - 1} AND owner_id = $${vals.length}`,
+      vals
+    );
     return;
   }
 }
@@ -151,13 +213,12 @@ async function applyOp(client: pg.PoolClient, op: CrudOp): Promise<void> {
  * App Intents, the macOS hotkey when run headless). These cannot safely open the app's PowerSync
  * SQLite DB, so they POST a raw capture here and the row syncs back to every client as `proposed`.
  *
- * Idempotent on the client-generated `id` so retries are safe. Always forced to status=proposed —
- * extensions can never create or mutate a real (confirmed/active) todo. The enrichment worker
- * fills in the suggestion fields afterwards.
+ * Idempotent on the client-generated `id`. Always forced to status=proposed and to the caller's
+ * own `owner_id` — extensions can never create or mutate a real todo, or write for another user.
  */
 const CAPTURE_SOURCES = new Set(['share-extension', 'app-intent', 'mac-hotkey', 'capture', 'siri']);
 
-app.post('/api/capture', requireSecret, async (req, res) => {
+app.post('/api/capture', requireAuth, async (req: AuthedRequest, res: Response) => {
   const body = req.body ?? {};
   const id: string = typeof body.id === 'string' && body.id ? body.id : randomUUID();
   const rawText: string = (body.raw_text ?? body.title ?? '').toString().trim();
@@ -175,7 +236,7 @@ app.post('/api/capture', requireSecret, async (req, res) => {
        VALUES ($1, $2, $3, $4, 'proposed', $5)
        ON CONFLICT (id) DO NOTHING
        RETURNING id`,
-      [id, DEV_USER_ID, title, notes, source]
+      [id, req.ownerId, title, notes, source]
     );
     res.json({ ok: true, id, created: (result.rowCount ?? 0) > 0 });
   } catch (err) {
@@ -184,12 +245,13 @@ app.post('/api/capture', requireSecret, async (req, res) => {
   }
 });
 
-app.put('/api/data', requireSecret, async (req, res) => {
+app.put('/api/data', requireAuth, async (req: AuthedRequest, res: Response) => {
   const ops: CrudOp[] = req.body?.ops ?? [];
+  const ownerId = req.ownerId!;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    for (const op of ops) await applyOp(client, op);
+    for (const op of ops) await applyOp(client, op, ownerId);
     await client.query('COMMIT');
     res.json({ ok: true, applied: ops.length });
   } catch (err) {
@@ -202,5 +264,5 @@ app.put('/api/data', requireSecret, async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`capture-backend listening on :${PORT} (user ${DEV_USER_ID})`);
+  console.log(`capture-backend listening on :${PORT} (multi-user)`);
 });

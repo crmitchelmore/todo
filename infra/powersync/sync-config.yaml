@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://unpkg.com/@powersync/service-sync-rules@latest/schema/sync_rules.json
 # Sync rules for the Capture stack.
-# M1 is single-user (dev): sync the whole tasks table. Per-user bucketing is tracked in bead
-# cap-ale (Backend auth & per-user sync rules).
+# Multi-user: each client only syncs the rows it owns. `auth.user_id()` is the JWT `sub`, which
+# the backend sets to the user's internal id (== owner_id) when minting the per-user sync token.
 #
 # Changes here require a PowerSync service restart to take effect.
 
@@ -12,8 +12,8 @@ streams:
   tasks:
     auto_subscribe: true
     queries:
-      - SELECT * FROM tasks
+      - SELECT * FROM tasks WHERE owner_id = auth.user_id()
   tags:
     auto_subscribe: true
     queries:
-      - SELECT * FROM tags
+      - SELECT * FROM tags WHERE owner_id = auth.user_id()
