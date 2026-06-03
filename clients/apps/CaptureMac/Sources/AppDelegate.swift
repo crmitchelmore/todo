@@ -9,6 +9,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController?
     private var window: NSWindow!
     private var hotKey: GlobalHotKey?
+    private let hotKeyStore = HotKeyStore()
+    private var settingsWindow: SettingsWindowController?
+    private var quickAppMenuItem: NSMenuItem?
     private let updater = UpdaterController.shared   // starts Sparkle scheduled checks
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -22,8 +25,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onOpenMain: { [weak self] in self?.showMainWindow() }
         )
 
-        // ⌥Space from anywhere → Spotlight-style quick capture (does not steal focus context).
-        hotKey = GlobalHotKey { [weak self] in self?.quick.toggle() }
+        // Configurable global hotkey (default ⌥Space) from anywhere → Spotlight-style quick
+        // capture (does not steal focus context).
+        hotKey = GlobalHotKey(hotKey: hotKeyStore.hotKey) { [weak self] in self?.quick.toggle() }
+        statusItemController?.setShortcutDisplay(hotKeyStore.hotKey.displayString)
         if hotKey?.isRegistered == false {
             NSLog("[Capture] global hotkey registration failed; use the menu bar item to capture.")
         }
@@ -70,15 +75,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appItem = NSMenuItem()
         mainMenu.addItem(appItem)
         let appMenu = NSMenu()
-        let quickItem = appMenu.addItem(withTitle: "Quick Capture", action: #selector(quickCapture), keyEquivalent: " ")
-        quickItem.keyEquivalentModifierMask = [.option]
+        let quickItem = appMenu.addItem(withTitle: quickCaptureTitle(for: hotKeyStore.hotKey), action: #selector(quickCapture), keyEquivalent: "")
+        quickAppMenuItem = quickItem
         appMenu.addItem(withTitle: "Open Capture", action: #selector(newCapture), keyEquivalent: "n")
+        appMenu.addItem(.separator())
+        let settingsItem = appMenu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
         appMenu.addItem(.separator())
         let updateItem = appMenu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
         updateItem.target = self
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Capture", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
+
+        // Standard Edit menu so the text fields get Cut/Copy/Paste/Select All and the
+        // system keyboard shortcuts (⌘X/⌘C/⌘V/⌘A) reach the first responder.
+        let editItem = NSMenuItem()
+        mainMenu.addItem(editItem)
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        let redo = editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Delete", action: #selector(NSText.delete(_:)), keyEquivalent: "")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editItem.submenu = editMenu
+
         NSApp.mainMenu = mainMenu
     }
 
@@ -87,4 +112,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func newCapture() { showMainWindow() }
 
     @objc private func checkForUpdates() { updater.checkForUpdates(nil) }
+
+    @objc private func openSettings() {
+        if settingsWindow == nil {
+            settingsWindow = SettingsWindowController(store: hotKeyStore) { [weak self] newHotKey in
+                self?.applyHotKey(newHotKey)
+            }
+        }
+        settingsWindow?.show()
+    }
+
+    /// Re-register the global hotkey live; only persist + show the new shortcut if the
+    /// system accepted it, otherwise keep the previous working combination.
+    private func applyHotKey(_ newHotKey: HotKey) {
+        guard hotKey?.update(to: newHotKey) ?? false else {
+            NSLog("[Capture] hotkey \(newHotKey.displayString) unavailable; keeping \(hotKeyStore.hotKey.displayString)")
+            return
+        }
+        hotKeyStore.hotKey = newHotKey
+        quickAppMenuItem?.title = quickCaptureTitle(for: newHotKey)
+        statusItemController?.setShortcutDisplay(newHotKey.displayString)
+    }
+
+    private func quickCaptureTitle(for hotKey: HotKey) -> String {
+        "Quick Capture  (\(hotKey.displayString))"
+    }
 }

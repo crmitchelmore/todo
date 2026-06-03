@@ -8,6 +8,7 @@ final class StatusItemController: NSObject {
     private let statusItem: NSStatusItem
     private let onQuickCapture: () -> Void
     private let onOpenMain: () -> Void
+    private var quickMenuItem: NSMenuItem?
 
     init(
         viewModel: MacViewModel,
@@ -34,11 +35,13 @@ final class StatusItemController: NSObject {
 
     private func buildMenu() {
         let menu = NSMenu()
-        menu.addItem(
-            withTitle: "Quick Capture  (⌥Space)",
+        let quick = menu.addItem(
+            withTitle: "Quick Capture",
             action: #selector(quickCapture),
             keyEquivalent: ""
-        ).target = self
+        )
+        quick.target = self
+        quickMenuItem = quick
         menu.addItem(
             withTitle: "Open Capture…",
             action: #selector(openMain),
@@ -51,6 +54,11 @@ final class StatusItemController: NSObject {
             keyEquivalent: "q"
         )
         statusItem.menu = menu
+    }
+
+    /// Update the Quick Capture menu item to show the currently configured shortcut.
+    func setShortcutDisplay(_ shortcut: String) {
+        quickMenuItem?.title = "Quick Capture  (\(shortcut))"
     }
 
     private func refresh() {
