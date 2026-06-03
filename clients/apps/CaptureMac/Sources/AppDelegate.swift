@@ -1,7 +1,6 @@
 import AppKit
 import CaptureCore
 
-@main
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let model = MacViewModel()            // single shared store / PowerSync instance
@@ -52,6 +51,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
+
+    // App stays alive in the menu bar after the window is closed. Re-show the main window when the
+    // user reactivates via Dock click or ⌘-Tab, otherwise reactivation looks like nothing happens.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { showMainWindow() }
+        return true
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        if NSApp.windows.allSatisfy({ !$0.isVisible }) { showMainWindow() }
+    }
 
     private func buildMenu() {
         let mainMenu = NSMenu()
