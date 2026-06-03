@@ -91,29 +91,41 @@ def call(method: str, path: str, body=None):
 
 
 def bundle_resource_id() -> str:
-    status, data = call("GET", f"/bundleIds?filter[identifier]={BUNDLE_ID}&limit=1")
+    status, data = call(
+        "GET",
+        f"/bundleIds?filter[identifier]={BUNDLE_ID}&include=bundleIdCapabilities&limit=1",
+    )
     if status != 200 or not data.get("data"):
         sys.exit(f"bundleId {BUNDLE_ID} not found in portal: {status} {json.dumps(data)}")
-    return data["data"][0]["id"]
-
-
-def assert_siwa_enabled(bundle_res: str) -> None:
-    status, data = call("GET", f"/bundleIds/{bundle_res}/bundleIdCapabilities?limit=50")
-    caps = [c.get("attributes", {}).get("capabilityType") for c in data.get("data", [])]
+    caps = [
+        i["attributes"].get("capabilityType")
+        for i in data.get("included", [])
+        if i.get("type") == "bundleIdCapabilities"
+    ]
     if "APPLE_ID_AUTH" not in caps:
         sys.exit(
             f"Sign in with Apple (APPLE_ID_AUTH) is NOT enabled on {BUNDLE_ID}. "
             f"Enable it in the Apple Developer portal first. Capabilities seen: {caps}"
         )
     print(f"  Sign in with Apple capability present on {BUNDLE_ID}")
+    return data["data"][0]["id"]
 
 
 def developer_id_cert_ids() -> list:
-    status, data = call(
-        "GET", "/certificates?filter[certificateType]=DEVELOPER_ID_APPLICATION&limit=50")
-    if status != 200 or not data.get("data"):
-        sys.exit(f"No DEVELOPER_ID_APPLICATION certificate found: {status} {json.dumps(data)}")
-    return [c["id"] for c in data["data"]]
+    # The Developer ID Application certificate may be the original type or the newer G2 type.
+    status, data = call("GET", "/certificates?limit=200")
+    if status != 200:
+        sys.exit(f"could not list certificates: {status} {json.dumps(data)}")
+    ids = [
+        c["id"]
+        for c in data.get("data", [])
+        if (c.get("attributes", {}).get("certificateType") or "").startswith(
+            "DEVELOPER_ID_APPLICATION"
+        )
+    ]
+    if not ids:
+        sys.exit("No Developer ID Application certificate (or G2) found in the account.")
+    return ids
 
 
 def find_existing_profile():
@@ -157,7 +169,6 @@ def create_profile(bundle_res: str, cert_ids: list):
 def main():
     print(f"Provisioning {PROFILE_TYPE} profile '{PROFILE_NAME}' for {BUNDLE_ID}...")
     bundle_res = bundle_resource_id()
-    assert_siwa_enabled(bundle_res)
 
     prof = find_existing_profile()
     if prof:
