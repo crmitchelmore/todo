@@ -31,14 +31,16 @@ final class SignInViewController: NSViewController {
 
     override func loadView() {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 620))
+        Theme.paintInk(container)
 
         let title = NSTextField(labelWithString: "Capture")
-        title.font = .systemFont(ofSize: 34, weight: .bold)
+        title.font = Theme.display(40, .heavy)
+        title.textColor = Theme.signal
         title.alignment = .center
 
-        let subtitle = NSTextField(labelWithString: "Sign in to sync your todos across your devices.")
+        let subtitle = NSTextField(labelWithString: "An instrument for thought. Sign in to sync across your devices.")
         subtitle.font = .systemFont(ofSize: 14)
-        subtitle.textColor = .secondaryLabelColor
+        subtitle.textColor = Theme.textSecondary
         subtitle.alignment = .center
 
         segmented.selectedSegment = 0
@@ -61,13 +63,14 @@ final class SignInViewController: NSViewController {
         submit.keyEquivalent = "\r"
         submit.target = self
         submit.action = #selector(submitTapped)
+        Theme.primary(submit, fontSize: 15)
 
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
 
-        status.font = .systemFont(ofSize: 12)
-        status.textColor = .systemRed
+        status.font = Theme.mono(12)
+        status.textColor = Theme.danger
         status.alignment = .center
         status.maximumNumberOfLines = 3
         status.isHidden = true
@@ -91,6 +94,7 @@ final class SignInViewController: NSViewController {
     @objc private func modeChanged() {
         mode = segmented.selectedSegment == 0 ? .signIn : .register
         submit.title = mode == .signIn ? "Sign In" : "Create Account"
+        Theme.primary(submit, fontSize: 15)
         status.isHidden = true
     }
 

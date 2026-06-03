@@ -28,6 +28,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     ) {
         guard let windowScene = scene as? UIWindowScene else { return }
         let window = UIWindow(windowScene: windowScene)
+        window.overrideUserInterfaceStyle = .dark   // ink-canvas design language, app-wide
+        window.tintColor = Theme.signal
         self.window = window
 
         // Swap the root between the sign-in gate and the capture UI as the auth state changes.

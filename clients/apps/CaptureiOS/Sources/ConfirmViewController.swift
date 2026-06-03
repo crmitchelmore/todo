@@ -29,15 +29,15 @@ final class ConfirmViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Confirm"
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = Theme.ink
 
         navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Reject", style: .plain, target: self, action: #selector(reject))
-        navigationItem.leftBarButtonItem?.tintColor = .systemRed
+        navigationItem.leftBarButtonItem?.tintColor = Theme.danger
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Confirm", style: .done, target: self, action: #selector(confirm))
 
         titleField.text = item.title
         titleField.borderStyle = .roundedRect
-        titleField.font = .systemFont(ofSize: 18, weight: .semibold)
+        titleField.font = Theme.display(18, .semibold)
 
         datePicker.datePickerMode = .dateAndTime
         datePicker.preferredDatePickerStyle = .compact
@@ -76,9 +76,9 @@ final class ConfirmViewController: UIViewController {
 
     private func label(_ text: String) -> UILabel {
         let l = UILabel()
-        l.text = text
-        l.font = .systemFont(ofSize: 13, weight: .medium)
-        l.textColor = .secondaryLabel
+        l.text = text.uppercased()
+        l.font = Theme.mono(12, .semibold)
+        l.textColor = Theme.textTertiary
         return l
     }
 

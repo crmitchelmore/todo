@@ -20,6 +20,7 @@ final class MacCaptureViewController: NSViewController {
 
     override func loadView() {
         view = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 620))
+        Theme.paintInk(view)
     }
 
     override func viewDidLoad() {
@@ -52,18 +53,20 @@ final class MacCaptureViewController: NSViewController {
 
     private func buildUI() {
         captureField.placeholderString = "Capture anything…  (⌥Space to summon)"
-        captureField.font = .systemFont(ofSize: 18)
+        captureField.font = Theme.display(18, .medium)
+        captureField.textColor = Theme.textPrimary
         captureField.target = self
         captureField.action = #selector(captureSubmit)
         captureField.bezelStyle = .roundedBezel
+        captureField.focusRingType = .none
         captureField.translatesAutoresizingMaskIntoConstraints = false
 
-        proposedHeader.font = .systemFont(ofSize: 11, weight: .semibold)
-        proposedHeader.textColor = .secondaryLabelColor
+        proposedHeader.font = Theme.mono(11, .semibold)
+        proposedHeader.textColor = Theme.signal
         proposedHeader.translatesAutoresizingMaskIntoConstraints = false
 
-        activeHeader.font = .systemFont(ofSize: 11, weight: .semibold)
-        activeHeader.textColor = .secondaryLabelColor
+        activeHeader.font = Theme.mono(11, .semibold)
+        activeHeader.textColor = Theme.textTertiary
         activeHeader.translatesAutoresizingMaskIntoConstraints = false
 
         filterBar.orientation = .horizontal
@@ -160,6 +163,7 @@ final class MacCaptureViewController: NSViewController {
         proposedHeader.stringValue = viewModel.proposed.isEmpty
             ? "NOTHING TO CONFIRM"
             : "NEEDS CONFIRMING · \(viewModel.proposed.count)"
+        proposedHeader.textColor = viewModel.proposed.isEmpty ? Theme.textTertiary : Theme.signal
         let filtered = viewModel.filteredActiveCount
         activeHeader.stringValue = viewModel.tagFilter.isEmpty
             ? "ACTIVE · \(filtered)"

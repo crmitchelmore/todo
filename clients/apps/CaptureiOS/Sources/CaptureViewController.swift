@@ -29,7 +29,7 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Capture"
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = Theme.ink
         setupCaptureBar()
         setupFilterBar()
         setupTable()
@@ -124,6 +124,7 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
     private func setupTable() {
         tableView.dataSource = self
         tableView.delegate = self
+        tableView.backgroundColor = Theme.ink
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "cell")
         tableView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(tableView)
@@ -169,18 +170,26 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "cell", for: indexPath)
+        cell.backgroundColor = Theme.surface
         var config = cell.defaultContentConfiguration()
         if indexPath.section == 0 {
             let item = viewModel.proposed[indexPath.row]
             config.text = item.title
+            config.textProperties.font = Theme.display(16, .semibold)
             config.secondaryText = proposalHint(item)
-            config.secondaryTextProperties.color = .systemBlue
+            config.secondaryTextProperties.color = Theme.signal
+            config.secondaryTextProperties.font = Theme.mono(12)
             cell.accessoryType = .disclosureIndicator
+            cell.tintColor = Theme.signal
         } else {
             let item = activeGroup(for: indexPath.section).items[indexPath.row]
             config.text = item.title
+            config.textProperties.font = Theme.display(16, .regular)
             config.secondaryText = activeSubtitle(item)
+            config.secondaryTextProperties.color = Theme.textTertiary
+            config.secondaryTextProperties.font = Theme.mono(12)
             cell.accessoryType = item.status == .done ? .checkmark : .none
+            cell.tintColor = Theme.mint
         }
         cell.contentConfiguration = config
         return cell
@@ -214,7 +223,7 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
             self?.presentDateEditor(for: item)
             done(true)
         }
-        date.backgroundColor = .systemIndigo
+        date.backgroundColor = Theme.iris
         return UISwipeActionsConfiguration(actions: [date])
     }
 

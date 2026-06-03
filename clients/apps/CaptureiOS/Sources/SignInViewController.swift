@@ -29,17 +29,18 @@ final class SignInViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = Theme.ink
 
         let title = UILabel()
         title.text = "Capture"
-        title.font = .systemFont(ofSize: 34, weight: .bold)
+        title.font = Theme.display(40, .heavy)
+        title.textColor = Theme.signal
         title.textAlignment = .center
 
         let subtitle = UILabel()
-        subtitle.text = "Sign in to sync your todos across your devices."
+        subtitle.text = "An instrument for thought. Sign in to sync across your devices."
         subtitle.font = .systemFont(ofSize: 15)
-        subtitle.textColor = .secondaryLabel
+        subtitle.textColor = Theme.textSecondary
         subtitle.textAlignment = .center
         subtitle.numberOfLines = 0
 
@@ -62,14 +63,12 @@ final class SignInViewController: UIViewController {
 
         submit.setTitle("Sign In", for: .normal)
         submit.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
-        submit.backgroundColor = .label
-        submit.setTitleColor(.systemBackground, for: .normal)
-        submit.layer.cornerRadius = 10
+        Theme.primary(submit)
         submit.addTarget(self, action: #selector(submitTapped), for: .touchUpInside)
         submit.translatesAutoresizingMaskIntoConstraints = false
 
-        status.font = .systemFont(ofSize: 13)
-        status.textColor = .systemRed
+        status.font = Theme.mono(13)
+        status.textColor = Theme.danger
         status.textAlignment = .center
         status.numberOfLines = 0
         status.isHidden = true

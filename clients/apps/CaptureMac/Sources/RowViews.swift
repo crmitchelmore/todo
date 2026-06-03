@@ -74,15 +74,16 @@ final class ProposedRowView: NSTableCellView {
 
     private func build(_ item: TaskItem, color: @escaping (String) -> String) {
         let title = NSTextField(labelWithString: item.title)
-        title.font = .systemFont(ofSize: 14, weight: .semibold)
+        title.font = Theme.display(14, .semibold)
+        title.textColor = Theme.textPrimary
         title.lineBreakMode = .byTruncatingTail
 
         var hintParts: [String] = []
         if let due = item.suggestedDueAt { hintParts.append(DueFormatter.short(due)) }
         if let cat = item.suggestedCategory { hintParts.append(cat) }
-        let hint = NSTextField(labelWithString: hintParts.isEmpty ? "no suggestion yet" : "suggested: " + hintParts.joined(separator: " · "))
-        hint.font = .systemFont(ofSize: 11)
-        hint.textColor = .systemBlue
+        let hint = NSTextField(labelWithString: hintParts.isEmpty ? "no suggestion yet" : "suggested · " + hintParts.joined(separator: " · "))
+        hint.font = Theme.mono(11)
+        hint.textColor = hintParts.isEmpty ? Theme.textTertiary : Theme.signal
 
         let textStack = NSStackView(views: [title, hint])
         textStack.orientation = .vertical
@@ -92,8 +93,9 @@ final class ProposedRowView: NSTableCellView {
 
         let confirm = NSButton(title: "Confirm", target: self, action: #selector(confirmTapped))
         confirm.keyEquivalent = "\r"
-        confirm.bezelColor = .controlAccentColor
+        Theme.primary(confirm)
         let reject = NSButton(title: "✕", target: self, action: #selector(rejectTapped))
+        reject.contentTintColor = Theme.textTertiary
 
         let row = NSStackView(views: [textStack, NSView(), reject, confirm])
         row.orientation = .horizontal
@@ -131,22 +133,24 @@ final class ActiveRowView: NSTableCellView {
     private func build(_ item: TaskItem, color: @escaping (String) -> String) {
         let check = NSButton(checkboxWithTitle: "", target: self, action: #selector(toggled(_:)))
         check.state = item.status == .done ? .on : .off
+        check.contentTintColor = Theme.mint
 
         let title = NSTextField(labelWithString: item.title)
-        title.font = .systemFont(ofSize: 13)
+        title.font = Theme.display(13, .regular)
+        title.textColor = item.status == .done ? Theme.textTertiary : Theme.textPrimary
         title.lineBreakMode = .byTruncatingTail
 
         let cat = NSTextField(labelWithString: item.category ?? "")
-        cat.font = .systemFont(ofSize: 11)
-        cat.textColor = .secondaryLabelColor
+        cat.font = Theme.mono(11)
+        cat.textColor = Theme.textTertiary
 
         // Editable due: click to open presets + a date picker.
         let dueTitle = item.dueAt.map { DueFormatter.short($0) } ?? "+ date"
         let due = NSButton(title: dueTitle, target: self, action: #selector(editDue(_:)))
         due.bezelStyle = .inline
         due.controlSize = .small
-        due.font = .systemFont(ofSize: 11)
-        if item.dueAt == nil { due.contentTintColor = .tertiaryLabelColor }
+        due.font = Theme.mono(11)
+        due.contentTintColor = item.dueAt == nil ? Theme.textTertiary : Theme.signal
 
         var views: [NSView] = [check, title, NSView()]
         if !(item.category ?? "").isEmpty { views.append(cat) }
@@ -182,8 +186,8 @@ final class DateBucketHeaderView: NSTableCellView {
     init(label: String, count: Int) {
         super.init(frame: .zero)
         let title = NSTextField(labelWithString: "\(label.uppercased())  ·  \(count)")
-        title.font = .systemFont(ofSize: 11, weight: .semibold)
-        title.textColor = label == "Overdue" ? .systemRed : .secondaryLabelColor
+        title.font = Theme.mono(11, .semibold)
+        title.textColor = label == "Overdue" ? Theme.danger : Theme.textTertiary
         title.translatesAutoresizingMaskIntoConstraints = false
         addSubview(title)
         NSLayoutConstraint.activate([

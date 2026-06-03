@@ -51,7 +51,8 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate {
         blur.translatesAutoresizingMaskIntoConstraints = false
 
         field.placeholderString = "Capture anything…"
-        field.font = .systemFont(ofSize: 24, weight: .regular)
+        field.font = Theme.display(24, .medium)
+        field.textColor = Theme.textPrimary
         field.isBezeled = false
         field.drawsBackground = false
         field.focusRingType = .none
@@ -60,8 +61,8 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate {
         field.action = #selector(submit)
         field.translatesAutoresizingMaskIntoConstraints = false
 
-        hint.font = .systemFont(ofSize: 11, weight: .medium)
-        hint.textColor = .tertiaryLabelColor
+        hint.font = Theme.mono(11, .medium)
+        hint.textColor = Theme.textTertiary
         hint.translatesAutoresizingMaskIntoConstraints = false
 
         let content = NSView()
