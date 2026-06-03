@@ -110,6 +110,25 @@ jobs:
           security list-keychain -d user -s "$KEYCHAIN_PATH"
           rm -f "$CERT_PATH"
 
+      - name: Create & Install Developer ID Provisioning Profile (Sign in with Apple)
+        env:
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+        run: |
+          # Sign in with Apple is a restricted entitlement: a Developer ID Mac app must embed a
+          # provisioning profile that authorises com.apple.developer.applesignin, or sign-in fails
+          # at runtime. Generate (or refresh) a MAC_APP_DIRECT profile via the ASC API and install it
+          # where xcodebuild can find it by name.
+          python3 -m pip install --quiet --break-system-packages pyjwt cryptography || \
+            python3 -m pip install --quiet pyjwt cryptography
+          PROFILES_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$PROFILES_DIR"
+          OUTPUT_PATH="$PROFILES_DIR/CaptureMac_DeveloperID.provisionprofile" \
+          APP_STORE_CONNECT_KEY_PATH="$HOME/.private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8" \
+            python3 scripts/mac-provision.py | tee /tmp/prov.txt
+          PROFILE_NAME=$(grep '^PROFILE_NAME=' /tmp/prov.txt | cut -d= -f2-)
+          echo "MAC_PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+
       - name: Build & Sign Archive (Developer ID, hardened runtime)
         env:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -118,6 +137,7 @@ jobs:
           # Sign during archive so Xcode signs the app AND all nested Sparkle
           # helpers (Autoupdate, Updater.app, XPC services) inside-out with the
           # hardened runtime — exportArchive does not reliably apply runtime.
+          # PROVISIONING_PROFILE_SPECIFIER embeds the Sign in with Apple profile.
           # CAPTURE_API_SECRET is baked into Info.plist via the $(CAPTURE_API_SECRET)
           # build setting so the app can authenticate to the gated backend.
           xcodebuild archive \
@@ -128,6 +148,7 @@ jobs:
             -destination "generic/platform=macOS" \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="Developer ID Application" \
+            PROVISIONING_PROFILE_SPECIFIER="$MAC_PROFILE_NAME" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
             ENABLE_HARDENED_RUNTIME=YES \
             CAPTURE_API_SECRET="$CAPTURE_API_SECRET" \
@@ -172,7 +193,20 @@ jobs:
           done < <(find "$FW" -type f \( -name Autoupdate -o -name Updater -o -name Installer -o -name Downloader \))
           codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
-      - name: Notarize & Staple
+      - name: Verify Sign in with Apple Provisioning
+        run: |
+          # Fail fast unless the app embeds a provisioning profile that authorises Sign in with Apple
+          # for our bundle id — otherwise sign-in fails only at runtime on users' machines.
+          PROFILE="$APP_PATH/Contents/embedded.provisionprofile"
+          [ -f "$PROFILE" ] || { echo "::error::embedded.provisionprofile missing — Sign in with Apple will fail at runtime"; exit 1; }
+          PLIST=$(security cms -D -i "$PROFILE" 2>/dev/null)
+          echo "$PLIST" | grep -q "com.apple.developer.applesignin" \
+            || { echo "::error::embedded profile does not authorise com.apple.developer.applesignin"; exit 1; }
+          echo "$PLIST" | grep -q "$BUNDLE_ID" \
+            || { echo "::error::embedded profile is not for $BUNDLE_ID"; exit 1; }
+          echo "✓ embedded.provisionprofile authorises Sign in with Apple for $BUNDLE_ID"
+          codesign -d --entitlements :- "$APP_PATH" 2>/dev/null | grep -q "applesignin" \
+            || { echo "::error::signed entitlements missing applesignin"; exit 1; }
         env:
           KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
