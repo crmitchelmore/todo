@@ -5,14 +5,33 @@ import { formatDue } from '../lib/format';
 import { TagChips } from './TagChips';
 import { RowDue } from './DueEditor';
 
-export function TaskRow({ task }: { task: TaskRecord }) {
+export function TaskRow({
+  task,
+  selected = false,
+  onSelect,
+}: {
+  task: TaskRecord;
+  selected?: boolean;
+  onSelect?: (task: TaskRecord) => void;
+}) {
   const done = task.status === 'done';
   const tags = decodeTags(task.tags);
   return (
-    <div className={`row ${done ? 'row-done' : ''}`}>
+    <div
+      className={`row ${done ? 'row-done' : ''} ${selected ? 'row-selected' : ''}`}
+      onClick={() => onSelect?.(task)}
+      onKeyDown={(e) => {
+        if ((e.key === 'Enter' || e.key === ' ') && onSelect) {
+          e.preventDefault();
+          onSelect(task);
+        }
+      }}
+      tabIndex={onSelect ? 0 : undefined}
+    >
       <input
         type="checkbox"
         checked={done}
+        onClick={(e) => e.stopPropagation()}
         onChange={(e) => void setDone(task.id, e.target.checked)}
       />
       <span className="row-title">{task.title}</span>

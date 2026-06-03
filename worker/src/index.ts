@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { createHash } from 'crypto';
 import { enrich } from './enrich.js';
 
 /**
@@ -21,13 +22,57 @@ const pool = new pg.Pool({ connectionString: DATABASE_URI });
 
 // Claim proposed rows that haven't yet had a server/LLM pass. on-device + null are upgradeable.
 const SELECT_SQL = `
-  SELECT id, title
+  SELECT id, owner_id, title
   FROM public.tasks
   WHERE status = 'proposed'
     AND coalesce(suggestion_source, 'on-device') NOT IN ('server', 'llm')
   ORDER BY created_at ASC
   LIMIT $1
 `;
+
+function deterministicUuid(input: string): string {
+  const chars = createHash('sha256').update(input).digest('hex').slice(0, 32).split('');
+  chars[12] = '5';
+  chars[16] = ((Number.parseInt(chars[16], 16) & 0x3) | 0x8).toString(16);
+  const h = chars.join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+function metadataJSON(value: Record<string, unknown>): string {
+  const encoded = JSON.stringify(value);
+  return Buffer.byteLength(encoded, 'utf8') <= 4096 ? encoded : JSON.stringify({ truncated: true });
+}
+
+async function recordEnrichmentEvent(
+  taskId: string,
+  ownerId: string,
+  title: string,
+  e: Awaited<ReturnType<typeof enrich>>
+): Promise<void> {
+  const eventId = deterministicUuid(
+    `${ownerId}:${taskId}:enriched:${e.source}:${e.suggestedDueAt ?? ''}:${e.suggestedCategory ?? ''}:${e.confidence}`
+  );
+  await pool.query(
+    `INSERT INTO public.task_events
+       (id, owner_id, task_id, actor, event_type, title, body, metadata)
+     VALUES ($1, $2, $3, 'worker', 'enriched', $4, $5, $6)
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      eventId,
+      ownerId,
+      taskId,
+      e.source === 'llm' ? 'AI organised this task' : 'Auto-organisation updated',
+      `Suggested ${e.suggestedCategory ?? 'no category'}${e.suggestedDueAt ? ` · due ${e.suggestedDueAt}` : ''}.`,
+      metadataJSON({
+        source: e.source,
+        suggested_due_at: e.suggestedDueAt,
+        suggested_category: e.suggestedCategory,
+        confidence: e.confidence,
+        title_sample: title.slice(0, 160),
+      }),
+    ]
+  );
+}
 
 const UPDATE_SQL = `
   UPDATE public.tasks
@@ -56,6 +101,7 @@ async function tick(): Promise<number> {
         e.source
       ]);
       if (res.rowCount && res.rowCount > 0) {
+        await recordEnrichmentEvent(row.id, row.owner_id, row.title, e);
         enriched += 1;
         console.log(
           `[worker] enriched ${row.id} -> category=${e.suggestedCategory ?? '∅'} ` +

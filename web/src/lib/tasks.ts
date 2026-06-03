@@ -35,9 +35,11 @@ async function enrich(id: string, title: string): Promise<void> {
 
 export interface ConfirmFields {
   title?: string;
+  notes?: string | null;
   due_at?: string | null;
   category?: string | null;
   tags?: string[];
+  priority?: number | null;
 }
 
 /**
@@ -88,10 +90,57 @@ export async function confirm(id: string, fields: ConfirmFields): Promise<void> 
     `UPDATE tasks
        SET status = 'active',
            title = COALESCE(?, title),
-           due_at = ?, category = ?, tags = COALESCE(?, tags),
+           notes = COALESCE(?, notes),
+           due_at = ?, category = ?, tags = COALESCE(?, tags), priority = ?,
            confirmed_at = ?, updated_at = ?
      WHERE id = ?`,
-    [fields.title ?? null, fields.due_at ?? null, fields.category ?? null, tagsJSON, now, now, id]
+    [
+     fields.title ?? null,
+     fields.notes ?? null,
+     fields.due_at ?? null,
+     fields.category ?? null,
+     tagsJSON,
+     fields.priority ?? null,
+     now,
+     now,
+     id
+    ]
+  );
+}
+
+export interface TaskUpdateFields {
+  title?: string;
+  notes?: string | null;
+  due_at?: string | null;
+  category?: string | null;
+  tags?: string[];
+  priority?: number | null;
+}
+
+/** Save the editable properties from the detail inspector in one local write. */
+export async function updateTask(id: string, fields: TaskUpdateFields): Promise<void> {
+  const title = fields.title?.trim();
+  if (fields.tags) await ensureTags(normalizeTags(fields.tags));
+  await db.execute(
+    `UPDATE tasks
+       SET title = COALESCE(?, title),
+           notes = ?,
+           due_at = ?,
+           category = ?,
+           tags = COALESCE(?, tags),
+           priority = ?,
+           updated_at = ?
+     WHERE id = ?`,
+    [
+     title || null,
+     fields.notes ?? null,
+     fields.due_at ?? null,
+     fields.category ?? null,
+     fields.tags ? encodeTags(fields.tags) ?? '[]' : null,
+     fields.priority ?? null,
+     new Date().toISOString(),
+     id
+    ]
   );
 }
 

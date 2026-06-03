@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useStatus, useQuery } from '@powersync/react';
 import type { TaskRecord } from './powersync/schema';
 import { CaptureBar } from './components/CaptureBar';
 import { ConfirmCard } from './components/ConfirmCard';
 import { TaskRow } from './components/TaskRow';
+import { TaskDetailPane } from './components/TaskDetailPane';
 import { TagManager } from './components/TagManager';
 import { TagFilter } from './components/TagFilter';
 import { dateBucket, type DateBucketKey } from './lib/dates';
@@ -28,6 +29,7 @@ export default function App() {
   const status = useStatus();
   const [showTags, setShowTags] = useState(false);
   const [filter, setFilter] = useState<string[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const { data: proposed } = useQuery<TaskRecord>(
     `SELECT * FROM tasks WHERE status = 'proposed' ORDER BY created_at DESC`
@@ -41,6 +43,18 @@ export default function App() {
 
   const filteredActive = useMemo(() => active.filter((t) => matchesTags(t, filter)), [active, filter]);
   const filteredDone = useMemo(() => done.filter((t) => matchesTags(t, filter)), [done, filter]);
+  const allVisibleTasks = useMemo(
+    () => [...proposed, ...filteredActive, ...filteredDone],
+    [proposed, filteredActive, filteredDone]
+  );
+  const selectedTask = useMemo(
+    () => allVisibleTasks.find((t) => t.id === selectedId) ?? null,
+    [allVisibleTasks, selectedId]
+  );
+
+  useEffect(() => {
+    if (selectedId && !selectedTask) setSelectedId(null);
+  }, [selectedId, selectedTask]);
 
   // Group the active list by date bucket (already sorted by due_at from the query).
   const groups = useMemo(() => {
@@ -55,7 +69,7 @@ export default function App() {
   }, [filteredActive]);
 
   return (
-    <div className="app">
+    <div className={`app app-workbench ${selectedTask ? 'detail-open' : ''}`}>
       <header>
         <h1>Capture</h1>
         <span className="header-spacer" />
@@ -79,52 +93,73 @@ export default function App() {
         </section>
       )}
 
-      {proposed.length > 0 && (
-        <section>
-          <h2>Needs confirming · {proposed.length}</h2>
-          <div className="cards">
-            {proposed.map((t) => (
-              <ConfirmCard key={t.id} task={t} />
-            ))}
-          </div>
-        </section>
-      )}
-
-      <section>
-        <h2>
-          Active · {filteredActive.length}
-          {filter.length > 0 && <span className="filtered-of"> of {active.length}</span>}
-        </h2>
-        <TagFilter selected={filter} onChange={setFilter} />
-        <div className="groups">
-          {groups.map((g) => (
-            <div className="date-group" key={g.label}>
-              <h3 className={`group-head group-${g.order}`}>
-                {g.label} <span className="group-count">{g.items.length}</span>
-              </h3>
-              <div className="rows">
-                {g.items.map((t) => (
-                  <TaskRow key={t.id} task={t} />
+      <div className="workbench-grid">
+        <main className="task-stream">
+          {proposed.length > 0 && (
+            <section>
+              <h2>Needs confirming · {proposed.length}</h2>
+              <div className="cards">
+                {proposed.map((t) => (
+                  <div key={t.id} className={`confirm-shell ${selectedId === t.id ? 'selected' : ''}`}>
+                    <button className="open-detail" onClick={() => setSelectedId(t.id)}>
+                      Inspect
+                    </button>
+                    <ConfirmCard task={t} />
+                  </div>
                 ))}
               </div>
-            </div>
-          ))}
-          {filteredActive.length === 0 && (
-            <p className="empty">{filter.length > 0 ? 'No items match this filter.' : 'Nothing active yet.'}</p>
+            </section>
           )}
-        </div>
-      </section>
 
-      {filteredDone.length > 0 && (
-        <section>
-          <h2>Done</h2>
-          <div className="rows">
-            {filteredDone.map((t) => (
-              <TaskRow key={t.id} task={t} />
-            ))}
-          </div>
-        </section>
-      )}
+          <section>
+            <h2>
+              Active · {filteredActive.length}
+              {filter.length > 0 && <span className="filtered-of"> of {active.length}</span>}
+            </h2>
+            <TagFilter selected={filter} onChange={setFilter} />
+            <div className="groups">
+              {groups.map((g) => (
+                <div className="date-group" key={g.label}>
+                  <h3 className={`group-head group-${g.order}`}>
+                    {g.label} <span className="group-count">{g.items.length}</span>
+                  </h3>
+                  <div className="rows">
+                    {g.items.map((t) => (
+                      <TaskRow
+                        key={t.id}
+                        task={t}
+                        selected={selectedId === t.id}
+                        onSelect={(task) => setSelectedId(task.id)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {filteredActive.length === 0 && (
+                <p className="empty">{filter.length > 0 ? 'No items match this filter.' : 'Nothing active yet.'}</p>
+              )}
+            </div>
+          </section>
+
+          {filteredDone.length > 0 && (
+            <section>
+              <h2>Done</h2>
+              <div className="rows">
+                {filteredDone.map((t) => (
+                  <TaskRow
+                    key={t.id}
+                    task={t}
+                    selected={selectedId === t.id}
+                    onSelect={(task) => setSelectedId(task.id)}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+        </main>
+
+        <TaskDetailPane task={selectedTask} onClose={() => setSelectedId(null)} />
+      </div>
     </div>
   );
 }

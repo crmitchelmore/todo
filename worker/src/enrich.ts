@@ -63,6 +63,7 @@ const CATEGORY_MATCHERS: ReadonlyArray<{ category: string; patterns: readonly Re
   }));
 
 const URGENCY_MATCHERS = URGENCY_HINTS.map(boundedMatcher);
+let llmDisabledReason: string | null = null;
 
 export function enrichDeterministic(title: string, now = new Date()): Enrichment {
   let suggestedDueAt: string | null = null;
@@ -94,7 +95,7 @@ export function enrichDeterministic(title: string, now = new Date()): Enrichment
  */
 export async function enrich(title: string, now = new Date()): Promise<Enrichment> {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return enrichDeterministic(title, now);
+  if (!apiKey || llmDisabledReason) return enrichDeterministic(title, now);
 
   try {
     const model = process.env.ENRICH_LLM_MODEL ?? 'gpt-4o-mini';
@@ -119,7 +120,12 @@ export async function enrich(title: string, now = new Date()): Promise<Enrichmen
         ]
       })
     });
-    if (!resp.ok) throw new Error(`LLM HTTP ${resp.status}`);
+    if (!resp.ok) {
+      if (resp.status === 401 || resp.status === 403) {
+        llmDisabledReason = `LLM HTTP ${resp.status}`;
+      }
+      throw new Error(`LLM HTTP ${resp.status}`);
+    }
     const json: any = await resp.json();
     const content = json.choices?.[0]?.message?.content;
     const out = JSON.parse(content);

@@ -2,7 +2,7 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import cors from 'cors';
 import pg from 'pg';
 import { SignJWT } from 'jose';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import {
   registerUser,
   loginUser,
@@ -334,6 +334,19 @@ interface CrudOp {
   data?: Record<string, unknown>;
 }
 
+type TaskEventType = 'captured' | 'confirmed' | 'updated' | 'completed' | 'reopened' | 'deleted' | 'enriched';
+
+interface TaskEventInput {
+  ownerId: string;
+  taskId: string;
+  actor: 'user' | 'system' | 'worker' | 'agent' | 'api';
+  eventType: TaskEventType;
+  title: string;
+  body?: string | null;
+  metadata?: Record<string, unknown>;
+  idempotencyKey: string;
+}
+
 function sanitize(table: string, data: Record<string, unknown>): Record<string, unknown> {
   const allowed = ALLOWED_COLUMNS[table];
   const out: Record<string, unknown> = {};
@@ -343,6 +356,78 @@ function sanitize(table: string, data: Record<string, unknown>): Record<string, 
   return out;
 }
 
+function deterministicUuid(input: string): string {
+  const chars = createHash('sha256').update(input).digest('hex').slice(0, 32).split('');
+  chars[12] = '5'; // version 5-ish deterministic UUID (hash-derived, not namespace RFC4122)
+  chars[16] = ((Number.parseInt(chars[16], 16) & 0x3) | 0x8).toString(16);
+  const h = chars.join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+function stableJSON(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJSON).join(',')}]`;
+  return `{${Object.keys(value as Record<string, unknown>)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJSON((value as Record<string, unknown>)[key])}`)
+    .join(',')}}`;
+}
+
+function boundText(value: string | null | undefined, max: number): string | null {
+  if (!value) return null;
+  return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
+}
+
+function eventMetadata(metadata: Record<string, unknown> | undefined): string | null {
+  if (!metadata) return null;
+  const encoded = stableJSON(metadata);
+  if (Buffer.byteLength(encoded, 'utf8') <= 4096) return encoded;
+  return stableJSON({ truncated: true });
+}
+
+async function recordTaskEvent(client: pg.PoolClient, input: TaskEventInput): Promise<void> {
+  const id = deterministicUuid(`${input.ownerId}:${input.taskId}:${input.eventType}:${input.idempotencyKey}`);
+  await client.query(
+    `INSERT INTO public.task_events
+       (id, owner_id, task_id, actor, event_type, title, body, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      id,
+      input.ownerId,
+      input.taskId,
+      input.actor,
+      input.eventType,
+      boundText(input.title, 160),
+      boundText(input.body, 2000),
+      eventMetadata(input.metadata),
+    ]
+  );
+}
+
+function taskEventForOp(op: CrudOp, applied: boolean): Omit<TaskEventInput, 'ownerId' | 'actor' | 'taskId' | 'idempotencyKey'> | null {
+  if (!applied || op.type !== 'tasks' || op.op === 'DELETE') return null;
+  const data = op.data ?? {};
+  const status = typeof data.status === 'string' ? data.status : null;
+  if (status === 'done') {
+    return { eventType: 'completed', title: 'Completed', body: 'Marked done.' };
+  }
+  if (status === 'active' || status === 'confirmed') {
+    return { eventType: 'confirmed', title: 'Confirmed', body: 'Promoted from capture inbox to active work.' };
+  }
+  if (status === 'proposed') {
+    return { eventType: 'reopened', title: 'Reopened', body: 'Moved back to the capture inbox.' };
+  }
+  const changed = Object.keys(data).filter((k) => ALLOWED_COLUMNS.tasks.has(k) && k !== 'id' && k !== 'owner_id');
+  if (changed.length === 0) return null;
+  return {
+    eventType: 'updated',
+    title: 'Updated',
+    body: `Changed ${changed.slice(0, 6).join(', ')}.`,
+    metadata: { changed },
+  };
+}
+
 /**
  * Apply one CRUD op, owner-scoped. Cross-owner ops are denied by the `owner_id` filter, which
  * makes them a silent no-op rather than an error: throwing here would roll back the whole upload
@@ -350,13 +435,13 @@ function sanitize(table: string, data: Record<string, unknown>): Record<string, 
  * The security guarantee is structural — a client can never overwrite or delete a row it does not
  * own — without making sync brittle.
  */
-async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Promise<void> {
+async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Promise<boolean> {
   const table = op.type;
   if (!ALLOWED_COLUMNS[table]) throw new Error(`table not allowed: ${table}`);
 
   if (op.op === 'DELETE') {
-    await client.query(`DELETE FROM ${table} WHERE id = $1 AND owner_id = $2`, [op.id, ownerId]);
-    return;
+    const result = await client.query(`DELETE FROM ${table} WHERE id = $1 AND owner_id = $2`, [op.id, ownerId]);
+    return (result.rowCount ?? 0) > 0;
   }
 
   // Identity fields are forced server-side: the client can never set a foreign owner.
@@ -375,22 +460,23 @@ async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Prom
       `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) ` +
       `ON CONFLICT (id) DO UPDATE SET ${updates.join(', ')} ` +
       `WHERE ${table}.owner_id = ${ownerParam}`;
-    await client.query(sql, [...vals, ownerId]);
-    return;
+    const result = await client.query(sql, [...vals, ownerId]);
+    return (result.rowCount ?? 0) > 0;
   }
 
   if (op.op === 'PATCH') {
     const cols = Object.keys(data).filter((c) => c !== 'id' && c !== 'owner_id');
-    if (cols.length === 0) return;
+    if (cols.length === 0) return false;
     const setClause = cols.map((c, i) => `${c} = $${i + 1}`).join(', ');
     const vals = cols.map((c) => data[c]);
     vals.push(op.id, ownerId);
-    await client.query(
+    const result = await client.query(
       `UPDATE ${table} SET ${setClause} WHERE id = $${vals.length - 1} AND owner_id = $${vals.length}`,
       vals
     );
-    return;
+    return (result.rowCount ?? 0) > 0;
   }
+  return false;
 }
 
 /**
@@ -415,18 +501,36 @@ app.post('/api/capture', requireAuth, async (req: AuthedRequest, res: Response) 
 
   const notes = url && rawText ? url : null; // keep the URL as context when there's also text
 
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query('BEGIN');
+    const result = await client.query(
       `INSERT INTO public.tasks (id, owner_id, title, notes, status, source)
        VALUES ($1, $2, $3, $4, 'proposed', $5)
        ON CONFLICT (id) DO NOTHING
        RETURNING id`,
       [id, req.ownerId, title, notes, source]
     );
+    if ((result.rowCount ?? 0) > 0) {
+      await recordTaskEvent(client, {
+        ownerId: req.ownerId!,
+        taskId: id,
+        actor: source === 'capture' ? 'api' : 'system',
+        eventType: 'captured',
+        title: 'Captured',
+        body: title,
+        metadata: { source, has_url: Boolean(url) },
+        idempotencyKey: `capture:${id}`,
+      });
+    }
+    await client.query('COMMIT');
     res.json({ ok: true, id, created: (result.rowCount ?? 0) > 0 });
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error('capture failed:', err);
     res.status(500).json({ ok: false, error: String(err) });
+  } finally {
+    client.release();
   }
 });
 
@@ -436,7 +540,19 @@ app.put('/api/data', requireAuth, async (req: AuthedRequest, res: Response) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    for (const op of ops) await applyOp(client, op, ownerId);
+    for (const op of ops) {
+      const applied = await applyOp(client, op, ownerId);
+      const event = taskEventForOp(op, applied);
+      if (event) {
+        await recordTaskEvent(client, {
+          ...event,
+          ownerId,
+          taskId: op.id,
+          actor: 'user',
+          idempotencyKey: `upload:${op.type}:${op.op}:${op.id}:${stableJSON(op.data ?? {})}`,
+        });
+      }
+    }
     await client.query('COMMIT');
     res.json({ ok: true, applied: ops.length });
   } catch (err) {

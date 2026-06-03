@@ -76,6 +76,42 @@ public let CAPTURE_CATEGORIES = [
     "engineering", "leadership", "home", "errands", "health", "finance", "personal", "inbox"
 ]
 
+/// Append-only history row for a task. Written by the backend/worker and synced read-only to
+/// clients so detail panes can show user changes and AI/agent work without joining into hot lists.
+public struct TaskEvent: Identifiable, Sendable, Equatable {
+    public let id: String
+    public var ownerId: String
+    public var taskId: String
+    public var actor: String
+    public var eventType: String
+    public var title: String
+    public var body: String?
+    public var metadata: String?
+    public var createdAt: Date?
+
+    public init(
+        id: String,
+        ownerId: String,
+        taskId: String,
+        actor: String,
+        eventType: String,
+        title: String,
+        body: String? = nil,
+        metadata: String? = nil,
+        createdAt: Date? = nil
+    ) {
+        self.id = id
+        self.ownerId = ownerId
+        self.taskId = taskId
+        self.actor = actor
+        self.eventType = eventType
+        self.title = title
+        self.body = body
+        self.metadata = metadata
+        self.createdAt = createdAt
+    }
+}
+
 /// A user-managed label (also used for "projects" — a project is just a tag).
 /// Mirrors `public.tags` in Postgres and the client SQLite schema.
 public struct Tag: Identifiable, Sendable, Equatable {

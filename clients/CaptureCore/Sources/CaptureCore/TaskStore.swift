@@ -1,6 +1,10 @@
 import Foundation
 import PowerSync
 
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
+}
+
 /// The capture-first task store. `capture` is the hot path: a single instant
 /// local insert with status=proposed, then enrichment fires in the background
 /// and patches the row. Confirmation promotes a proposal to an active todo.
@@ -191,6 +195,44 @@ public final class TaskStore: @unchecked Sendable {
         )
     }
 
+    /// Consolidated detail-pane save: one write for the editable properties so inspectors do not
+    /// create noisy per-keystroke sync traffic.
+    public func updateTask(
+        id: String,
+        title: String?,
+        notes: String?,
+        dueAt: Date?,
+        category: String?,
+        tags: [String]?,
+        priority: Int?
+    ) async throws {
+        if let tags { await Self.ensureTags(db: db, ownerId: ownerId, names: TagsCodec.normalize(tags)) }
+        let cleanedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        try await db.execute(
+            sql: """
+            UPDATE \(TASKS_TABLE)
+               SET title = COALESCE(?, title),
+                   notes = ?,
+                   due_at = ?,
+                   category = ?,
+                   tags = COALESCE(?, tags),
+                   priority = ?,
+                   updated_at = ?
+             WHERE id = ?
+            """,
+            parameters: [
+                (cleanedTitle?.isEmpty == false) ? cleanedTitle : nil,
+                notes?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+                dueAt.map(ISO8601.string),
+                category?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+                tags.map { TagsCodec.encode($0) ?? "[]" },
+                priority,
+                ISO8601.string(Date()),
+                id
+            ]
+        )
+    }
+
     public func reject(id: String) async throws {
         try await db.execute(sql: "DELETE FROM \(TASKS_TABLE) WHERE id = ?", parameters: [id])
     }
@@ -229,6 +271,39 @@ public final class TaskStore: @unchecked Sendable {
             sql: "SELECT * FROM \(TASKS_TABLE) WHERE status = 'done' ORDER BY completed_at DESC LIMIT 50",
             parameters: [],
             mapper: Self.map
+        )
+    }
+
+    public func watchTask(id: String) throws -> AsyncThrowingStream<TaskItem?, Error> {
+        let rows = try db.watch(
+            sql: "SELECT * FROM \(TASKS_TABLE) WHERE id = ? LIMIT 1",
+            parameters: [id],
+            mapper: { try Self.map($0) }
+        )
+        return AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    for try await batch in rows {
+                        continuation.yield(batch.first)
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+
+    public func watchTaskEvents(taskId: String, limit: Int = 80) throws -> AsyncThrowingStream<[TaskEvent], Error> {
+        try db.watch(
+            sql: """
+            SELECT * FROM \(TASK_EVENTS_TABLE)
+             WHERE task_id = ?
+             ORDER BY created_at DESC, id DESC
+             LIMIT ?
+            """,
+            parameters: [taskId, limit],
+            mapper: Self.mapTaskEvent
         )
     }
 
@@ -375,6 +450,20 @@ public final class TaskStore: @unchecked Sendable {
             color: (try cursor.getStringOptional(name: "color")) ?? "#9BA1A6",
             createdAt: ISO8601.date(try cursor.getStringOptional(name: "created_at")),
             updatedAt: ISO8601.date(try cursor.getStringOptional(name: "updated_at"))
+        )
+    }
+
+    static func mapTaskEvent(_ cursor: SqlCursor) throws -> TaskEvent {
+        TaskEvent(
+            id: try cursor.getString(name: "id"),
+            ownerId: (try cursor.getStringOptional(name: "owner_id")) ?? "",
+            taskId: try cursor.getString(name: "task_id"),
+            actor: try cursor.getString(name: "actor"),
+            eventType: try cursor.getString(name: "event_type"),
+            title: try cursor.getString(name: "title"),
+            body: try cursor.getStringOptional(name: "body"),
+            metadata: try cursor.getStringOptional(name: "metadata"),
+            createdAt: ISO8601.date(try cursor.getStringOptional(name: "created_at"))
         )
     }
 

@@ -36,8 +36,23 @@ const tags = new Table(
   { indexes: {} }
 );
 
-export const AppSchema = new Schema({ tasks, tags });
+const task_events = new Table(
+  {
+    owner_id: column.text,
+    task_id: column.text,
+    actor: column.text,
+    event_type: column.text,
+    title: column.text,
+    body: column.text,
+    metadata: column.text,
+    created_at: column.text
+  },
+  { indexes: { by_task_created: ['task_id', 'created_at'] } }
+);
+
+export const AppSchema = new Schema({ tasks, tags, task_events });
 
 export type Database = (typeof AppSchema)['types'];
 export type TaskRecord = Database['tasks'];
 export type TagRecord = Database['tags'];
+export type TaskEventRecord = Database['task_events'];

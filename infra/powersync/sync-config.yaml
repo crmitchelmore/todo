@@ -17,3 +17,7 @@ streams:
     auto_subscribe: true
     queries:
       - SELECT * FROM tags WHERE owner_id = auth.user_id()
+  task_events:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM task_events WHERE owner_id = auth.user_id()
