@@ -144,6 +144,30 @@ jobs:
             codesign --verify --strict --verbose=2 "$APP_PATH/Contents/Frameworks/Sparkle.framework"
           fi
 
+      - name: Re-sign Sparkle Helpers (Developer ID + runtime + timestamp)
+        run: |
+          # Xcode signs the app + framework, but NOT Sparkle's deeply nested helper
+          # apps/binaries (Updater.app, Autoupdate, XPC services) — they keep Sparkle's
+          # original signatures, which lack our Developer ID cert + secure timestamp and
+          # fail notarization. Re-sign them bottom-up, then re-seal the framework + app.
+          CERT="Developer ID Application"
+          FW="$APP_PATH/Contents/Frameworks/Sparkle.framework"
+          V="$FW/Versions/B"
+          sign() { [ -e "$1" ] && codesign --force --options runtime --timestamp --sign "$CERT" "$1"; }
+          for xpc in "$V"/XPCServices/*.xpc; do sign "$xpc"; done
+          sign "$V/Autoupdate"
+          sign "$V/Updater.app"
+          sign "$FW"
+          # Re-seal the whole app so the outer signature covers the updated nested code.
+          codesign --force --options runtime --timestamp --sign "$CERT" "$APP_PATH"
+          # Fail fast if any nested Mach-O still lacks runtime or a Developer ID authority.
+          while IFS= read -r f; do
+            info=$(codesign -dv --verbose=4 "$f" 2>&1)
+            echo "$info" | grep -q "Authority=Developer ID Application" || { echo "::error::$f not Developer ID signed"; exit 1; }
+            echo "$info" | grep -q "Timestamp=" || { echo "::error::$f missing secure timestamp"; exit 1; }
+          done < <(find "$FW" -type f \( -name Autoupdate -o -name Updater -o -name Installer -o -name Downloader \))
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
       - name: Notarize & Staple
         env:
           KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
