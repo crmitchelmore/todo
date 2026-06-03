@@ -1,14 +1,21 @@
 import UIKit
-import AuthenticationServices
 import CaptureCore
 
-/// Sign in with Apple gate for iOS, shown before the capture UI. Mirrors the macOS gate: runs
-/// `ASAuthorizationController`, hands the identity token to `AuthStore`, and lets the SceneDelegate
-/// swap in the capture UI on success.
+/// Email + password gate for iOS, shown before the capture UI. Mirrors the macOS gate: a segmented
+/// control toggles between signing in and creating an account, then the credentials are handed to
+/// `AuthStore`, which exchanges them for an opaque session token. The AppDelegate swaps in the
+/// capture UI on success.
 final class SignInViewController: UIViewController {
+    private enum Mode: Int { case signIn, register }
+
     private let auth: AuthStore
     private let onSignedIn: () -> Void
-    private var currentNonce: AppleNonce?
+    private var mode: Mode = .signIn
+
+    private let segmented = UISegmentedControl(items: ["Sign In", "Create Account"])
+    private let emailField = UITextField()
+    private let passwordField = UITextField()
+    private let submit = UIButton(type: .system)
     private let status = UILabel()
     private let spinner = UIActivityIndicatorView(style: .medium)
 
@@ -36,9 +43,30 @@ final class SignInViewController: UIViewController {
         subtitle.textAlignment = .center
         subtitle.numberOfLines = 0
 
-        let button = ASAuthorizationAppleIDButton(type: .signIn, style: .black)
-        button.addTarget(self, action: #selector(startSignIn), for: .touchUpInside)
-        button.translatesAutoresizingMaskIntoConstraints = false
+        segmented.selectedSegmentIndex = 0
+        segmented.addTarget(self, action: #selector(modeChanged), for: .valueChanged)
+
+        configure(emailField, placeholder: "Email")
+        emailField.keyboardType = .emailAddress
+        emailField.textContentType = .username
+        emailField.autocapitalizationType = .none
+        emailField.autocorrectionType = .no
+        emailField.returnKeyType = .next
+        emailField.delegate = self
+
+        configure(passwordField, placeholder: "Password")
+        passwordField.isSecureTextEntry = true
+        passwordField.textContentType = .password
+        passwordField.returnKeyType = .go
+        passwordField.delegate = self
+
+        submit.setTitle("Sign In", for: .normal)
+        submit.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
+        submit.backgroundColor = .label
+        submit.setTitleColor(.systemBackground, for: .normal)
+        submit.layer.cornerRadius = 10
+        submit.addTarget(self, action: #selector(submitTapped), for: .touchUpInside)
+        submit.translatesAutoresizingMaskIntoConstraints = false
 
         status.font = .systemFont(ofSize: 13)
         status.textColor = .systemRed
@@ -48,77 +76,89 @@ final class SignInViewController: UIViewController {
 
         spinner.hidesWhenStopped = true
 
-        let stack = UIStackView(arrangedSubviews: [title, subtitle, button, spinner, status])
+        let stack = UIStackView(arrangedSubviews: [title, subtitle, segmented, emailField, passwordField, submit, spinner, status])
         stack.axis = .vertical
-        stack.alignment = .center
-        stack.spacing = 18
+        stack.alignment = .fill
+        stack.spacing = 16
+        stack.setCustomSpacing(28, after: subtitle)
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             stack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            stack.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 32),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -32),
-            button.widthAnchor.constraint(equalToConstant: 240),
-            button.heightAnchor.constraint(equalToConstant: 48)
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
+            emailField.heightAnchor.constraint(equalToConstant: 48),
+            passwordField.heightAnchor.constraint(equalToConstant: 48),
+            submit.heightAnchor.constraint(equalToConstant: 50)
         ])
     }
 
-    @objc private func startSignIn() {
-        let nonce = AppleNonce()
-        currentNonce = nonce
+    private func configure(_ field: UITextField, placeholder: String) {
+        field.placeholder = placeholder
+        field.borderStyle = .roundedRect
+        field.font = .systemFont(ofSize: 16)
+    }
+
+    @objc private func modeChanged() {
+        mode = Mode(rawValue: segmented.selectedSegmentIndex) ?? .signIn
+        submit.setTitle(mode == .signIn ? "Sign In" : "Create Account", for: .normal)
         status.isHidden = true
-        spinner.startAnimating()
+    }
 
-        let request = ASAuthorizationAppleIDProvider().createRequest()
-        request.requestedScopes = [.email]
-        request.nonce = nonce.hashed
+    @objc private func submitTapped() {
+        let email = (emailField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let password = passwordField.text ?? ""
+        guard !email.isEmpty, !password.isEmpty else {
+            show(error: "Enter your email and password.")
+            return
+        }
+        if mode == .register, password.count < 8 {
+            show(error: "Password must be at least 8 characters.")
+            return
+        }
+        view.endEditing(true)
+        status.isHidden = true
+        setBusy(true)
+        let currentMode = mode
+        Task {
+            do {
+                if currentMode == .register {
+                    try await auth.register(email: email, password: password, client: "ios")
+                } else {
+                    try await auth.signIn(email: email, password: password, client: "ios")
+                }
+                setBusy(false)
+                onSignedIn()
+            } catch {
+                let message = (error as? CaptureError)?.message ?? error.localizedDescription
+                show(error: message)
+            }
+        }
+    }
 
-        let controller = ASAuthorizationController(authorizationRequests: [request])
-        controller.delegate = self
-        controller.presentationContextProvider = self
-        controller.performRequests()
+    private func setBusy(_ busy: Bool) {
+        if busy { spinner.startAnimating() } else { spinner.stopAnimating() }
+        submit.isEnabled = !busy
+        segmented.isEnabled = !busy
+        emailField.isEnabled = !busy
+        passwordField.isEnabled = !busy
+        submit.alpha = busy ? 0.6 : 1
     }
 
     private func show(error: String) {
-        spinner.stopAnimating()
+        setBusy(false)
         status.text = error
         status.isHidden = false
     }
 }
 
-extension SignInViewController: ASAuthorizationControllerDelegate {
-    func authorizationController(controller: ASAuthorizationController,
-                                didCompleteWithAuthorization authorization: ASAuthorization) {
-        guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
-              let tokenData = credential.identityToken,
-              let identityToken = String(data: tokenData, encoding: .utf8) else {
-            show(error: "Could not read the Apple credential. Please try again.")
-            return
+extension SignInViewController: UITextFieldDelegate {
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        if textField === emailField {
+            passwordField.becomeFirstResponder()
+        } else {
+            submitTapped()
         }
-        let raw = currentNonce?.raw
-        Task {
-            do {
-                try await auth.signIn(appleIdentityToken: identityToken, rawNonce: raw, client: "ios")
-                spinner.stopAnimating()
-                onSignedIn()
-            } catch {
-                show(error: "Sign in failed: \(error.localizedDescription)")
-            }
-        }
-    }
-
-    func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
-        if (error as? ASAuthorizationError)?.code == .canceled {
-            spinner.stopAnimating()
-            return
-        }
-        show(error: "Sign in failed: \(error.localizedDescription)")
-    }
-}
-
-extension SignInViewController: ASAuthorizationControllerPresentationContextProviding {
-    func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
-        view.window ?? ASPresentationAnchor()
+        return true
     }
 }

@@ -1,75 +1,59 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { generateKeyPair, SignJWT, jwtVerify, importJWK, type JWK } from 'jose';
 import {
-  verifyAppleIdentityToken,
   hashToken,
   newOpaqueToken,
   loadSigningKey,
+  hashPassword,
+  verifyPassword,
+  normalizeEmail,
+  isValidEmail,
+  isValidPassword,
 } from '../src/auth.ts';
 
-// A stand-in for Apple: a local RSA key whose public half we hand to the verifier as the "JWKS".
-const fakeApple = await generateKeyPair('RS256', { extractable: true });
-const fakeAppleJwks = async () => fakeApple.publicKey;
-const ISSUER = 'https://appleid.apple.com';
-const AUD = ['dev.crmitchelmore.capture', 'dev.crmitchelmore.capture.web'];
-
-function appleToken(opts: {
-  sub?: string;
-  aud?: string;
-  email?: string;
-  nonce?: string;
-  expiresIn?: string;
-  iat?: number;
-}) {
-  const claims = {
-    ...(opts.email ? { email: opts.email } : {}),
-    ...(opts.nonce ? { nonce: opts.nonce } : {}),
-  };
-  return new SignJWT(claims)
-    .setProtectedHeader({ alg: 'RS256' })
-    .setSubject(opts.sub ?? 'apple-user-1')
-    .setIssuer(ISSUER)
-    .setAudience(opts.aud ?? AUD[0])
-    .setIssuedAt(opts.iat)
-    .setExpirationTime(opts.expiresIn ?? '5m')
-    .sign(fakeApple.privateKey);
-}
-
-test('accepts a valid Apple identity token and returns sub + email', async () => {
-  const token = await appleToken({ sub: 'abc.123', email: 'me@example.com' });
-  const claims = await verifyAppleIdentityToken(token, AUD, undefined, fakeAppleJwks);
-  assert.equal(claims.sub, 'abc.123');
-  assert.equal(claims.email, 'me@example.com');
+test('hashPassword + verifyPassword round-trips, and salts so two hashes differ', async () => {
+  const h1 = await hashPassword('correct horse battery staple');
+  const h2 = await hashPassword('correct horse battery staple');
+  assert.notEqual(h1, h2); // unique salt per hash
+  assert.ok(await verifyPassword('correct horse battery staple', h1));
+  assert.ok(await verifyPassword('correct horse battery staple', h2));
 });
 
-test('rejects a token minted for a different audience', async () => {
-  const token = await appleToken({ aud: 'some.other.app' });
-  await assert.rejects(() => verifyAppleIdentityToken(token, AUD, undefined, fakeAppleJwks));
+test('verifyPassword rejects the wrong password', async () => {
+  const hash = await hashPassword('s3cret-passw0rd');
+  assert.equal(await verifyPassword('not-the-password', hash), false);
 });
 
-test('rejects an expired token', async () => {
-  const token = await appleToken({ iat: Math.floor(Date.now() / 1000) - 3600, expiresIn: '-30m' });
-  await assert.rejects(() => verifyAppleIdentityToken(token, AUD, undefined, fakeAppleJwks));
+test('stored hash is scheme-tagged (self-describing for future migration) and never plaintext', async () => {
+  const hash = await hashPassword('another-good-password');
+  assert.ok(hash.startsWith('bcrypt-sha256$'));
+  assert.ok(!hash.includes('another-good-password'));
 });
 
-test('rejects a token too old even if not yet expired (maxTokenAge)', async () => {
-  const token = await appleToken({ iat: Math.floor(Date.now() / 1000) - 3600, expiresIn: '10h' });
-  await assert.rejects(() => verifyAppleIdentityToken(token, AUD, undefined, fakeAppleJwks));
+test('verifyPassword rejects a hash with an unknown/forged scheme tag', async () => {
+  assert.equal(await verifyPassword('whatever', 'plaintext-not-a-hash'), false);
 });
 
-test('verifies the nonce (sha256 of the raw nonce we sent)', async () => {
-  const raw = 'random-nonce-value';
-  const hashed = createHash('sha256').update(raw).digest('hex');
-  const token = await appleToken({ nonce: hashed });
-  const claims = await verifyAppleIdentityToken(token, AUD, raw, fakeAppleJwks);
-  assert.equal(claims.sub, 'apple-user-1');
+test('passwords longer than bcrypt 72-byte limit are fully significant (sha256 pre-hash)', async () => {
+  // Two 100-char passwords sharing the first 72 bytes must NOT verify against each other.
+  const base = 'a'.repeat(72);
+  const hash = await hashPassword(base + 'TAIL-ONE-distinct');
+  assert.equal(await verifyPassword(base + 'TAIL-TWO-distinct', hash), false);
+  assert.ok(await verifyPassword(base + 'TAIL-ONE-distinct', hash));
 });
 
-test('rejects a nonce mismatch (replay with a different nonce)', async () => {
-  const token = await appleToken({ nonce: createHash('sha256').update('attacker').digest('hex') });
-  await assert.rejects(() => verifyAppleIdentityToken(token, AUD, 'victim', fakeAppleJwks));
+test('normalizeEmail lowercases and trims (server-authoritative canonical form)', () => {
+  assert.equal(normalizeEmail('  Me@Example.COM '), 'me@example.com');
+});
+
+test('isValidEmail / isValidPassword enforce basic shape and length', () => {
+  assert.ok(isValidEmail('me@example.com'));
+  assert.equal(isValidEmail('not-an-email'), false);
+  assert.equal(isValidEmail('a@b'), false);
+  assert.ok(isValidPassword('12345678'));
+  assert.equal(isValidPassword('1234567'), false); // < 8
+  assert.equal(isValidPassword('x'.repeat(1025)), false); // > max
 });
 
 test('opaque session tokens are random and hash deterministically', () => {
@@ -111,3 +95,7 @@ test('public JWK exposes no private key material', async () => {
   assert.equal(publicJwk.kty, 'RSA');
   assert.ok(publicJwk.n && publicJwk.e);
 });
+
+// generateKeyPair import retained for parity with prior fixtures; ensures the test toolchain
+// resolves jose the same way the app does.
+void generateKeyPair;

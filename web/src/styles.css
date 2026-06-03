@@ -278,7 +278,7 @@ input[type='checkbox'] { width: 18px; height: 18px; accent-color: var(--accent-2
 .due-presets { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip-clear { border-style: dashed; }
 
-/* Sign in with Apple gate */
+/* Email + password sign-in gate */
 .signin {
   max-width: 360px;
   margin: 18vh auto 0;
@@ -286,21 +286,61 @@ input[type='checkbox'] { width: 18px; height: 18px; accent-color: var(--accent-2
   padding: 0 24px;
 }
 .signin h1 { font-size: 40px; margin: 0 0 8px; }
-.signin-sub { color: var(--muted, #888); margin: 0 0 28px; }
-.apple-signin {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: 240px;
-  height: 48px;
+.signin-sub { color: var(--muted, #888); margin: 0 0 24px; }
+.signin-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--surface, #f1f1f3);
+  border-radius: 10px;
+  padding: 4px;
+  margin-bottom: 20px;
+}
+.signin-tabs button {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 9px 0;
+  border-radius: 7px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--muted, #777);
+  cursor: pointer;
+}
+.signin-tabs button.active {
+  background: var(--bg, #fff);
+  color: var(--fg, #111);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+.signin-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: left;
+}
+.signin-form input {
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--border, #d8d8dd);
+  border-radius: 8px;
+  font-size: 15px;
+  background: var(--bg, #fff);
+  color: var(--fg, #111);
+}
+.signin-form input:focus {
+  outline: none;
+  border-color: #000;
+}
+.signin-submit {
+  height: 46px;
+  margin-top: 4px;
   border: none;
   border-radius: 8px;
   background: #000;
   color: #fff;
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
 }
-.apple-signin:disabled { opacity: 0.6; cursor: default; }
+.signin-submit:disabled { opacity: 0.6; cursor: default; }
 .signin-error { color: #e5484d; margin-top: 16px; font-size: 14px; }
+

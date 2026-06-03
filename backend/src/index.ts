@@ -4,23 +4,28 @@ import pg from 'pg';
 import { SignJWT } from 'jose';
 import { randomUUID } from 'crypto';
 import {
-  verifyAppleIdentityToken,
-  upsertUserForApple,
+  registerUser,
+  loginUser,
   createSession,
   lookupSession,
   revokeSession,
   loadSigningKey,
+  normalizeEmail,
+  isValidEmail,
+  isValidPassword,
+  EmailTakenError,
 } from './auth.js';
 
 /**
- * Capture backend connector (multi-user, Sign in with Apple).
+ * Capture backend connector (multi-user, email + password auth).
  *
- *  - POST /api/auth/apple  Exchange a verified Apple identity token for an opaque session token.
- *  - POST /api/auth/logout Revoke the caller's session.
- *  - GET  /api/auth/keys   JWKS so the PowerSync service can verify the per-user sync tokens.
- *  - GET  /api/auth/token  Mint a short-lived per-user RS256 JWT + the PowerSync endpoint URL.
- *  - PUT  /api/data        Apply a batch of client CRUD ops to Postgres (owner-scoped write path).
- *  - POST /api/capture     Lightweight ingest for out-of-process surfaces (extensions/intents).
+ *  - POST /api/auth/register Create an account (email + password) and return a session token.
+ *  - POST /api/auth/login    Exchange email + password for an opaque session token.
+ *  - POST /api/auth/logout   Revoke the caller's session.
+ *  - GET  /api/auth/keys     JWKS so the PowerSync service can verify the per-user sync tokens.
+ *  - GET  /api/auth/token    Mint a short-lived per-user RS256 JWT + the PowerSync endpoint URL.
+ *  - PUT  /api/data          Apply a batch of client CRUD ops to Postgres (owner-scoped write path).
+ *  - POST /api/capture       Lightweight ingest for out-of-process surfaces (extensions/intents).
  */
 
 const PORT = Number(process.env.BACKEND_PORT ?? 6060);
@@ -29,24 +34,43 @@ const JWT_ISSUER = process.env.JWT_ISSUER ?? 'capture';
 const JWT_AUDIENCE = process.env.JWT_AUDIENCE ?? 'powersync';
 const POWERSYNC_URL = process.env.POWERSYNC_PUBLIC_URL ?? 'http://localhost:8080';
 
-// Accepted audiences for Apple identity tokens. Native tokens carry the app's bundle id as `aud`
-// (one per platform target); the web flow uses the Services id. APPLE_NATIVE_AUD may be a
-// comma-separated list so iOS + macOS builds are both accepted. To get a single shared user
-// across platforms, group the App IDs under one primary App ID for Sign in with Apple in the
-// developer portal so Apple issues the same `sub`.
-const APPLE_AUDIENCES = [
-  ...(process.env.APPLE_NATIVE_AUD ?? 'dev.crmitchelmore.capture.ios,dev.crmitchelmore.capture.mac')
-    .split(',')
-    .map((s) => s.trim()),
-  process.env.APPLE_WEB_AUD ?? 'dev.crmitchelmore.capture.web',
-].filter(Boolean);
-
 const pool = new pg.Pool({ connectionString: DATABASE_URI });
 const { privateKey, publicJwk, kid } = await loadSigningKey();
 
 const app = express();
+// Behind Railway's proxy: trust the first hop so req.ip reflects the real client for throttling.
+app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json({ limit: '5mb' }));
+
+// --- Brute-force throttle: cap failed credential attempts before doing expensive bcrypt work. ---
+// In-memory (single Railway instance); resets on deploy. Good enough for a small user base — move
+// to a Postgres/Redis-backed limiter before scaling out or opening signups widely.
+const FAIL_WINDOW_MS = 15 * 60_000;
+const FAIL_MAX = 10;
+const failures = new Map<string, { count: number; resetAt: number }>();
+
+function attemptKey(ip: string, email: string): string {
+  return `${ip}|${email}`;
+}
+function isThrottled(key: string): boolean {
+  const e = failures.get(key);
+  if (!e) return false;
+  if (Date.now() > e.resetAt) {
+    failures.delete(key);
+    return false;
+  }
+  return e.count >= FAIL_MAX;
+}
+function recordFailure(key: string): void {
+  const now = Date.now();
+  const e = failures.get(key);
+  if (!e || now > e.resetAt) failures.set(key, { count: 1, resetAt: now + FAIL_WINDOW_MS });
+  else e.count += 1;
+}
+function clearFailures(key: string): void {
+  failures.delete(key);
+}
 
 // --- Auth middleware: opaque session token -> req.ownerId -------------------------------------
 
@@ -102,26 +126,65 @@ app.get('/api/auth/keys', (_req, res) => {
 });
 
 /**
- * Exchange a verified Apple identity token for an opaque session token. Public endpoint: anyone
- * may attempt, but they must present an Apple-signed token for one of our client audiences.
+ * Register a new account (email + password) and return an opaque session token. Public endpoint;
+ * the unique index on lower(email) enforces one account per email.
  */
-app.post('/api/auth/apple', async (req: Request, res: Response) => {
-  const identityToken: unknown = req.body?.identity_token;
-  const nonce: string | undefined =
-    typeof req.body?.nonce === 'string' ? req.body.nonce : undefined;
+app.post('/api/auth/register', async (req: Request, res: Response) => {
+  const rawEmail = typeof req.body?.email === 'string' ? req.body.email : '';
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
   const client: string | null =
     typeof req.body?.client === 'string' ? req.body.client.slice(0, 32) : null;
-  if (typeof identityToken !== 'string' || !identityToken) {
-    return res.status(400).json({ ok: false, error: 'identity_token required' });
+  const email = normalizeEmail(rawEmail);
+
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ ok: false, error: 'a valid email is required' });
+  }
+  if (!isValidPassword(password)) {
+    return res.status(400).json({ ok: false, error: 'password must be at least 8 characters' });
   }
   try {
-    const claims = await verifyAppleIdentityToken(identityToken, APPLE_AUDIENCES, nonce);
-    const userId = await upsertUserForApple(pool, claims.sub, claims.email);
+    const { userId, sessionToken } = await registerUser(pool, email, password, client);
+    res.json({ ok: true, session_token: sessionToken, user_id: userId });
+  } catch (err) {
+    if (err instanceof EmailTakenError) {
+      return res.status(409).json({ ok: false, error: 'that email is already registered' });
+    }
+    console.error('register failed:', err);
+    res.status(500).json({ ok: false, error: 'registration failed' });
+  }
+});
+
+/**
+ * Exchange email + password for an opaque session token. A wrong password and an unknown email
+ * return the SAME generic 401 (no account enumeration on this path). Failed attempts are throttled
+ * per ip+email BEFORE the bcrypt compare so the hash can't be used as a CPU amplifier.
+ */
+app.post('/api/auth/login', async (req: Request, res: Response) => {
+  const rawEmail = typeof req.body?.email === 'string' ? req.body.email : '';
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  const client: string | null =
+    typeof req.body?.client === 'string' ? req.body.client.slice(0, 32) : null;
+  const email = normalizeEmail(rawEmail);
+
+  if (!email || !password) {
+    return res.status(400).json({ ok: false, error: 'email and password are required' });
+  }
+  const key = attemptKey(req.ip ?? 'unknown', email);
+  if (isThrottled(key)) {
+    return res.status(429).json({ ok: false, error: 'too many attempts, try again later' });
+  }
+  try {
+    const userId = await loginUser(pool, email, password);
+    if (!userId) {
+      recordFailure(key);
+      return res.status(401).json({ ok: false, error: 'invalid email or password' });
+    }
+    clearFailures(key);
     const sessionToken = await createSession(pool, userId, client);
     res.json({ ok: true, session_token: sessionToken, user_id: userId });
   } catch (err) {
-    console.error('apple auth failed:', err);
-    res.status(401).json({ ok: false, error: 'invalid apple token' });
+    console.error('login failed:', err);
+    res.status(500).json({ ok: false, error: 'login failed' });
   }
 });
 

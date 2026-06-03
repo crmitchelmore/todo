@@ -1,6 +1,4 @@
 import {
-  createRemoteJWKSet,
-  jwtVerify,
   exportJWK,
   importPKCS8,
   generateKeyPair,
@@ -8,51 +6,69 @@ import {
   type KeyLike,
 } from 'jose';
 import { createHash, randomBytes } from 'crypto';
+import bcrypt from 'bcryptjs';
 import type pg from 'pg';
 
 /**
- * Capture auth: Sign in with Apple + opaque, revocable sessions.
+ * Capture auth: email + password credentials on top of opaque, revocable sessions.
  *
  * Two distinct credentials, on purpose:
- *  - REST backend (`/api/data`, `/api/capture`, `/api/auth/token`) is gated by an OPAQUE session
- *    token (random; we only persist its SHA-256). Opaque => trivially revocable (logout, Apple
- *    credential revoked, account deletion) and nothing sensitive is self-contained in the token.
+ *  - The REST backend (`/api/data`, `/api/capture`, `/api/auth/token`) is gated by an OPAQUE
+ *    session token (random; we only persist its SHA-256). Opaque => trivially revocable (logout,
+ *    account deletion) and nothing sensitive is self-contained in the token.
  *  - PowerSync still receives a short-lived RS256 JWT minted per request (`aud=powersync`, `sub`
  *    = the user's id), which the PowerSync service verifies via our JWKS. Strict, separate `aud`
  *    keeps the two from being interchangeable.
+ *
+ * Federated/social providers (Apple, Google, …) can be added later purely additively: a row in
+ * `user_identities` links a provider subject to the same `users.id` — no reshaping of ownership.
  */
 
-const APPLE_ISSUER = 'https://appleid.apple.com';
-const appleJwks = createRemoteJWKSet(new URL('https://appleid.apple.com/auth/keys'));
+// --- Email + password credentials -------------------------------------------------------------
 
-export interface AppleClaims {
-  sub: string;
-  email?: string;
+// bcrypt only consumes the first 72 bytes of its input. Pre-hashing with SHA-256 (base64, fixed
+// ASCII, no null bytes) lets passwords be arbitrarily long without silent truncation. The scheme
+// tag makes the stored hash self-describing so we can migrate to argon2id later without guessing.
+const PW_SCHEME = 'bcrypt-sha256';
+const BCRYPT_COST = 12;
+const MIN_PASSWORD_LEN = 8;
+const MAX_PASSWORD_LEN = 1024; // bound raw input so a giant body can't tie up CPU before hashing.
+
+/** Canonical email form used for storage, the unique index, and login lookup (server-authoritative). */
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
 }
 
-/**
- * Verify an Apple ID token: signature (Apple JWKS), issuer, exact audience, expiry, and — when a
- * raw nonce is supplied — that its SHA-256 matches the token's `nonce` claim (replay protection;
- * native clients set `request.nonce = sha256(raw)` and send us `raw`).
- */
-export async function verifyAppleIdentityToken(
-  token: string,
-  audiences: string[],
-  rawNonce?: string,
-  jwks: Parameters<typeof jwtVerify>[1] = appleJwks
-): Promise<AppleClaims> {
-  const { payload } = await jwtVerify(token, jwks, {
-    issuer: APPLE_ISSUER,
-    audience: audiences,
-    maxTokenAge: '10m',
-  });
-  if (rawNonce) {
-    const expected = createHash('sha256').update(rawNonce).digest('hex');
-    if (payload.nonce !== expected) throw new Error('nonce mismatch');
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export function isValidEmail(email: string): boolean {
+  return email.length <= 254 && EMAIL_RE.test(email);
+}
+
+export function isValidPassword(password: string): boolean {
+  return password.length >= MIN_PASSWORD_LEN && password.length <= MAX_PASSWORD_LEN;
+}
+
+function prehash(password: string): string {
+  return createHash('sha256').update(password, 'utf8').digest('base64');
+}
+
+export async function hashPassword(password: string): Promise<string> {
+  const hash = await bcrypt.hash(prehash(password), BCRYPT_COST);
+  return `${PW_SCHEME}$${hash}`;
+}
+
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  const prefix = `${PW_SCHEME}$`;
+  if (!stored.startsWith(prefix)) return false;
+  return bcrypt.compare(prehash(password), stored.slice(prefix.length));
+}
+
+/** Thrown when a registration collides with an existing account (unique index on lower(email)). */
+export class EmailTakenError extends Error {
+  constructor() {
+    super('email already registered');
+    this.name = 'EmailTakenError';
   }
-  if (typeof payload.sub !== 'string' || !payload.sub) throw new Error('apple token missing sub');
-  const email = typeof payload.email === 'string' ? payload.email : undefined;
-  return { sub: payload.sub, email };
 }
 
 // --- Opaque session tokens --------------------------------------------------------------------
@@ -99,47 +115,83 @@ export async function revokeSession(pool: pg.Pool, token: string): Promise<void>
   );
 }
 
-/**
- * Map an Apple identity to a stable internal user id, creating the user + identity on first
- * sign-in. Returns the internal `users.id` (which is the row `owner_id` everywhere).
- */
-export async function upsertUserForApple(
-  pool: pg.Pool,
-  sub: string,
-  email: string | undefined
-): Promise<string> {
-  const existing = await pool.query(
-    `SELECT user_id FROM public.user_identities WHERE provider = 'apple' AND provider_subject = $1`,
-    [sub]
-  );
-  if ((existing.rowCount ?? 0) > 0) return existing.rows[0].user_id as string;
+// --- Registration / login ---------------------------------------------------------------------
 
-  const client = await pool.connect();
+/**
+ * Create a new account and its first session in a single transaction (so we never leave an
+ * account with no usable session). The email must already be valid and the password length
+ * checked by the caller. Throws `EmailTakenError` on a duplicate email — the unique index is the
+ * real guard against the register race, not a prior SELECT.
+ */
+export async function registerUser(
+  pool: pg.Pool,
+  email: string,
+  password: string,
+  client: string | null,
+  ttlDays = 30
+): Promise<{ userId: string; sessionToken: string }> {
+  const normalized = normalizeEmail(email);
+  const passwordHash = await hashPassword(password);
+  const token = newOpaqueToken();
+  const expires = new Date(Date.now() + ttlDays * 86_400_000);
+
+  const conn = await pool.connect();
   try {
-    await client.query('BEGIN');
-    const u = await client.query(
-      `INSERT INTO public.users (email) VALUES ($1) RETURNING id`,
-      [email ?? null]
+    await conn.query('BEGIN');
+    let userId: string;
+    try {
+      const u = await conn.query(
+        `INSERT INTO public.users (email, password_hash) VALUES ($1, $2) RETURNING id`,
+        [normalized, passwordHash]
+      );
+      userId = u.rows[0].id as string;
+    } catch (err) {
+      if ((err as { code?: string }).code === '23505') {
+        await conn.query('ROLLBACK');
+        throw new EmailTakenError();
+      }
+      throw err;
+    }
+    await conn.query(
+      `INSERT INTO public.sessions (user_id, token_hash, client, expires_at)
+       VALUES ($1, $2, $3, $4)`,
+      [userId, hashToken(token), client, expires]
     );
-    await client.query(
-      `INSERT INTO public.user_identities (user_id, provider, provider_subject, email)
-       VALUES ($1, 'apple', $2, $3)
-       ON CONFLICT (provider, provider_subject) DO NOTHING`,
-      [u.rows[0].id, sub, email ?? null]
-    );
-    // Re-read to resolve the winner of any concurrent first-login race.
-    const resolved = await client.query(
-      `SELECT user_id FROM public.user_identities WHERE provider = 'apple' AND provider_subject = $1`,
-      [sub]
-    );
-    await client.query('COMMIT');
-    return resolved.rows[0].user_id as string;
+    await conn.query('COMMIT');
+    return { userId, sessionToken: token };
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (!(err instanceof EmailTakenError)) {
+      try {
+        await conn.query('ROLLBACK');
+      } catch {
+        /* already rolled back */
+      }
+    }
     throw err;
   } finally {
-    client.release();
+    conn.release();
   }
+}
+
+/**
+ * Verify an email + password. Returns the internal user id on success, or null on either a missing
+ * account or a wrong password — the caller surfaces a single generic error so the two are
+ * indistinguishable to clients.
+ */
+export async function loginUser(
+  pool: pg.Pool,
+  email: string,
+  password: string
+): Promise<string | null> {
+  const normalized = normalizeEmail(email);
+  const r = await pool.query(
+    `SELECT id, password_hash FROM public.users
+     WHERE lower(email) = $1 AND password_hash IS NOT NULL`,
+    [normalized]
+  );
+  if ((r.rowCount ?? 0) === 0) return null;
+  const ok = await verifyPassword(password, r.rows[0].password_hash as string);
+  return ok ? (r.rows[0].id as string) : null;
 }
 
 // --- RS256 signing key for PowerSync tokens ---------------------------------------------------

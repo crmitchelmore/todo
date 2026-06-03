@@ -5,7 +5,7 @@ import { getToken, clearSession } from '../lib/auth';
 const BACKEND_URL = config.backendUrl;
 const POWERSYNC_URL = config.powersyncUrl;
 
-/** Bearer header carrying the opaque Sign in with Apple session token (omitted when signed out). */
+/** Bearer header carrying the opaque session token (omitted when signed out). */
 function authHeaders(): Record<string, string> {
   const token = getToken();
   return token ? { Authorization: `Bearer ${token}` } : {};

@@ -1,19 +1,34 @@
 import { useState } from 'react';
-import { signInWithApple } from '../lib/auth';
+import { signIn, register } from '../lib/auth';
 
-/** Sign in with Apple gate shown before the capture UI when there's no active session. */
+type Mode = 'signIn' | 'register';
+
+/** Email + password gate shown before the capture UI when there's no active session. */
 export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
+  const [mode, setMode] = useState<Mode>('signIn');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function handle() {
+  async function handle(e: React.FormEvent) {
+    e.preventDefault();
     setError(null);
+    if (!email.trim() || !password) {
+      setError('Enter your email and password.');
+      return;
+    }
+    if (mode === 'register' && password.length < 8) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
     setBusy(true);
     try {
-      await signInWithApple();
+      if (mode === 'register') await register(email, password);
+      else await signIn(email, password);
       onSignedIn();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Sign in failed');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sign in failed');
     } finally {
       setBusy(false);
     }
@@ -23,9 +38,49 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
     <div className="signin">
       <h1>Capture</h1>
       <p className="signin-sub">Sign in to sync your todos across your devices.</p>
-      <button className="apple-signin" onClick={handle} disabled={busy}>
-        {busy ? 'Signing in…' : ' Sign in with Apple'}
-      </button>
+
+      <div className="signin-tabs" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'signIn'}
+          className={mode === 'signIn' ? 'active' : ''}
+          onClick={() => { setMode('signIn'); setError(null); }}
+        >
+          Sign In
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'register'}
+          className={mode === 'register' ? 'active' : ''}
+          onClick={() => { setMode('register'); setError(null); }}
+        >
+          Create Account
+        </button>
+      </div>
+
+      <form className="signin-form" onSubmit={handle}>
+        <input
+          type="email"
+          placeholder="Email"
+          autoComplete="username"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          disabled={busy}
+        />
+        <input
+          type="password"
+          placeholder="Password"
+          autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          disabled={busy}
+        />
+        <button className="signin-submit" type="submit" disabled={busy}>
+          {busy ? 'Please wait…' : mode === 'register' ? 'Create Account' : 'Sign In'}
+        </button>
+      </form>
       {error && <p className="signin-error">{error}</p>}
     </div>
   );

@@ -1,27 +1,37 @@
--- Capture — multi-user auth (Sign in with Apple).
+-- Capture — multi-user auth (email + password).
 -- Additive, idempotent migration applied to the LIVE Postgres (run via psql over the proxy).
 -- Adds the identity model and makes task/tag ownership a real foreign key.
 --
 -- Fresh-start policy (user chose NOT to migrate the single-user data): the old DEV_USER_ID
--- rows are removed so the NOT NULL FK on owner_id can be added cleanly. Anyone who signs in
+-- rows are removed so the NOT NULL FK on owner_id can be added cleanly. Anyone who signs up
 -- gets their own user id; no new row is ever assigned the legacy DEV_USER_ID.
 
 \connect postgres;
 
--- A person. Identity providers attach to this via user_identities so adding Google/email/passkey
--- later is purely additive (no reshaping of ownership).
+-- A person. Credentials attach here: `password_hash` for email+password sign-in today;
+-- `user_identities` rows for federated/social providers (Apple/Google) added later — purely
+-- additive, no reshaping of ownership.
 create table if not exists public.users (
-  id          uuid primary key default gen_random_uuid(),
-  email       text,
-  created_at  timestamptz not null default now()
+  id             uuid primary key default gen_random_uuid(),
+  email          text,
+  password_hash  text,
+  created_at     timestamptz not null default now()
 );
+-- Existing databases predating password auth: add the column in place.
+alter table public.users add column if not exists password_hash text;
+
+-- One account per email (case-insensitive). Partial so federated-only users with no email are
+-- still allowed. Email is normalised (lower+trim) server-side before insert, so a plain
+-- lower(email) index matches both the uniqueness guarantee and the login lookup path.
+create unique index if not exists users_email_unique on public.users (lower(email)) where email is not null;
 
 -- Federated identity: (provider, subject) is globally unique and maps to exactly one user.
+-- Reserved for social sign-in (Apple/Google/…); email+password uses users.password_hash directly.
 create table if not exists public.user_identities (
   id                uuid primary key default gen_random_uuid(),
   user_id           uuid not null references public.users(id) on delete cascade,
-  provider          text not null,            -- 'apple' (future: 'google', 'email', ...)
-  provider_subject  text not null,            -- Apple `sub` (stable per-user, per-team)
+  provider          text not null,            -- future: 'apple', 'google', …
+  provider_subject  text not null,            -- the provider's stable per-user subject
   email             text,
   created_at        timestamptz not null default now(),
   unique (provider, provider_subject)

@@ -194,10 +194,17 @@ public final class BackendConnector: PowerSyncBackendConnectorProtocol, @uncheck
 public enum CaptureError: Error, Sendable {
     case auth(String)
     case upload(String)
+
+    /// The human-readable detail carried by the error (used to surface backend messages in the UI).
+    public var message: String {
+        switch self {
+        case .auth(let m), .upload(let m): return m
+        }
+    }
 }
 
 extension URLRequest {
-    /// Adds the opaque Sign in with Apple session token when one is present (no-op when signed out).
+    /// Adds the opaque session token when one is present (no-op when signed out).
     mutating func applyBearer(_ token: String?) {
         if let token, !token.isEmpty {
             setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

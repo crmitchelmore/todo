@@ -1,8 +1,7 @@
 import Foundation
 
-/// The credential the app holds after a successful Sign in with Apple exchange: an opaque,
-/// server-revocable session token plus the user's internal id (== `owner_id` for local writes).
-/// The Apple identity token itself is single-use and never stored.
+/// The credential the app holds after a successful sign-in: an opaque, server-revocable session
+/// token plus the user's internal id (== `owner_id` for local writes). The password is never stored.
 public struct AuthSession: Sendable, Equatable {
     public let token: String
     public let userId: String
@@ -29,12 +28,13 @@ private struct BackendAuthResponse: Decodable {
     let error: String?
 }
 
-/// Owns the Sign in with Apple flow and the resulting opaque session, persisting it in a shared
-/// Keychain access group so the main app, Share Extension and App Intents all read the same login.
+/// Owns the email + password sign-in flow and the resulting opaque session, persisting it in a
+/// shared Keychain access group so the main app, Share Extension and App Intents all read the
+/// same login.
 ///
-/// Deliberately small and UI-agnostic: the AppKit/UIKit layers run `ASAuthorizationController`,
-/// then call `signIn(appleIdentityToken:rawNonce:)`. State changes are broadcast via `onChange`
-/// so a view controller can swap between the sign-in gate and the capture UI.
+/// Deliberately small and UI-agnostic: the AppKit/UIKit layers collect an email + password, then
+/// call `signIn(email:password:client:)` or `register(email:password:client:)`. State changes are
+/// broadcast via `onChange` so a view controller can swap between the sign-in gate and capture UI.
 public final class AuthStore: @unchecked Sendable, TokenProviding {
     private let backendURL: URL
     private let keychain: Keychain
@@ -76,17 +76,24 @@ public final class AuthStore: @unchecked Sendable, TokenProviding {
 
     // MARK: Flow
 
-    /// Exchange an Apple identity token for an opaque session token. `rawNonce` is the un-hashed
-    /// nonce we generated for this request; the backend checks `sha256(rawNonce)` against the
-    /// token's `nonce` claim to bind the assertion to this login attempt.
+    /// Sign in with an existing email + password, exchanging them for an opaque session token.
     @discardableResult
-    public func signIn(appleIdentityToken: String, rawNonce: String?, client: String) async throws -> AuthSession {
-        var req = URLRequest(url: backendURL.appendingPathComponent("api/auth/apple"))
+    public func signIn(email: String, password: String, client: String) async throws -> AuthSession {
+        try await authenticate(path: "api/auth/login", email: email, password: password, client: client)
+    }
+
+    /// Create a new account with an email + password, returning the opaque session for it.
+    @discardableResult
+    public func register(email: String, password: String, client: String) async throws -> AuthSession {
+        try await authenticate(path: "api/auth/register", email: email, password: password, client: client)
+    }
+
+    private func authenticate(path: String, email: String, password: String, client: String) async throws -> AuthSession {
+        var req = URLRequest(url: backendURL.appendingPathComponent(path))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.timeoutInterval = 15
-        var body: [String: Any] = ["identity_token": appleIdentityToken, "client": client]
-        if let rawNonce { body["nonce"] = rawNonce }
+        req.timeoutInterval = 20
+        let body: [String: Any] = ["email": email, "password": password, "client": client]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await session.data(for: req)
