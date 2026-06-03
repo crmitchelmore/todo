@@ -1,110 +1,84 @@
-# Sign in with Apple — rollout runbook
+# Auth rollout runbook — email + password (multi-user)
 
-Capture moved from a single shared API secret to per-user **Sign in with Apple**. Every client now
-signs in, the backend issues an opaque, revocable session token, and PowerSync only syncs the rows
-each user owns (`WHERE owner_id = auth.user_id()`).
+Capture uses per-user **email + password** auth (social sign-in is additive later). Each client
+signs in or registers, the backend issues an **opaque, revocable session token**, and PowerSync
+only syncs the rows each user owns (`WHERE owner_id = auth.user_id()`).
 
-This change is **coordinated and partly destructive**, so it is intentionally a deliberate go-live
-rather than an automatic deploy:
+> History: we briefly shipped Sign in with Apple but reverted it — a grouped/secondary Mac App ID
+> can't carry the `applesignin` entitlement in its Developer ID provisioning profile, so the Mac
+> build was unsignable. Email + password removes all Apple-portal dependency and is deterministic
+> across surfaces (same email+password ⇒ same backend user ⇒ todos sync).
 
-- The migration deletes the old single-user (`DEV_USER_ID`) tasks/tags — a fresh start (approved).
-- The new backend rejects the old static secret, so the **currently-installed Mac/iOS builds stop
-  syncing** until they are replaced with the sign-in builds.
-- Sign in with Apple can only be verified **interactively** (your Apple ID + Face ID/Touch ID).
+## Design (what's deployed)
 
-Do the steps below in order, in one sitting.
+Two credentials, by design:
 
-## 0. Prerequisites (Apple Developer portal — one-time)
+1. **Opaque session token** — random; only its SHA-256 is stored in `public.sessions`. Sent as a
+   Bearer token to the REST backend. Revocable (logout / account deletion = a row update).
+2. **Short-lived RS256 PowerSync JWT** — `aud=powersync`, `sub=users.id`, ~5 min TTL. Minted
+   per-request via `GET /api/auth/token`, verified by PowerSync against the backend JWKS
+   (`GET /api/auth/keys`).
 
-App IDs (team `8X4ZN58TYH`):
+Per-user isolation is enforced at the **database boundary**: `owner_id` foreign keys on
+`tasks`/`tags` (cascade on user delete) plus the PowerSync per-user sync filter. `owner_id` is
+forced server-side from the session — never trusted from the client.
 
-- `dev.crmitchelmore.capture.ios` (iOS app)
-- `dev.crmitchelmore.capture.mac` (macOS app)
-- `dev.crmitchelmore.capture.ios.share` (share extension — no auth needed)
+Passwords: **bcryptjs** (pure-JS, cost 12) with a SHA-256 base64 pre-hash to bound input under
+bcrypt's 72-byte truncation limit. Stored self-describing as `bcrypt-sha256$<hash>` so a future
+argon2id migration is a clean swap. Email is normalised (lower+trim) **server-side** before
+insert; a partial unique index on `lower(email)` is the uniqueness + login-lookup path.
 
-1. For the **iOS** and **macOS** App IDs, enable the **Sign in with Apple** capability.
-2. Group both under **one primary App ID** so Apple issues the **same `sub`** for you on both
-   platforms (otherwise iOS-you and Mac-you would be two separate accounts). In the capability
-   config, set one as primary and the other as "Grouped with primary App ID".
-3. Regenerate the provisioning profiles that the iOS app + macOS app are signed with so they carry
-   the new `com.apple.developer.applesignin` entitlement (already added to the entitlements files).
-4. **Web only** (optional, deferred): create a **Services ID** `dev.crmitchelmore.capture.web`,
-   enable Sign in with Apple on it, register the hosted HTTPS domain + return URL, and verify the
-   domain. The web sign-in cannot work until the web app is hosted on that domain.
+## Endpoints
 
-> The App Store Connect API key `Y6C8R5DA75` can toggle the bundle-id capability, but grouping,
-> Services IDs and domain verification are portal UI steps.
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/api/auth/register` | Create account → `{session_token, user_id}` (409 if email taken) |
+| POST | `/api/auth/login` | `{session_token, user_id}`; generic 401 for unknown email **or** wrong password |
+| POST | `/api/auth/logout` | Revoke the current session |
+| GET | `/api/auth/token` | Mint a short-lived per-user PowerSync JWT |
+| GET | `/api/auth/keys` | JWKS for PowerSync to verify the sync JWT |
 
-## 1. Backend environment (Railway `backend` service)
+A pre-bcrypt in-memory throttle (10 failed logins / 15 min per ip+email) runs **before** the
+hash compare. `trust proxy` is on so the client IP is the real one behind Railway.
 
-Set these env vars on the backend service (project `ee351d08-1020-464d-a8af-7616085de5a4`):
+## Go-live (DONE on 2026-06-03)
 
-| Var | Value |
-| --- | --- |
-| `BACKEND_JWT_PRIVATE_KEY` | The persistent RS256 private key PEM (newlines as literal `\n`). Generated locally with `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048`. Keeps the JWKS stable across restarts so in-flight PowerSync tokens stay valid. |
-| `APPLE_NATIVE_AUD` | `dev.crmitchelmore.capture.ios,dev.crmitchelmore.capture.mac` (comma-separated; default already matches). |
-| `APPLE_WEB_AUD` | `dev.crmitchelmore.capture.web` |
-| `JWT_AUDIENCE` | `powersync` (already the default). |
+1. **Migration** — `db/migrations/002-auth.sql` applied to live PG over the TCP proxy. Additive +
+   idempotent: creates `users` (+`password_hash`) / `user_identities` / `sessions`, partial unique
+   index on `lower(email)`, owner FKs, owner indexes. Destructive only in that it deletes the
+   legacy `DEV_USER_ID` rows (fresh-start policy, approved). **7 legacy test tasks removed.**
+2. **Backend env** — `BACKEND_JWT_PRIVATE_KEY` already set on Railway. `APPLE_NATIVE_AUD` /
+   `APPLE_WEB_AUD` are now unused (harmless; can be removed).
+3. **Deploy** — `railway up --ci --service backend` then `--service powersync`, **from repo root**.
+4. **Verified live** — register → login (same `user_id`) → wrong password 401 → JWKS serves →
+   `GET /api/auth/token` mints a JWT with `sub=user_id, aud=powersync` → `/api/capture` creates an
+   owner-scoped row → PowerSync `/sync/stream` returns an owner-scoped bucket containing only that
+   user's task. Verification accounts cleaned up afterwards (DB back to 0 users / 0 tasks).
+5. **Clients** — Mac release on tag `mac-v0.2.0` (notarised + Sparkle appcast); iOS to TestFlight
+   via the `release-ios.yml` workflow_dispatch. Web bundle is static (no live host configured yet).
 
-Generate + set the key (run from a checkout; do **not** commit the PEM):
-
-```bash
-openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /tmp/capture-jwt-private.pem
-ONE_LINE=$(awk 'BEGIN{ORS="\\n"} {print}' /tmp/capture-jwt-private.pem)
-railway variables --service backend \
-  --project ee351d08-1020-464d-a8af-7616085de5a4 \
-  --environment 585ea813-c8be-481c-9713-9f0387ca4331 \
-  --set "BACKEND_JWT_PRIVATE_KEY=$ONE_LINE"
-```
-
-(`RAILWAY_API_TOKEN` = the account token; **not** `RAILWAY_TOKEN`.)
-
-## 2. Migrate the live database
-
-Apply `db/migrations/002-auth.sql` over the Railway TCP proxy. The **real** Postgres password lives
-inside the backend's `BACKEND_DATABASE_URI` env var (the `POSTGRES_PASSWORD` var is stale).
+## Verify after a redeploy
 
 ```bash
-# Pull the password from the backend service env, then:
-psql "postgresql://postgres:<password>@acela.proxy.rlwy.net:45610/postgres" \
-  -f db/migrations/002-auth.sql
+BE=https://backend-production-de2f.up.railway.app
+EMAIL="you+test@example.com"
+# register
+curl -s -X POST $BE/api/auth/register -H 'content-type: application/json' \
+  -d "{\"email\":\"$EMAIL\",\"password\":\"a-long-password\"}"
+# login returns the SAME user_id
+curl -s -X POST $BE/api/auth/login -H 'content-type: application/json' \
+  -d "{\"email\":\"$EMAIL\",\"password\":\"a-long-password\"}"
+# wrong password -> generic 401
+curl -s -X POST $BE/api/auth/login -H 'content-type: application/json' \
+  -d "{\"email\":\"$EMAIL\",\"password\":\"wrong\"}"
 ```
 
-The migration is additive (creates `users`, `user_identities`, `sessions`; adds `owner_id` FKs;
-deletes the old `DEV_USER_ID` rows) and idempotent.
+Then on a client: register on one surface, log in with the same credentials on Mac + iOS + web →
+shared todos; a second account is fully isolated; sign-out clears the local list.
 
-## 3. Deploy backend + PowerSync (from repo root)
+## Deferred (non-blocking for a single trusted user)
 
-```bash
-railway up --ci --service backend  --project ee351d08-... --environment 585ea813-...
-railway up --ci --service powersync --project ee351d08-... --environment 585ea813-...
-```
-
-PowerSync picks up the new per-user `sync-config.yaml` (baked into its image) and the tightened
-`audience: ["powersync"]` on restart.
-
-## 4. Ship the native builds
-
-- **macOS**: build + sign + notarize, then install (or `git tag mac-v0.x.y && git push --tags` for
-  the Sparkle release). See `docs/mac-release.md`.
-- **iOS**: archive + upload to TestFlight. See `docs/testflight.md`.
-
-Both now require the Sign in with Apple entitlement — make sure the regenerated provisioning
-profiles (step 0.3) are used.
-
-## 5. Verify (interactive — you)
-
-1. Open the Mac app → you should see the **Sign in with Apple** gate. Sign in.
-2. Capture a todo → confirm it → it should stay `active` and appear in Postgres with **your** new
-   `users.id` as `owner_id`.
-3. Open the iOS app, sign in with the **same Apple ID** → the same todos sync in (proves shared
-   `sub` / per-user sync).
-4. Two-user isolation check: sign in on a second Apple ID (or ask a second person) → confirm they
-   see **none** of your rows and you see none of theirs.
-5. Sign out on the Mac → the local list clears and the gate returns.
-
-## Rollback
-
-- The migration is additive; to revert behaviour, redeploy the previous backend image (pre-auth)
-  and restore the old `sync-config.yaml`. The dropped `DEV_USER_ID` rows are not recoverable (this
-  was an accepted fresh start).
+Email verification, password reset, web HttpOnly-cookie sessions (localStorage XSS risk accepted
+while web isn't HTTPS-hosted), and persistent (Redis/PG) rate-limiting (in-memory is fine for one
+Railway instance). `register` reveals email existence via 409 (acceptable for a small user base);
+`login` does not enumerate. Social sign-in attaches later via `user_identities` — purely additive.
