@@ -88,6 +88,64 @@ public final class AuthStore: @unchecked Sendable, TokenProviding {
         try await authenticate(path: "api/auth/register", email: email, password: password, client: client)
     }
 
+    /// Passwordless sign-in, step 1: ask the backend to email a one-time code. Always succeeds
+    /// server-side (no account enumeration); throws only on a network/transport failure.
+    public func requestEmailCode(email: String) async throws {
+        try await postIssue(path: "api/auth/email-code", body: ["email": email])
+    }
+
+    /// Passwordless sign-in, step 2: exchange the emailed code for a session.
+    @discardableResult
+    public func verifyEmailCode(email: String, code: String, client: String) async throws -> AuthSession {
+        try await postSession(path: "api/auth/email-code/verify", body: ["email": email, "code": code, "client": client])
+    }
+
+    /// Forgot password, step 1: ask the backend to email a reset code (always succeeds — no enumeration).
+    public func requestPasswordReset(email: String) async throws {
+        try await postIssue(path: "api/auth/forgot", body: ["email": email])
+    }
+
+    /// Forgot password, step 2: set a new password with the emailed code; signs in on success.
+    @discardableResult
+    public func resetPassword(email: String, code: String, password: String, client: String) async throws -> AuthSession {
+        try await postSession(path: "api/auth/reset", body: ["email": email, "code": code, "password": password, "client": client])
+    }
+
+    /// POST a body to an always-200 issuance endpoint; throws only on transport/5xx failure.
+    private func postIssue(path: String, body: [String: Any]) async throws {
+        var req = URLRequest(url: backendURL.appendingPathComponent(path))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 20
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw CaptureError.auth("no response") }
+        guard http.statusCode == 200 else {
+            let decoded = try? JSONDecoder().decode(BackendAuthResponse.self, from: data)
+            throw CaptureError.auth(decoded?.error ?? "request failed (\(http.statusCode))")
+        }
+    }
+
+    /// POST a body to an endpoint that returns a session, storing it and signing the user in.
+    @discardableResult
+    private func postSession(path: String, body: [String: Any]) async throws -> AuthSession {
+        var req = URLRequest(url: backendURL.appendingPathComponent(path))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 20
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw CaptureError.auth("no response") }
+        let decoded = try? JSONDecoder().decode(BackendAuthResponse.self, from: data)
+        guard http.statusCode == 200, decoded?.ok == true,
+              let token = decoded?.session_token, let userId = decoded?.user_id else {
+            throw CaptureError.auth(decoded?.error ?? "sign-in failed (\(http.statusCode))")
+        }
+        let session = AuthSession(token: token, userId: userId)
+        store(session)
+        return session
+    }
+
     private func authenticate(path: String, email: String, password: String, client: String) async throws -> AuthSession {
         var req = URLRequest(url: backendURL.appendingPathComponent(path))
         req.httpMethod = "POST"

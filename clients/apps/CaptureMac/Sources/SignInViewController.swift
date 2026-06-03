@@ -18,6 +18,8 @@ final class SignInViewController: NSViewController {
     private let emailField = NSTextField()
     private let passwordField = NSSecureTextField()
     private let submit = NSButton(title: "Sign In", target: nil, action: nil)
+    private let forgotButton = NSButton(title: "Forgot password?", target: nil, action: nil)
+    private let codeButton = NSButton(title: "Email me a sign-in code", target: nil, action: nil)
     private let status = NSTextField(labelWithString: "")
     private let spinner = NSProgressIndicator()
 
@@ -65,6 +67,20 @@ final class SignInViewController: NSViewController {
         submit.action = #selector(submitTapped)
         Theme.primary(submit, fontSize: 15)
 
+        forgotButton.bezelStyle = .inline
+        forgotButton.isBordered = false
+        forgotButton.contentTintColor = Theme.textSecondary
+        forgotButton.font = .systemFont(ofSize: 13, weight: .medium)
+        forgotButton.target = self
+        forgotButton.action = #selector(forgotTapped)
+
+        codeButton.bezelStyle = .inline
+        codeButton.isBordered = false
+        codeButton.contentTintColor = Theme.signal
+        codeButton.font = .systemFont(ofSize: 14, weight: .semibold)
+        codeButton.target = self
+        codeButton.action = #selector(codeTapped)
+
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
@@ -75,10 +91,11 @@ final class SignInViewController: NSViewController {
         status.maximumNumberOfLines = 3
         status.isHidden = true
 
-        let stack = NSStackView(views: [title, subtitle, segmented, emailField, passwordField, submit, spinner, status])
+        let stack = NSStackView(views: [title, subtitle, segmented, emailField, passwordField, submit, forgotButton, codeButton, spinner, status])
         stack.orientation = .vertical
         stack.alignment = .centerX
         stack.spacing = 16
+        stack.setCustomSpacing(20, after: submit)
         stack.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(stack)
         NSLayoutConstraint.activate([
@@ -95,7 +112,16 @@ final class SignInViewController: NSViewController {
         mode = segmented.selectedSegment == 0 ? .signIn : .register
         submit.title = mode == .signIn ? "Sign In" : "Create Account"
         Theme.primary(submit, fontSize: 15)
+        forgotButton.isHidden = mode != .signIn
         status.isHidden = true
+    }
+
+    @objc private func forgotTapped() { present(purpose: .reset) }
+    @objc private func codeTapped() { present(purpose: .login) }
+
+    private func present(purpose: CodeAuthViewController.Purpose) {
+        let vc = CodeAuthViewController(auth: auth, purpose: purpose, onSignedIn: onSignedIn)
+        presentAsSheet(vc)
     }
 
     @objc private func submitTapped() {
@@ -134,6 +160,8 @@ final class SignInViewController: NSViewController {
         segmented.isEnabled = !busy
         emailField.isEnabled = !busy
         passwordField.isEnabled = !busy
+        forgotButton.isEnabled = !busy
+        codeButton.isEnabled = !busy
     }
 
     private func show(error: String) {

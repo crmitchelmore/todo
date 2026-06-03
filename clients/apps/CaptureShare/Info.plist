@@ -4,6 +4,10 @@
 <dict>
 	<key>CFBundleDisplayName</key>
 	<string>Capture</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
 	<key>CAPTURE_API_SECRET</key>
 	<string>$(CAPTURE_API_SECRET)</string>
 	<key>CFBundleIdentifier</key>
