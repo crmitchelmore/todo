@@ -9,6 +9,9 @@ node_modules/
 # Build output
 dist/
 build/
+.ui-artifacts/
+web/playwright-report/
+web/test-results/
 
 # Env files (local dev defaults live in .env.example)
 .env
