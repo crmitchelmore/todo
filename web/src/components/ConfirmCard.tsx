@@ -75,10 +75,10 @@ export function ConfirmCard({ task }: { task: TaskRecord }) {
 
       <div className="card-actions">
         <button className="primary" onClick={accept}>
-          Confirm
+          Confirm <span className="kbd">⏎</span>
         </button>
         <button className="ghost" onClick={() => void reject(task.id)}>
-          Reject
+          Reject <span className="kbd">esc</span>
         </button>
         {task.suggestion_source && (
           <span className="hint">

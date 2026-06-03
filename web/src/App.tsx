@@ -58,6 +58,7 @@ export default function App() {
     <div className="app">
       <header>
         <h1>Capture</h1>
+        <span className="header-spacer" />
         <button className="tags-toggle" onClick={() => setShowTags((s) => !s)}>
           {showTags ? 'Close tags' : 'Manage tags'}
         </button>

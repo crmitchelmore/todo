@@ -50,7 +50,7 @@ export function CaptureBar() {
         spellCheck={false}
       />
       <button onClick={submit} disabled={!value.trim()}>
-        Capture
+        Capture <span className="kbd">⏎</span>
       </button>
       {flash && <span className="capture-flash">{flash}</span>}
     </div>
