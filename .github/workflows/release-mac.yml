@@ -110,8 +110,13 @@ jobs:
           security list-keychain -d user -s "$KEYCHAIN_PATH"
           rm -f "$CERT_PATH"
 
-      - name: Build Release Archive
+      - name: Build & Sign Archive (Developer ID, hardened runtime)
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          # Sign during archive so Xcode signs the app AND all nested Sparkle
+          # helpers (Autoupdate, Updater.app, XPC services) inside-out with the
+          # hardened runtime — exportArchive does not reliably apply runtime.
           xcodebuild archive \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
@@ -119,45 +124,22 @@ jobs:
             -archivePath "$RUNNER_TEMP/$PRODUCT_NAME.xcarchive" \
             -destination "generic/platform=macOS" \
             CODE_SIGN_STYLE=Manual \
-            CODE_SIGNING_ALLOWED=NO \
-            ENABLE_HARDENED_RUNTIME=YES
-
-      - name: Export & Sign (Developer ID)
-        env:
-          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          cat > "$RUNNER_TEMP/ExportOptions.plist" << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key><string>developer-id</string>
-            <key>teamID</key><string>${TEAM_ID}</string>
-            <key>signingStyle</key><string>automatic</string>
-            <key>signingCertificate</key><string>Developer ID Application</string>
-          </dict>
-          </plist>
-          EOF
-          xcodebuild -exportArchive \
-            -archivePath "$RUNNER_TEMP/$PRODUCT_NAME.xcarchive" \
-            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
-            -exportPath "$RUNNER_TEMP/export" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8 \
-            -authenticationKeyID "$KEY_ID" \
-            -authenticationKeyIssuerID "$ISSUER_ID" \
+            CODE_SIGN_IDENTITY="Developer ID Application" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
             ENABLE_HARDENED_RUNTIME=YES \
-            OTHER_CODE_SIGN_FLAGS="--options runtime"
+            OTHER_CODE_SIGN_FLAGS="--timestamp"
 
-      - name: Verify Signature & Hardened Runtime
+      - name: Locate & Verify Signed App
         run: |
-          APP_PATH="$RUNNER_TEMP/export/$PRODUCT_NAME.app"
+          APP_PATH="$RUNNER_TEMP/$PRODUCT_NAME.xcarchive/Products/Applications/$PRODUCT_NAME.app"
+          [ -d "$APP_PATH" ] || { echo "::error::archived app not found at $APP_PATH"; exit 1; }
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
           codesign --verify --deep --strict --verbose=2 "$APP_PATH"
           codesign -dv --verbose=4 "$APP_PATH" 2>&1 | tee /tmp/cs.txt
           grep -q "flags=.*runtime" /tmp/cs.txt || { echo "::error::hardened runtime missing on main app"; exit 1; }
-          # Sparkle's nested helpers must also be signed with runtime for notarization.
+          # Confirm Developer ID authority (not ad-hoc) and runtime on Sparkle helpers.
+          codesign -dv --verbose=4 "$APP_PATH" 2>&1 | grep -q "Authority=Developer ID Application" \
+            || { echo "::error::app not signed with Developer ID"; exit 1; }
           if [ -d "$APP_PATH/Contents/Frameworks/Sparkle.framework" ]; then
             codesign --verify --strict --verbose=2 "$APP_PATH/Contents/Frameworks/Sparkle.framework"
           fi
@@ -167,7 +149,6 @@ jobs:
           KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
-          APP_PATH="$RUNNER_TEMP/export/$PRODUCT_NAME.app"
           VERSION="${{ steps.version.outputs.version }}"
           ZIP_PATH="$RUNNER_TEMP/Capture-${VERSION}.zip"
           ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
