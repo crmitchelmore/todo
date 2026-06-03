@@ -14,7 +14,16 @@ import {
   isValidEmail,
   isValidPassword,
   EmailTakenError,
+  ensureAuthSchema,
+  issueAuthCode,
+  verifyAuthCode,
+  findOrCreateUserByEmail,
+  findUserIdByEmail,
+  resetPassword,
+  CODE_TTL_LOGIN_MS,
+  CODE_TTL_RESET_MS,
 } from './auth.js';
+import { sendEmailBestEffort, loginCodeEmail, resetCodeEmail } from './mailer.js';
 
 /**
  * Capture backend connector (multi-user, email + password auth).
@@ -198,6 +207,114 @@ app.post('/api/auth/logout', requireAuth, async (req: AuthedRequest, res: Respon
   }
 });
 
+/**
+ * Passwordless login — step 1: email a one-time code. Always 200 (no account enumeration). A new
+ * email simply gets a code and becomes an account on verify. Throttled per ip+email to stop an
+ * attacker from spamming someone's inbox.
+ */
+app.post('/api/auth/email-code', async (req: Request, res: Response) => {
+  const email = normalizeEmail(typeof req.body?.email === 'string' ? req.body.email : '');
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ ok: false, error: 'a valid email is required' });
+  }
+  const key = attemptKey(req.ip ?? 'unknown', `code:${email}`);
+  if (isThrottled(key)) {
+    return res.status(429).json({ ok: false, error: 'too many requests, try again later' });
+  }
+  recordFailure(key); // count issuance against the same window (cap emails per ip+email)
+  try {
+    const code = await issueAuthCode(pool, email, 'login', null, CODE_TTL_LOGIN_MS);
+    await sendEmailBestEffort(loginCodeEmail(email, code, CODE_TTL_LOGIN_MS / 60_000));
+  } catch (err) {
+    console.error('email-code issue failed:', err);
+  }
+  res.json({ ok: true }); // uniform response regardless of outcome
+});
+
+/**
+ * Passwordless login — step 2: verify the code and issue a session. Signs in an existing user or
+ * creates a new password-less account for a first-time email.
+ */
+app.post('/api/auth/email-code/verify', async (req: Request, res: Response) => {
+  const email = normalizeEmail(typeof req.body?.email === 'string' ? req.body.email : '');
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  const client: string | null =
+    typeof req.body?.client === 'string' ? req.body.client.slice(0, 32) : null;
+  if (!isValidEmail(email) || !code) {
+    return res.status(400).json({ ok: false, error: 'email and code are required' });
+  }
+  try {
+    const result = await verifyAuthCode(pool, email, 'login', code);
+    if (!result.ok) {
+      const status = result.reason === 'too_many_attempts' ? 429 : 401;
+      return res.status(status).json({ ok: false, error: 'that code is invalid or has expired' });
+    }
+    const userId = result.userId ?? (await findOrCreateUserByEmail(pool, email));
+    const sessionToken = await createSession(pool, userId, client);
+    res.json({ ok: true, session_token: sessionToken, user_id: userId });
+  } catch (err) {
+    console.error('email-code verify failed:', err);
+    res.status(500).json({ ok: false, error: 'sign-in failed' });
+  }
+});
+
+/**
+ * Forgot password — step 1: email a reset code. Always 200 (no enumeration): a code is only
+ * actually issued/sent when the email maps to a real account, but the response never reveals that.
+ */
+app.post('/api/auth/forgot', async (req: Request, res: Response) => {
+  const email = normalizeEmail(typeof req.body?.email === 'string' ? req.body.email : '');
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ ok: false, error: 'a valid email is required' });
+  }
+  const key = attemptKey(req.ip ?? 'unknown', `reset:${email}`);
+  if (isThrottled(key)) {
+    return res.status(429).json({ ok: false, error: 'too many requests, try again later' });
+  }
+  recordFailure(key);
+  try {
+    const userId = await findUserIdByEmail(pool, email);
+    if (userId) {
+      const code = await issueAuthCode(pool, email, 'reset', userId, CODE_TTL_RESET_MS);
+      await sendEmailBestEffort(resetCodeEmail(email, code, CODE_TTL_RESET_MS / 60_000));
+    }
+  } catch (err) {
+    console.error('forgot-password issue failed:', err);
+  }
+  res.json({ ok: true });
+});
+
+/**
+ * Forgot password — step 2: verify the reset code, set a new password, revoke existing sessions,
+ * and hand back a fresh session so the user is signed in immediately.
+ */
+app.post('/api/auth/reset', async (req: Request, res: Response) => {
+  const email = normalizeEmail(typeof req.body?.email === 'string' ? req.body.email : '');
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  const client: string | null =
+    typeof req.body?.client === 'string' ? req.body.client.slice(0, 32) : null;
+  if (!isValidEmail(email) || !code) {
+    return res.status(400).json({ ok: false, error: 'email and code are required' });
+  }
+  if (!isValidPassword(password)) {
+    return res.status(400).json({ ok: false, error: 'password must be at least 8 characters' });
+  }
+  try {
+    const result = await verifyAuthCode(pool, email, 'reset', code);
+    if (!result.ok || !result.userId) {
+      const status = result.ok === false && result.reason === 'too_many_attempts' ? 429 : 401;
+      return res.status(status).json({ ok: false, error: 'that code is invalid or has expired' });
+    }
+    await resetPassword(pool, result.userId, password);
+    const sessionToken = await createSession(pool, result.userId, client);
+    res.json({ ok: true, session_token: sessionToken, user_id: result.userId });
+  } catch (err) {
+    console.error('password reset failed:', err);
+    res.status(500).json({ ok: false, error: 'reset failed' });
+  }
+});
+
 app.get('/api/auth/token', requireAuth, async (req: AuthedRequest, res: Response) => {
   const token = await new SignJWT({})
     .setProtectedHeader({ alg: 'RS256', kid })
@@ -330,6 +447,8 @@ app.put('/api/data', requireAuth, async (req: AuthedRequest, res: Response) => {
     client.release();
   }
 });
+
+await ensureAuthSchema(pool);
 
 app.listen(PORT, () => {
   console.log(`capture-backend listening on :${PORT} (multi-user)`);

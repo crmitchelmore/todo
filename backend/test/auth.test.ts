@@ -10,6 +10,8 @@ import {
   normalizeEmail,
   isValidEmail,
   isValidPassword,
+  newNumericCode,
+  hashCode,
 } from '../src/auth.ts';
 
 test('hashPassword + verifyPassword round-trips, and salts so two hashes differ', async () => {
@@ -99,3 +101,23 @@ test('public JWK exposes no private key material', async () => {
 // generateKeyPair import retained for parity with prior fixtures; ensures the test toolchain
 // resolves jose the same way the app does.
 void generateKeyPair;
+
+test('newNumericCode returns a fixed-length all-digit string, preserving leading zeros', () => {
+  for (let i = 0; i < 500; i++) {
+    const code = newNumericCode();
+    assert.equal(code.length, 6, `expected 6 digits, got "${code}"`);
+    assert.match(code, /^[0-9]{6}$/);
+  }
+  // custom length honoured
+  assert.equal(newNumericCode(4).length, 4);
+});
+
+test('hashCode is deterministic, hex-encoded, and never echoes the raw code', () => {
+  const a = hashCode('123456');
+  const b = hashCode('123456');
+  const c = hashCode('123457');
+  assert.equal(a, b); // deterministic
+  assert.notEqual(a, c); // different inputs differ
+  assert.match(a, /^[0-9a-f]{64}$/); // sha256 hex
+  assert.ok(!a.includes('123456')); // raw code not present
+});

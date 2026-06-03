@@ -5,7 +5,7 @@ import {
   type JWK,
   type KeyLike,
 } from 'jose';
-import { createHash, randomBytes } from 'crypto';
+import { createHash, randomBytes, randomInt } from 'crypto';
 import bcrypt from 'bcryptjs';
 import type pg from 'pg';
 
@@ -192,6 +192,175 @@ export async function loginUser(
   if ((r.rowCount ?? 0) === 0) return null;
   const ok = await verifyPassword(password, r.rows[0].password_hash as string);
   return ok ? (r.rows[0].id as string) : null;
+}
+
+// --- One-time email codes (passwordless login + password reset) -------------------------------
+
+/**
+ * Short-lived numeric codes emailed to a user for two flows that share one table (`auth_codes`):
+ *  - `login`: passwordless sign-in — verifying a code signs in an existing user or creates a new
+ *    (password-less) account.
+ *  - `reset`: forgot-password — verifying a code authorises setting a new password.
+ *
+ * Codes are single-use, expiring, attempt-capped, and only the SHA-256 is stored (never the code).
+ * Issuing a new code for an (email, purpose) consumes any earlier unconsumed ones so only the
+ * newest works.
+ */
+export type CodePurpose = 'login' | 'reset';
+
+export const CODE_TTL_LOGIN_MS = 10 * 60_000;
+export const CODE_TTL_RESET_MS = 15 * 60_000;
+export const CODE_MAX_ATTEMPTS = 5;
+
+/** A 6-digit numeric one-time code (leading zeros preserved) — easy to read and type from an email. */
+export function newNumericCode(digits = 6): string {
+  return randomInt(0, 10 ** digits).toString().padStart(digits, '0');
+}
+
+export function hashCode(code: string): string {
+  return createHash('sha256').update(code).digest('hex');
+}
+
+/** Idempotently create the auth-codes table + lookup index (auto-migrates on deploy). */
+export async function ensureAuthSchema(pool: pg.Pool): Promise<void> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.auth_codes (
+      id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      email      text NOT NULL,
+      purpose    text NOT NULL,
+      code_hash  text NOT NULL,
+      user_id    uuid REFERENCES public.users(id) ON DELETE CASCADE,
+      attempts   integer NOT NULL DEFAULT 0,
+      expires_at timestamptz NOT NULL,
+      consumed_at timestamptz,
+      created_at timestamptz NOT NULL DEFAULT now()
+    )`);
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS auth_codes_lookup_idx
+       ON public.auth_codes (lower(email), purpose, consumed_at)`
+  );
+}
+
+/**
+ * Create + persist a one-time code and return the PLAINTEXT code (to email). Any earlier
+ * unconsumed code for the same (email, purpose) is consumed first so only the newest is valid.
+ */
+export async function issueAuthCode(
+  pool: pg.Pool,
+  email: string,
+  purpose: CodePurpose,
+  userId: string | null,
+  ttlMs: number
+): Promise<string> {
+  const normalized = normalizeEmail(email);
+  const code = newNumericCode();
+  const expires = new Date(Date.now() + ttlMs);
+  await pool.query(
+    `UPDATE public.auth_codes SET consumed_at = now()
+       WHERE lower(email) = $1 AND purpose = $2 AND consumed_at IS NULL`,
+    [normalized, purpose]
+  );
+  await pool.query(
+    `INSERT INTO public.auth_codes (email, purpose, code_hash, user_id, expires_at)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [normalized, purpose, hashCode(code), userId, expires]
+  );
+  return code;
+}
+
+export type CodeVerifyResult =
+  | { ok: true; userId: string | null }
+  | { ok: false; reason: 'invalid' | 'expired' | 'too_many_attempts' };
+
+/**
+ * Atomically verify the newest unconsumed code for (email, purpose). A wrong code increments
+ * `attempts` (and is rejected once the cap is hit); a correct, unexpired code is marked consumed.
+ * `FOR UPDATE` serialises concurrent verifies so attempts can't be raced past the cap.
+ */
+export async function verifyAuthCode(
+  pool: pg.Pool,
+  email: string,
+  purpose: CodePurpose,
+  code: string
+): Promise<CodeVerifyResult> {
+  const normalized = normalizeEmail(email);
+  const conn = await pool.connect();
+  try {
+    await conn.query('BEGIN');
+    const r = await conn.query(
+      `SELECT id, code_hash, user_id, attempts, expires_at
+         FROM public.auth_codes
+        WHERE lower(email) = $1 AND purpose = $2 AND consumed_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT 1
+        FOR UPDATE`,
+      [normalized, purpose]
+    );
+    if ((r.rowCount ?? 0) === 0) {
+      await conn.query('COMMIT');
+      return { ok: false, reason: 'invalid' };
+    }
+    const row = r.rows[0] as {
+      id: string; code_hash: string; user_id: string | null; attempts: number; expires_at: string;
+    };
+    if (new Date(row.expires_at).getTime() < Date.now()) {
+      await conn.query(`UPDATE public.auth_codes SET consumed_at = now() WHERE id = $1`, [row.id]);
+      await conn.query('COMMIT');
+      return { ok: false, reason: 'expired' };
+    }
+    if (row.attempts >= CODE_MAX_ATTEMPTS) {
+      await conn.query(`UPDATE public.auth_codes SET consumed_at = now() WHERE id = $1`, [row.id]);
+      await conn.query('COMMIT');
+      return { ok: false, reason: 'too_many_attempts' };
+    }
+    if (hashCode(code) !== row.code_hash) {
+      await conn.query(`UPDATE public.auth_codes SET attempts = attempts + 1 WHERE id = $1`, [row.id]);
+      await conn.query('COMMIT');
+      return { ok: false, reason: 'invalid' };
+    }
+    await conn.query(`UPDATE public.auth_codes SET consumed_at = now() WHERE id = $1`, [row.id]);
+    await conn.query('COMMIT');
+    return { ok: true, userId: row.user_id };
+  } catch (err) {
+    try { await conn.query('ROLLBACK'); } catch { /* already gone */ }
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+/** Find a user id by email, or create a new password-less account (email-code login of a new user). */
+export async function findOrCreateUserByEmail(pool: pg.Pool, email: string): Promise<string> {
+  const normalized = normalizeEmail(email);
+  const sel = `SELECT id FROM public.users WHERE lower(email) = $1`;
+  const found = await pool.query(sel, [normalized]);
+  if ((found.rowCount ?? 0) > 0) return found.rows[0].id as string;
+  try {
+    const ins = await pool.query(`INSERT INTO public.users (email) VALUES ($1) RETURNING id`, [normalized]);
+    return ins.rows[0].id as string;
+  } catch (err) {
+    if ((err as { code?: string }).code === '23505') {
+      const again = await pool.query(sel, [normalized]); // lost the create race — read the winner
+      if ((again.rowCount ?? 0) > 0) return again.rows[0].id as string;
+    }
+    throw err;
+  }
+}
+
+/** Set a new password for a user and revoke all their existing sessions (forced re-login). */
+export async function resetPassword(pool: pg.Pool, userId: string, newPassword: string): Promise<void> {
+  const passwordHash = await hashPassword(newPassword);
+  await pool.query(`UPDATE public.users SET password_hash = $1 WHERE id = $2`, [passwordHash, userId]);
+  await pool.query(
+    `UPDATE public.sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`,
+    [userId]
+  );
+}
+
+/** Resolve an email to an existing user id (or null) — used by forgot-password without enumeration. */
+export async function findUserIdByEmail(pool: pg.Pool, email: string): Promise<string | null> {
+  const r = await pool.query(`SELECT id FROM public.users WHERE lower(email) = $1`, [normalizeEmail(email)]);
+  return (r.rowCount ?? 0) > 0 ? (r.rows[0].id as string) : null;
 }
 
 // --- RS256 signing key for PowerSync tokens ---------------------------------------------------
