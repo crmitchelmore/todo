@@ -150,3 +150,94 @@ h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: var
 .empty { color: var(--muted); font-size: 14px; }
 
 input[type='checkbox'] { width: 18px; height: 18px; accent-color: var(--accent-2); }
+
+/* --- Tags + paste feature --- */
+.capture-flash {
+  font-size: 12px;
+  color: var(--accent-2);
+  margin-left: 10px;
+  white-space: nowrap;
+}
+.tags-toggle {
+  font-size: 12px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 9px;
+  cursor: pointer;
+}
+.tags-toggle:hover { color: var(--text); }
+
+.tag-chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #fff;
+  border-radius: 6px;
+  padding: 2px 7px;
+  line-height: 1.5;
+}
+.tag-chip.sm { font-size: 10px; padding: 1px 6px; }
+.tag-chip-x {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0;
+  line-height: 1;
+}
+.tag-editor { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex: 1; }
+.tag-add-input {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  min-width: 70px;
+  flex: 1;
+}
+.tag-add-input:focus { outline: none; }
+
+.tag-manager { display: flex; flex-direction: column; gap: 10px; }
+.tag-manager-add { display: flex; gap: 8px; }
+.tag-manager-add input { flex: 1; }
+.tag-manager-list { display: flex; flex-direction: column; gap: 6px; }
+.tag-manager-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--line);
+}
+.tag-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+.tag-manager-name {
+  flex: 1;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 14px;
+  cursor: text;
+}
+.tag-swatches { display: flex; gap: 3px; }
+.tag-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+.tag-swatch.sel { border-color: var(--text); }
+.tag-del {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 18px;
+  cursor: pointer;
+  line-height: 1;
+}
+.tag-del:hover { color: var(--accent); }

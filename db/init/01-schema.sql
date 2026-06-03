@@ -13,6 +13,7 @@ create table if not exists public.tasks (
   notes                 text,
   status                text not null default 'proposed',
   category              text,
+  tags                  text,                          -- JSON array of tag names ("projects" are tags)
   due_at                timestamptz,
   priority              integer,                       -- 0 = highest .. 4 = lowest
 
@@ -34,6 +35,19 @@ create table if not exists public.tasks (
 create index if not exists tasks_owner_status_idx on public.tasks (owner_id, status);
 create index if not exists tasks_due_idx on public.tasks (due_at);
 
+-- User-managed tags (a "project" is just a tag). Tasks reference tags by name in their JSON
+-- `tags` column; this table holds presentation metadata (colour) for management.
+create table if not exists public.tags (
+  id          uuid primary key default gen_random_uuid(),
+  owner_id    uuid not null,
+  name        text not null,
+  color       text not null default '#9BA1A6',
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
+create unique index if not exists tags_owner_name_idx on public.tags (owner_id, lower(name));
+
 -- Seed: one confirmed item so a fresh client shows the active list working.
 insert into public.tasks (id, owner_id, title, status, category, source, confirmed_at)
 values (
@@ -48,4 +62,4 @@ values (
 on conflict (id) do nothing;
 
 -- PowerSync logical replication publication.
-create publication powersync for table public.tasks;
+create publication powersync for table public.tasks, public.tags;

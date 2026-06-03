@@ -13,3 +13,7 @@ streams:
     auto_subscribe: true
     queries:
       - SELECT * FROM tasks
+  tags:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM tags

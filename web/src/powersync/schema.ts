@@ -9,6 +9,7 @@ const tasks = new Table(
     notes: column.text,
     status: column.text,
     category: column.text,
+    tags: column.text,
     due_at: column.text,
     priority: column.integer,
     suggested_due_at: column.text,
@@ -24,7 +25,19 @@ const tasks = new Table(
   { indexes: { by_status: ['status', 'created_at'] } }
 );
 
-export const AppSchema = new Schema({ tasks });
+const tags = new Table(
+  {
+    owner_id: column.text,
+    name: column.text,
+    color: column.text,
+    created_at: column.text,
+    updated_at: column.text
+  },
+  { indexes: {} }
+);
+
+export const AppSchema = new Schema({ tasks, tags });
 
 export type Database = (typeof AppSchema)['types'];
 export type TaskRecord = Database['tasks'];
+export type TagRecord = Database['tags'];

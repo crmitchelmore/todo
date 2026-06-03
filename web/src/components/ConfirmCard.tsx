@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { TaskRecord } from '../powersync/schema';
 import { confirm, reject } from '../lib/tasks';
+import { decodeTags } from '../lib/tags';
 import { formatDue } from '../lib/format';
+import { TagEditor } from './TagChips';
 
 const CATEGORIES = ['engineering', 'leadership', 'home', 'errands', 'health', 'finance', 'personal', 'inbox'];
 
@@ -11,6 +13,7 @@ export function ConfirmCard({ task }: { task: TaskRecord }) {
   const [title, setTitle] = useState(task.title ?? '');
   const [due, setDue] = useState<string | null>(task.suggested_due_at ?? null);
   const [category, setCategory] = useState<string | null>(task.suggested_category ?? null);
+  const [tags, setTags] = useState<string[]>(decodeTags(task.tags));
   const ref = useRef<HTMLDivElement>(null);
 
   // Keep suggestions live until the user touches a field (they arrive asynchronously).
@@ -22,7 +25,7 @@ export function ConfirmCard({ task }: { task: TaskRecord }) {
   }, [task.suggested_due_at, task.suggested_category, touchedDue, touchedCat]);
 
   function accept() {
-    void confirm(task.id, { title, due_at: due, category });
+    void confirm(task.id, { title, due_at: due, category, tags });
   }
 
   return (
@@ -63,6 +66,11 @@ export function ConfirmCard({ task }: { task: TaskRecord }) {
             {c}
           </button>
         ))}
+      </div>
+
+      <div className="card-row">
+        <label>Tags</label>
+        <TagEditor tags={tags} onChange={setTags} />
       </div>
 
       <div className="card-actions">

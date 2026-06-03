@@ -1,11 +1,14 @@
+import { useState } from 'react';
 import { useStatus, useQuery } from '@powersync/react';
 import type { TaskRecord } from './powersync/schema';
 import { CaptureBar } from './components/CaptureBar';
 import { ConfirmCard } from './components/ConfirmCard';
 import { TaskRow } from './components/TaskRow';
+import { TagManager } from './components/TagManager';
 
 export default function App() {
   const status = useStatus();
+  const [showTags, setShowTags] = useState(false);
 
   const { data: proposed } = useQuery<TaskRecord>(
     `SELECT * FROM tasks WHERE status = 'proposed' ORDER BY created_at DESC`
@@ -21,12 +24,22 @@ export default function App() {
     <div className="app">
       <header>
         <h1>Capture</h1>
+        <button className="tags-toggle" onClick={() => setShowTags((s) => !s)}>
+          {showTags ? 'Close tags' : 'Manage tags'}
+        </button>
         <span className={`sync ${status.connected ? 'on' : 'off'}`}>
           {status.connected ? 'synced' : 'offline'}
         </span>
       </header>
 
       <CaptureBar />
+
+      {showTags && (
+        <section>
+          <h2>Tags</h2>
+          <TagManager />
+        </section>
+      )}
 
       {proposed.length > 0 && (
         <section>

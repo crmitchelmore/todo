@@ -31,6 +31,23 @@ final class MacCaptureViewController: NSViewController {
         view.window?.makeFirstResponder(captureField)
     }
 
+    /// Custom field editor that turns a pasted markdown / checkbox list into individual items.
+    private lazy var pasteFieldEditor: CapturePasteTextView = {
+        let tv = CapturePasteTextView()
+        tv.isFieldEditor = true
+        tv.onPasteList = { [weak self] text in
+            guard let self, self.viewModel.ingestIfList(text) else { return false }
+            self.captureField.stringValue = ""
+            return true
+        }
+        return tv
+    }()
+
+    /// Called by the window delegate; returns our paste-aware editor for the capture field only.
+    func fieldEditor(for client: Any?) -> NSText? {
+        (client as AnyObject) === captureField ? pasteFieldEditor : nil
+    }
+
     private func buildUI() {
         captureField.placeholderString = "Capture anything…  (⌥Space to summon)"
         captureField.font = .systemFont(ofSize: 18)
@@ -86,7 +103,7 @@ final class MacCaptureViewController: NSViewController {
         column.resizingMask = .autoresizingMask
         table.addTableColumn(column)
         table.headerView = nil
-        table.rowHeight = identifier == "proposed" ? 56 : 32
+        table.rowHeight = identifier == "proposed" ? 78 : 36
         table.dataSource = self
         table.delegate = self
         table.identifier = NSUserInterfaceItemIdentifier(identifier)
@@ -124,16 +141,17 @@ extension MacCaptureViewController: NSTableViewDataSource, NSTableViewDelegate {
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        let color: (String) -> String = { [weak self] in self?.viewModel.color(forTag: $0) ?? TagPalette.color(for: $0) }
         if tableView == proposedTable {
             let item = viewModel.proposed[row]
-            return ProposedRowView(item: item) { [weak self] in
+            return ProposedRowView(item: item, color: color) { [weak self] in
                 self?.viewModel.confirm(item)
             } onReject: { [weak self] in
                 self?.viewModel.reject(item)
             }
         } else {
             let item = viewModel.active[row]
-            return ActiveRowView(item: item) { [weak self] done in
+            return ActiveRowView(item: item, color: color) { [weak self] done in
                 self?.viewModel.setDone(item, done)
             }
         }

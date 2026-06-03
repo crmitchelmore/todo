@@ -2,7 +2,7 @@ import AppKit
 import CaptureCore
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let model = MacViewModel()            // single shared store / PowerSync instance
     private lazy var captureVC = MacCaptureViewController(viewModel: model)
     private lazy var quick = QuickCaptureController(viewModel: model)
@@ -45,8 +45,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         window.title = "Capture"
         window.contentViewController = captureVC
+        window.delegate = self
         window.center()
         window.setFrameAutosaveName("CaptureMainWindow")
+    }
+
+    // Hand the capture field our paste-aware editor so pasting a markdown list ingests items.
+    func windowWillReturnFieldEditor(_ sender: NSWindow, to client: Any?) -> Any? {
+        captureVC.fieldEditor(for: client)
     }
 
     private func showMainWindow() {

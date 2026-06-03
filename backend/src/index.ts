@@ -57,9 +57,12 @@ function requireSecret(req: Request, res: Response, next: NextFunction): void {
 // --- Write-path safety: only these tables/columns may be mutated by clients. -----------------
 const ALLOWED_COLUMNS: Record<string, Set<string>> = {
   tasks: new Set([
-    'id', 'owner_id', 'title', 'notes', 'status', 'category', 'due_at', 'priority',
+    'id', 'owner_id', 'title', 'notes', 'status', 'category', 'tags', 'due_at', 'priority',
     'suggested_due_at', 'suggested_category', 'suggestion_confidence', 'suggestion_source',
     'source', 'created_at', 'updated_at', 'confirmed_at', 'completed_at'
+  ]),
+  tags: new Set([
+    'id', 'owner_id', 'name', 'color', 'created_at', 'updated_at'
   ])
 };
 

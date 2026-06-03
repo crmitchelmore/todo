@@ -1,9 +1,20 @@
 import UIKit
 import CaptureCore
 
+/// Capture field that intercepts paste: a pasted markdown / checkbox list is ingested as
+/// individual items instead of pasting collapsed single-line text.
+final class CapturePasteTextField: UITextField {
+    var onPasteList: ((String) -> Bool)?
+
+    override func paste(_ sender: Any?) {
+        if let s = UIPasteboard.general.string, onPasteList?(s) == true { return }
+        super.paste(sender)
+    }
+}
+
 final class CaptureViewController: UIViewController, UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate {
     private let viewModel = CaptureViewModel()
-    private let captureField = UITextField()
+    private let captureField = CapturePasteTextField()
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
 
     override func viewDidLoad() {
@@ -25,6 +36,11 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         captureField.clearButtonMode = .whileEditing
         captureField.delegate = self
         captureField.font = .systemFont(ofSize: 18)
+        captureField.onPasteList = { [weak self] text in
+            guard let self, self.viewModel.ingestIfList(text) else { return false }
+            self.captureField.text = ""
+            return true
+        }
         captureField.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(captureField)
         NSLayoutConstraint.activate([
@@ -100,7 +116,7 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
             let vc = ConfirmViewController(item: item) { [weak self] action in
                 switch action {
                 case let .confirm(title, due, category):
-                    self?.viewModel.confirm(item, title: title, dueAt: due, category: category)
+                    self?.viewModel.confirm(item, title: title, dueAt: due, category: category, tags: item.tags)
                 case .reject:
                     self?.viewModel.reject(item)
                 }
@@ -116,6 +132,7 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         var parts: [String] = []
         if let due = item.suggestedDueAt { parts.append(DueFormatter.short(due)) }
         if let cat = item.suggestedCategory { parts.append(cat) }
+        parts.append(contentsOf: item.tags.map { "#\($0)" })
         return parts.isEmpty ? "tap to confirm" : "suggested: " + parts.joined(separator: " · ")
     }
 
@@ -123,6 +140,7 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         var parts: [String] = []
         if let due = item.dueAt { parts.append(DueFormatter.short(due)) }
         if let cat = item.category { parts.append(cat) }
+        parts.append(contentsOf: item.tags.map { "#\($0)" })
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }

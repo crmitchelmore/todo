@@ -43,11 +43,21 @@ final class CaptureViewModel {
     }
 
     func capture(_ text: String) {
+        if ingestIfList(text) { return }
         store.capture(text) // instant, non-blocking
     }
 
-    func confirm(_ item: TaskItem, title: String, dueAt: Date?, category: String?) {
-        Task { try? await store.confirm(id: item.id, title: title, dueAt: dueAt, category: category) }
+    /// If `text` is a markdown / checkbox list, ingest each line as its own item (nested lines
+    /// become project tags; `[x]` items import as done). Returns true if it was a list.
+    @discardableResult
+    func ingestIfList(_ text: String) -> Bool {
+        guard let items = store.detectList(text) else { return false }
+        store.captureBatch(items)
+        return true
+    }
+
+    func confirm(_ item: TaskItem, title: String, dueAt: Date?, category: String?, tags: [String]? = nil) {
+        Task { try? await store.confirm(id: item.id, title: title, dueAt: dueAt, category: category, tags: tags) }
     }
 
     func reject(_ item: TaskItem) {

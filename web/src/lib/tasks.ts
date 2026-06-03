@@ -1,5 +1,7 @@
 import { db, OWNER_ID } from '../powersync/db';
 import { suggest } from './suggest';
+import { parseMarkdownList, type ParsedCaptureItem } from './markdownList';
+import { encodeTags, ensureTags, normalizeTags } from './tags';
 
 /**
  * Capture is the hot path: ONE instant local INSERT, nothing awaited on the network or an LLM.
@@ -35,19 +37,73 @@ export interface ConfirmFields {
   title?: string;
   due_at?: string | null;
   category?: string | null;
+  tags?: string[];
+}
+
+/**
+ * If `raw` is a markdown / checkbox list, capture each line as its own item (active items land
+ * in the proposed inbox; `[x]` items import directly as done). Otherwise returns null and the
+ * caller should fall back to single `capture`.
+ */
+export async function captureList(raw: string): Promise<string[] | null> {
+  const items = parseMarkdownList(raw);
+  if (!items) return null;
+  return captureBatch(items);
+}
+
+export async function captureBatch(items: ParsedCaptureItem[]): Promise<string[]> {
+  const prepared = items
+    .filter((i) => i.title.trim().length > 0)
+    .map((item) => ({ id: crypto.randomUUID(), item }));
+  if (prepared.length === 0) return [];
+  await ensureTags(prepared.flatMap((p) => p.item.tags));
+  for (const { id, item } of prepared) {
+    const now = new Date().toISOString();
+    const tagsJSON = encodeTags(item.tags);
+    if (item.isDone) {
+      await db.execute(
+        `INSERT INTO tasks
+           (id, owner_id, title, status, category, tags, source, created_at, updated_at, confirmed_at, completed_at)
+         VALUES (?, ?, ?, 'done', NULL, ?, 'paste', ?, ?, ?, ?)`,
+        [id, OWNER_ID, item.title, tagsJSON, now, now, now, now]
+      );
+    } else {
+      await db.execute(
+        `INSERT INTO tasks (id, owner_id, title, status, tags, source, created_at, updated_at)
+         VALUES (?, ?, ?, 'proposed', ?, 'paste', ?, ?)`,
+        [id, OWNER_ID, item.title, tagsJSON, now, now]
+      );
+      void enrich(id, item.title);
+    }
+  }
+  return prepared.map((p) => p.id);
 }
 
 /** Promote a proposed item to a real (active) todo after the human confirms its structure. */
 export async function confirm(id: string, fields: ConfirmFields): Promise<void> {
   const now = new Date().toISOString();
+  if (fields.tags) await ensureTags(normalizeTags(fields.tags));
+  const tagsJSON = fields.tags ? encodeTags(fields.tags) ?? '[]' : null;
   await db.execute(
     `UPDATE tasks
        SET status = 'active',
            title = COALESCE(?, title),
-           due_at = ?, category = ?, confirmed_at = ?, updated_at = ?
+           due_at = ?, category = ?, tags = COALESCE(?, tags),
+           confirmed_at = ?, updated_at = ?
      WHERE id = ?`,
-    [fields.title ?? null, fields.due_at ?? null, fields.category ?? null, now, now, id]
+    [fields.title ?? null, fields.due_at ?? null, fields.category ?? null, tagsJSON, now, now, id]
   );
+}
+
+/** Replace the tag set on an existing task (inline editing on a row). */
+export async function setTags(id: string, tags: string[]): Promise<void> {
+  const normalized = normalizeTags(tags);
+  await ensureTags(normalized);
+  await db.execute(`UPDATE tasks SET tags = ?, updated_at = ? WHERE id = ?`, [
+    encodeTags(normalized) ?? '[]',
+    new Date().toISOString(),
+    id
+  ]);
 }
 
 export async function reject(id: string): Promise<void> {
