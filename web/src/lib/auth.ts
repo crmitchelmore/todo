@@ -92,6 +92,53 @@ export async function register(email: string, password: string): Promise<void> {
   await authenticate('/api/auth/register', email, password);
 }
 
+/** Helper for the always-200 issuance endpoints (email-code request, forgot-password request). */
+async function postJson(path: string, payload: Record<string, unknown>): Promise<void> {
+  const res = await fetch(`${config.backendUrl}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    const body: AuthResponse = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `request failed (${res.status})`);
+  }
+}
+
+/** Helper for endpoints that return a session ({ session_token, user_id }) and sign the user in. */
+async function postSession(path: string, payload: Record<string, unknown>): Promise<void> {
+  const res = await fetch(`${config.backendUrl}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...payload, client: 'web' })
+  });
+  const body: AuthResponse = await res.json().catch(() => ({}));
+  if (!res.ok || !body.ok || !body.session_token || !body.user_id) {
+    throw new Error(body.error ?? `request failed (${res.status})`);
+  }
+  setSession({ token: body.session_token, userId: body.user_id });
+}
+
+/** Passwordless sign-in, step 1: ask the backend to email a one-time code. */
+export async function requestEmailCode(email: string): Promise<void> {
+  await postJson('/api/auth/email-code', { email: email.trim() });
+}
+
+/** Passwordless sign-in, step 2: exchange the emailed code for a session. */
+export async function verifyEmailCode(email: string, code: string): Promise<void> {
+  await postSession('/api/auth/email-code/verify', { email: email.trim(), code: code.trim() });
+}
+
+/** Forgot password, step 1: ask the backend to email a reset code (always succeeds — no enumeration). */
+export async function requestPasswordReset(email: string): Promise<void> {
+  await postJson('/api/auth/forgot', { email: email.trim() });
+}
+
+/** Forgot password, step 2: set a new password with the emailed code; signs the user in on success. */
+export async function resetPassword(email: string, code: string, password: string): Promise<void> {
+  await postSession('/api/auth/reset', { email: email.trim(), code: code.trim(), password });
+}
+
 /** Best-effort server revoke, then drop the local session regardless of the network result. */
 export async function signOut(): Promise<void> {
   const token = getToken();
