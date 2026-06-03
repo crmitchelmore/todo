@@ -127,6 +127,43 @@ final class CaptureViewModel {
         Task { try? await store.confirm(id: item.id, title: title, dueAt: dueAt, category: category, tags: tags) }
     }
 
+    func saveDetail(_ item: TaskItem, form: IOSTaskDetailForm) {
+        Task {
+            try? await store.updateTask(
+                id: item.id,
+                title: form.title,
+                notes: form.notes,
+                dueAt: form.dueAt,
+                category: form.category,
+                tags: form.tags,
+                priority: form.priority
+            )
+        }
+    }
+
+    func confirmDetail(_ item: TaskItem, form: IOSTaskDetailForm) {
+        Task {
+            try? await store.updateTask(
+                id: item.id,
+                title: form.title,
+                notes: form.notes,
+                dueAt: form.dueAt,
+                category: form.category,
+                tags: form.tags,
+                priority: form.priority
+            )
+            try? await store.confirm(
+                id: item.id,
+                title: form.title,
+                dueAt: form.dueAt,
+                category: form.category,
+                tags: form.tags,
+                notes: form.notes,
+                priority: form.priority
+            )
+        }
+    }
+
     func reject(_ item: TaskItem) {
         Task { try? await store.reject(id: item.id) }
     }

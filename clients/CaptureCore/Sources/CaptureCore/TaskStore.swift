@@ -158,20 +158,40 @@ public final class TaskStore: @unchecked Sendable {
     // MARK: - Confirm / reject / complete
 
     /// Promote a proposed item to an active todo after the human confirms its structure.
-    public func confirm(id: String, title: String?, dueAt: Date?, category: String?, tags: [String]? = nil) async throws {
+    public func confirm(
+        id: String,
+        title: String?,
+        dueAt: Date?,
+        category: String?,
+        tags: [String]? = nil,
+        notes: String? = nil,
+        priority: Int? = nil
+    ) async throws {
         let now = ISO8601.string(Date())
         if let tags { await Self.ensureTags(db: db, ownerId: ownerId, names: TagsCodec.normalize(tags)) }
+        let safePriority = priority.flatMap { (0...4).contains($0) ? $0 : nil }
         try await db.execute(
             sql: """
             UPDATE \(TASKS_TABLE)
-               SET status = 'active',
+              SET status = 'active',
                    title = COALESCE(?, title),
+                   notes = COALESCE(?, notes),
                    due_at = ?, category = ?, tags = COALESCE(?, tags),
+                   priority = ?,
                    confirmed_at = ?, updated_at = ?
              WHERE id = ?
             """,
-            parameters: [title, dueAt.map(ISO8601.string), category,
-                         tags.map { TagsCodec.encode($0) ?? "[]" }, now, now, id]
+            parameters: [
+               title,
+               notes?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+               dueAt.map(ISO8601.string),
+               category,
+               tags.map { TagsCodec.encode($0) ?? "[]" },
+               safePriority,
+               now,
+               now,
+               id
+            ]
         )
     }
 
@@ -207,6 +227,7 @@ public final class TaskStore: @unchecked Sendable {
         priority: Int?
     ) async throws {
         if let tags { await Self.ensureTags(db: db, ownerId: ownerId, names: TagsCodec.normalize(tags)) }
+        let safePriority = priority.flatMap { (0...4).contains($0) ? $0 : nil }
         let cleanedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
         try await db.execute(
             sql: """
@@ -226,7 +247,7 @@ public final class TaskStore: @unchecked Sendable {
                 dueAt.map(ISO8601.string),
                 category?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
                 tags.map { TagsCodec.encode($0) ?? "[]" },
-                priority,
+                safePriority,
                 ISO8601.string(Date()),
                 id
             ]
@@ -281,7 +302,7 @@ public final class TaskStore: @unchecked Sendable {
             mapper: { try Self.map($0) }
         )
         return AsyncThrowingStream { continuation in
-            Task {
+            let task = Task {
                 do {
                     for try await batch in rows {
                         continuation.yield(batch.first)
@@ -291,6 +312,7 @@ public final class TaskStore: @unchecked Sendable {
                     continuation.finish(throwing: error)
                 }
             }
+            continuation.onTermination = { @Sendable _ in task.cancel() }
         }
     }
 

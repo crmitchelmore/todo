@@ -412,6 +412,9 @@ function taskEventForOp(op: CrudOp, applied: boolean): Omit<TaskEventInput, 'own
   if (status === 'done') {
     return { eventType: 'completed', title: 'Completed', body: 'Marked done.' };
   }
+  if ((status === 'active' || status === 'confirmed') && 'completed_at' in data && data.completed_at === null) {
+    return { eventType: 'reopened', title: 'Reopened', body: 'Moved back to active work.' };
+  }
   if (status === 'active' || status === 'confirmed') {
     return { eventType: 'confirmed', title: 'Confirmed', body: 'Promoted from capture inbox to active work.' };
   }

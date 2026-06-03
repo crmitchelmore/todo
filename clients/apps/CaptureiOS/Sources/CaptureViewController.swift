@@ -199,18 +199,10 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         tableView.deselectRow(at: indexPath, animated: true)
         if indexPath.section == 0 {
             let item = viewModel.proposed[indexPath.row]
-            let vc = ConfirmViewController(item: item) { [weak self] action in
-                switch action {
-                case let .confirm(title, due, category):
-                    self?.viewModel.confirm(item, title: title, dueAt: due, category: category, tags: item.tags)
-                case .reject:
-                    self?.viewModel.reject(item)
-                }
-            }
-            present(UINavigationController(rootViewController: vc), animated: true)
+            navigationController?.pushViewController(TaskDetailViewController(viewModel: viewModel, item: item), animated: true)
         } else {
             let item = activeGroup(for: indexPath.section).items[indexPath.row]
-            viewModel.setDone(item, true)
+            navigationController?.pushViewController(TaskDetailViewController(viewModel: viewModel, item: item), animated: true)
         }
     }
 
@@ -224,7 +216,12 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
             done(true)
         }
         date.backgroundColor = Theme.iris
-        return UISwipeActionsConfiguration(actions: [date])
+        let complete = UIContextualAction(style: .normal, title: item.status == .done ? "Reopen" : "Done") { [weak self] _, _, done in
+            self?.viewModel.setDone(item, item.status != .done)
+            done(true)
+        }
+        complete.backgroundColor = Theme.mint
+        return UISwipeActionsConfiguration(actions: [complete, date])
     }
 
     private func presentDateEditor(for item: TaskItem) {

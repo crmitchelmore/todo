@@ -16,10 +16,13 @@ final class MacViewModel {
     private(set) var allTags: [Tag] = []
     private(set) var tagColors: [String: String] = [:]   // lowercased name -> hex
     private(set) var tagFilter: Set<String> = []          // lowercased names; AND semantics
+    private(set) var selectedTask: TaskItem?
+    private(set) var selectedEvents: [TaskEvent] = []
 
     private var observers: [() -> Void] = []
     private var started = false
     private var tasks: [Task<Void, Never>] = []
+    private var detailTasks: [Task<Void, Never>] = []
 
     init(auth: AuthStore, config: CaptureConfig = .fromEnvironment()) {
         self.auth = auth
@@ -157,8 +160,105 @@ final class MacViewModel {
         }
     }
 
+    func select(_ item: TaskItem) {
+        guard selectedTask?.id != item.id else { return }
+        detailTasks.forEach { $0.cancel() }
+        detailTasks.removeAll()
+        selectedTask = item
+        selectedEvents = []
+        notify()
+        watchSelectedTask(id: item.id)
+        watchSelectedEvents(id: item.id)
+    }
+
+    func clearSelection() {
+        detailTasks.forEach { $0.cancel() }
+        detailTasks.removeAll()
+        selectedTask = nil
+        selectedEvents = []
+        notify()
+    }
+
+    private func watchSelectedTask(id: String) {
+        let t = Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await task in try self.store.watchTask(id: id) {
+                    await MainActor.run {
+                        guard self.selectedTask?.id == id else { return }
+                        self.selectedTask = task
+                        if task == nil { self.selectedEvents = [] }
+                        self.notify()
+                    }
+                }
+            } catch {}
+        }
+        detailTasks.append(t)
+    }
+
+    private func watchSelectedEvents(id: String) {
+        let t = Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await events in try self.store.watchTaskEvents(taskId: id) {
+                    await MainActor.run {
+                        guard self.selectedTask?.id == id else { return }
+                        self.selectedEvents = events
+                        self.notify()
+                    }
+                }
+            } catch {}
+        }
+        detailTasks.append(t)
+    }
+
+    func saveDetail(_ form: MacTaskDetailForm) {
+        guard let item = selectedTask else { return }
+        Task {
+            try? await store.updateTask(
+                id: item.id,
+                title: form.title,
+                notes: form.notes,
+                dueAt: form.dueAt,
+                category: form.category,
+                tags: form.tags,
+                priority: form.priority
+            )
+        }
+    }
+
+    func confirmDetail(_ form: MacTaskDetailForm) {
+        guard let item = selectedTask else { return }
+        Task {
+            try? await store.updateTask(
+                id: item.id,
+                title: form.title,
+                notes: form.notes,
+                dueAt: form.dueAt,
+                category: form.category,
+                tags: form.tags,
+                priority: form.priority
+            )
+            try? await store.confirm(
+                id: item.id,
+                title: form.title,
+                dueAt: form.dueAt,
+                category: form.category,
+                tags: form.tags,
+                notes: form.notes,
+                priority: form.priority
+            )
+        }
+    }
+
     func reject(_ item: TaskItem) {
         Task { try? await store.reject(id: item.id) }
+    }
+
+    func rejectSelected() {
+        guard let item = selectedTask else { return }
+        clearSelection()
+        reject(item)
     }
 
     func setDone(_ item: TaskItem, _ done: Bool) {
@@ -170,5 +270,8 @@ final class MacViewModel {
         Task { try? await store.setDue(id: item.id, dueAt: date) }
     }
 
-    deinit { tasks.forEach { $0.cancel() } }
+    deinit {
+        tasks.forEach { $0.cancel() }
+        detailTasks.forEach { $0.cancel() }
+    }
 }
