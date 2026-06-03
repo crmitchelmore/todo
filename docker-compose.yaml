@@ -40,6 +40,7 @@ services:
       JWT_ISSUER: ${JWT_ISSUER}
       JWT_AUDIENCE: ${JWT_AUDIENCE}
       DEV_USER_ID: ${DEV_USER_ID}
+      CAPTURE_API_SECRET: ${CAPTURE_API_SECRET:-}
     ports:
       - "${BACKEND_PORT}:${BACKEND_PORT}"
 
@@ -77,6 +78,7 @@ services:
       PS_STORAGE_URI: ${PS_STORAGE_URI}
       PS_JWKS_URL: ${PS_JWKS_URL}
       PS_PORT: ${PS_PORT}
+      PS_API_TOKEN: ${PS_API_TOKEN:-use_a_better_token_in_production}
     healthcheck:
       test:
         [

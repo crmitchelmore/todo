@@ -1,8 +1,8 @@
-import express from 'express';
+import express, { type Request, type Response, type NextFunction } from 'express';
 import cors from 'cors';
 import pg from 'pg';
 import { generateKeyPair, exportJWK, SignJWT, type JWK } from 'jose';
-import { randomUUID } from 'crypto';
+import { randomUUID, timingSafeEqual } from 'crypto';
 
 /**
  * Capture backend connector (M1, single dev user).
@@ -23,6 +23,36 @@ const DEV_USER_ID = process.env.DEV_USER_ID ?? '00000000-0000-0000-0000-00000000
 const POWERSYNC_URL = process.env.POWERSYNC_PUBLIC_URL ?? 'http://localhost:8080';
 
 const KID = 'capture-dev-key';
+
+/**
+ * Shared-secret gate. Every mutating / token-minting endpoint requires
+ * `Authorization: Bearer <CAPTURE_API_SECRET>`. The secret is injected via env (never committed)
+ * and embedded in the personal clients at build time. JWKS + health stay open: the PowerSync
+ * service fetches JWKS over the private network to verify client JWTs, and Railway needs health.
+ *
+ * Fail-closed in production: refuse to boot an open backend if the secret is missing.
+ */
+const API_SECRET = process.env.CAPTURE_API_SECRET;
+const IS_PRODUCTION = !!(process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production');
+if (IS_PRODUCTION && !API_SECRET) {
+  throw new Error(
+    'CAPTURE_API_SECRET is required in production — refusing to start with an unauthenticated backend.'
+  );
+}
+
+function bearerMatches(header: string | undefined): boolean {
+  if (!API_SECRET) return true; // local dev: no secret configured => open
+  if (!header || !header.startsWith('Bearer ')) return false;
+  const provided = Buffer.from(header.slice('Bearer '.length));
+  const expected = Buffer.from(API_SECRET);
+  if (provided.length !== expected.length) return false;
+  return timingSafeEqual(provided, expected);
+}
+
+function requireSecret(req: Request, res: Response, next: NextFunction): void {
+  if (bearerMatches(req.header('authorization'))) return next();
+  res.status(401).json({ ok: false, error: 'unauthorized' });
+}
 
 // --- Write-path safety: only these tables/columns may be mutated by clients. -----------------
 const ALLOWED_COLUMNS: Record<string, Set<string>> = {
@@ -48,7 +78,7 @@ app.get('/api/auth/keys', (_req, res) => {
   res.json({ keys: [publicJwk] });
 });
 
-app.get('/api/auth/token', async (_req, res) => {
+app.get('/api/auth/token', requireSecret, async (_req, res) => {
   const token = await new SignJWT({})
     .setProtectedHeader({ alg: 'RS256', kid: KID })
     .setSubject(DEV_USER_ID)
@@ -124,7 +154,7 @@ async function applyOp(client: pg.PoolClient, op: CrudOp): Promise<void> {
  */
 const CAPTURE_SOURCES = new Set(['share-extension', 'app-intent', 'mac-hotkey', 'capture', 'siri']);
 
-app.post('/api/capture', async (req, res) => {
+app.post('/api/capture', requireSecret, async (req, res) => {
   const body = req.body ?? {};
   const id: string = typeof body.id === 'string' && body.id ? body.id : randomUUID();
   const rawText: string = (body.raw_text ?? body.title ?? '').toString().trim();
@@ -151,7 +181,7 @@ app.post('/api/capture', async (req, res) => {
   }
 });
 
-app.put('/api/data', async (req, res) => {
+app.put('/api/data', requireSecret, async (req, res) => {
   const ops: CrudOp[] = req.body?.ops ?? [];
   const client = await pool.connect();
   try {

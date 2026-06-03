@@ -10,17 +10,37 @@ public struct CaptureConfig: Sendable {
     public var ownerId: String
     /// Shared App Group container id for the offline capture outbox (used by extensions/intents).
     public var appGroupId: String?
+    /// Shared-secret bearer for the backend gate. Injected at build (env `CAPTURE_API_SECRET` or the
+    /// matching Info.plist key), never committed. Nil in local dev (the backend runs open then).
+    public var apiSecret: String?
 
     public init(
         backendURL: URL,
         powersyncURL: URL,
         ownerId: String = "00000000-0000-0000-0000-000000000001",
-        appGroupId: String? = nil
+        appGroupId: String? = nil,
+        apiSecret: String? = CaptureConfig.resolveAPISecret()
     ) {
         self.backendURL = backendURL
         self.powersyncURL = powersyncURL
         self.ownerId = ownerId
         self.appGroupId = appGroupId
+        self.apiSecret = apiSecret
+    }
+
+    /// Resolves the backend shared secret from the process environment first (CI/probe/tests), then
+    /// the app bundle's Info.plist (`CAPTURE_API_SECRET`, populated from a build setting so the
+    /// literal never lives in the committed project spec). Guards against an unsubstituted
+    /// `$(CAPTURE_API_SECRET)` placeholder leaking through.
+    public static func resolveAPISecret() -> String? {
+        if let env = ProcessInfo.processInfo.environment["CAPTURE_API_SECRET"], !env.isEmpty {
+            return env
+        }
+        if let plist = Bundle.main.object(forInfoDictionaryKey: "CAPTURE_API_SECRET") as? String,
+           !plist.isEmpty, !plist.hasPrefix("$(") {
+            return plist
+        }
+        return nil
     }
 
     /// Sensible default for a simulator/desktop talking to the local stack.
@@ -72,7 +92,7 @@ public struct CaptureConfig: Sendable {
     /// Ingress for out-of-process surfaces (Share Extension, App Intents): backend POST with an
     /// App Group outbox fallback. Never opens PowerSync.
     public func makeIngress(session: URLSession = .shared) -> ResilientCaptureIngress {
-        ResilientCaptureIngress(backendURL: backendURL, appGroupId: appGroupId, session: session)
+        ResilientCaptureIngress(backendURL: backendURL, appGroupId: appGroupId, apiSecret: apiSecret, session: session)
     }
 
     /// The App Group outbox, when configured. Used by the main app to drain captures that an
@@ -90,7 +110,7 @@ public struct CaptureConfig: Sendable {
         guard let outbox = makeOutbox() else { return 0 }
         let pending = (try? outbox.drain()) ?? []
         guard !pending.isEmpty else { return 0 }
-        let http = HTTPCaptureIngress(backendURL: backendURL, session: session)
+        let http = HTTPCaptureIngress(backendURL: backendURL, apiSecret: apiSecret, session: session)
         var flushed = 0
         for input in pending {
             do {
@@ -123,7 +143,9 @@ public final class BackendConnector: PowerSyncBackendConnectorProtocol, @uncheck
 
     public func fetchCredentials() async throws -> PowerSyncCredentials? {
         let url = config.backendURL.appendingPathComponent("api/auth/token")
-        let (data, response) = try await session.data(from: url)
+        var request = URLRequest(url: url)
+        request.applyAPISecret(config.apiSecret)
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw CaptureError.auth("token request failed")
         }
@@ -155,6 +177,7 @@ public final class BackendConnector: PowerSyncBackendConnectorProtocol, @uncheck
         var request = URLRequest(url: config.backendURL.appendingPathComponent("api/data"))
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.applyAPISecret(config.apiSecret)
         request.httpBody = try JSONSerialization.data(withJSONObject: ["ops": ops])
 
         let (body, response) = try await session.data(for: request)
@@ -170,4 +193,13 @@ public final class BackendConnector: PowerSyncBackendConnectorProtocol, @uncheck
 public enum CaptureError: Error, Sendable {
     case auth(String)
     case upload(String)
+}
+
+extension URLRequest {
+    /// Adds the backend shared-secret bearer when one is configured (no-op in open local dev).
+    mutating func applyAPISecret(_ secret: String?) {
+        if let secret, !secret.isEmpty {
+            setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+        }
+    }
 }

@@ -4,6 +4,11 @@ import { config } from '../config';
 const BACKEND_URL = config.backendUrl;
 const POWERSYNC_URL = config.powersyncUrl;
 
+/** Authorization header for the backend shared-secret gate (omitted when no secret is configured). */
+function authHeaders(): Record<string, string> {
+  return config.apiSecret ? { Authorization: `Bearer ${config.apiSecret}` } : {};
+}
+
 /**
  * Connects the local-first SQLite DB to our self-hosted PowerSync + backend.
  * - fetchCredentials: short-lived JWT minted by the backend.
@@ -12,7 +17,7 @@ const POWERSYNC_URL = config.powersyncUrl;
  */
 export class BackendConnector implements PowerSyncBackendConnector {
   async fetchCredentials() {
-    const res = await fetch(`${BACKEND_URL}/api/auth/token`);
+    const res = await fetch(`${BACKEND_URL}/api/auth/token`, { headers: authHeaders() });
     if (!res.ok) throw new Error(`auth token request failed: ${res.status}`);
     const { token, powersync_url } = await res.json();
     return { endpoint: POWERSYNC_URL || powersync_url, token };
@@ -31,7 +36,7 @@ export class BackendConnector implements PowerSyncBackendConnector {
 
     const res = await fetch(`${BACKEND_URL}/api/data`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ ops })
     });
     if (!res.ok) throw new Error(`upload failed: ${res.status} ${await res.text()}`);

@@ -31,7 +31,7 @@ client_auth:
 
 api:
   tokens:
-    - use_a_better_token_in_production
+    - !env PS_API_TOKEN
 
 system:
   logging:

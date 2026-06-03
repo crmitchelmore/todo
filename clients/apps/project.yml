@@ -44,6 +44,7 @@ targets:
       path: CaptureiOS/Info.plist
       properties:
         CFBundleDisplayName: Capture
+        CAPTURE_API_SECRET: $(CAPTURE_API_SECRET)
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
@@ -93,6 +94,7 @@ targets:
       path: CaptureMac/Info.plist
       properties:
         CFBundleDisplayName: Capture
+        CAPTURE_API_SECRET: $(CAPTURE_API_SECRET)
         LSMinimumSystemVersion: "12.0"
         NSPrincipalClass: NSApplication
         NSHighResolutionCapable: true
