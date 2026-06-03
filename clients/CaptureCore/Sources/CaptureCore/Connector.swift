@@ -122,10 +122,48 @@ public final class BackendConnector: PowerSyncBackendConnectorProtocol, @uncheck
     private let session: URLSession
     private let token: TokenProviding
 
-    public init(config: CaptureConfig, token: TokenProviding, session: URLSession = .shared) {
+    // A single transient 401 (e.g. a backend redeploy, a brief DB blip, a proxy hiccup) must NOT
+    // discard a still-valid 30-day session — doing so left the StreamingSyncClient permanently
+    // stuck with queued, never-uploaded ops. We only treat the session as genuinely
+    // revoked/expired after a *sustained* run of 401s; transient ones are thrown so PowerSync
+    // retries with backoff and re-establishes sync on its own once the backend is healthy again.
+    private let authFailureLock = NSLock()
+    private var firstAuthFailureAt: Date?
+    private var consecutiveAuthFailures = 0
+    private let authFailureThreshold: Int
+    private let authFailureGracePeriod: TimeInterval
+
+    public init(
+        config: CaptureConfig,
+        token: TokenProviding,
+        session: URLSession = .shared,
+        authFailureThreshold: Int = 3,
+        authFailureGracePeriod: TimeInterval = 90
+    ) {
         self.config = config
         self.token = token
         self.session = session
+        self.authFailureThreshold = authFailureThreshold
+        self.authFailureGracePeriod = authFailureGracePeriod
+    }
+
+    /// Record a 401 from an authenticated request. Returns `true` only once failures have been
+    /// sustained (>= threshold consecutive 401s spanning >= the grace period), i.e. this really is
+    /// a revoked/expired session rather than a transient backend blip.
+    private func shouldInvalidateAfterUnauthorized() -> Bool {
+        authFailureLock.lock(); defer { authFailureLock.unlock() }
+        let now = Date()
+        if firstAuthFailureAt == nil { firstAuthFailureAt = now }
+        consecutiveAuthFailures += 1
+        let elapsed = now.timeIntervalSince(firstAuthFailureAt ?? now)
+        return consecutiveAuthFailures >= authFailureThreshold && elapsed >= authFailureGracePeriod
+    }
+
+    /// Any successful authenticated round-trip clears the transient-failure run.
+    private func recordAuthSuccess() {
+        authFailureLock.lock(); defer { authFailureLock.unlock() }
+        firstAuthFailureAt = nil
+        consecutiveAuthFailures = 0
     }
 
     public func fetchCredentials() async throws -> PowerSyncCredentials? {
@@ -137,12 +175,15 @@ public final class BackendConnector: PowerSyncBackendConnectorProtocol, @uncheck
             throw CaptureError.auth("token request failed")
         }
         if http.statusCode == 401 {
-            token.invalidate()
+            // Only sign the user out after sustained 401s; otherwise keep the session and let
+            // PowerSync retry — a transient blip must not nuke a valid login.
+            if shouldInvalidateAfterUnauthorized() { token.invalidate() }
             throw CaptureError.auth("session expired")
         }
         guard http.statusCode == 200 else {
             throw CaptureError.auth("token request failed (\(http.statusCode))")
         }
+        recordAuthSuccess()
         let decoded = try JSONDecoder().decode(TokenResponse.self, from: data)
         return PowerSyncCredentials(
             endpoint: config.powersyncURL.absoluteString,
@@ -179,7 +220,7 @@ public final class BackendConnector: PowerSyncBackendConnectorProtocol, @uncheck
             throw CaptureError.upload("upload failed: no response")
         }
         if http.statusCode == 401 {
-            token.invalidate()
+            if shouldInvalidateAfterUnauthorized() { token.invalidate() }
             throw CaptureError.auth("session expired")
         }
         guard http.statusCode == 200 else {
@@ -187,6 +228,7 @@ public final class BackendConnector: PowerSyncBackendConnectorProtocol, @uncheck
             throw CaptureError.upload("upload failed: \(text)")
         }
 
+        recordAuthSuccess()
         try await transaction.complete()
     }
 }
