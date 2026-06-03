@@ -35,6 +35,10 @@ insert; a partial unique index on `lower(email)` is the uniqueness + login-looku
 | POST | `/api/auth/register` | Create account → `{session_token, user_id}` (409 if email taken) |
 | POST | `/api/auth/login` | `{session_token, user_id}`; generic 401 for unknown email **or** wrong password |
 | POST | `/api/auth/logout` | Revoke the current session |
+| POST | `/api/auth/email-code` | Email a one-time sign-in code; always 200 if the email shape is valid |
+| POST | `/api/auth/email-code/verify` | Verify the sign-in code and return `{session_token, user_id}` |
+| POST | `/api/auth/forgot` | Email a password-reset code; always 200 if the email shape is valid |
+| POST | `/api/auth/reset` | Verify reset code, set a new password, revoke old sessions, return a fresh session |
 | GET | `/api/auth/token` | Mint a short-lived per-user PowerSync JWT |
 | GET | `/api/auth/keys` | JWKS for PowerSync to verify the sync JWT |
 
@@ -78,7 +82,8 @@ shared todos; a second account is fully isolated; sign-out clears the local list
 
 ## Deferred (non-blocking for a single trusted user)
 
-Email verification, password reset, web HttpOnly-cookie sessions (localStorage XSS risk accepted
-while web isn't HTTPS-hosted), and persistent (Redis/PG) rate-limiting (in-memory is fine for one
-Railway instance). `register` reveals email existence via 409 (acceptable for a small user base);
-`login` does not enumerate. Social sign-in attaches later via `user_identities` — purely additive.
+Email verification, web HttpOnly-cookie sessions (localStorage XSS risk accepted while web is still
+low-risk), and persistent (Redis/PG) rate-limiting (in-memory is fine for one Railway instance).
+`register` reveals email existence via 409 (acceptable for a small user base); `login`, `forgot`,
+and code issuance do not enumerate. Social sign-in attaches later via `user_identities` — purely
+additive.

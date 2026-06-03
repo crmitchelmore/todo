@@ -44,6 +44,9 @@ Key environment variables:
 | postgres | `POSTGRES_USER` / `POSTGRES_DB` / `POSTGRES_PASSWORD` | `postgres` / `postgres` / *(secret)* |
 | backend | `BACKEND_DATABASE_URI` | `postgres://postgres:<pw>@<pg-private>:5432/postgres` |
 | backend | `POWERSYNC_PUBLIC_URL` | `https://powersync-production-e560.up.railway.app` |
+| backend | `MAIL_PROVIDER` | optional: `smtp`, `resend`, `brevo`, `sendgrid`, or `postmark` |
+| backend | `MAIL_FROM` | sender identity, e.g. `Capture <hello@example.com>` |
+| backend | `SMTP_URL` / provider key | one of `SMTP_URL`, `RESEND_API_KEY`, `BREVO_API_KEY`, `SENDGRID_API_KEY`, `POSTMARK_SERVER_TOKEN` |
 | powersync | `PS_DATA_SOURCE_URI` | `postgres://postgres:<pw>@<pg-private>:5432/postgres` |
 | powersync | `PS_STORAGE_URI` | `postgres://postgres:<pw>@<pg-private>:5432/powersync` |
 | powersync | `PS_JWKS_URL` | `http://backend.railway.internal:6060/api/auth/keys` |
