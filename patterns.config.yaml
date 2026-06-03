@@ -1,0 +1,77 @@
+# Candidate conformance profile for todo.
+# Advisory pilot artefact only: review and ratify before treating as adopted.
+version: 1
+status: candidate
+projectSize: medium
+
+philosophies:
+  adopt:
+    - id: conceptual-integrity
+      weight: primary
+      reason: "The capture-first product contract, status lifecycle, sync, enrichment, and write path must stay coherent across clients and services."
+    - id: design-for-production
+      weight: primary
+      reason: "Hosted sync, background enrichment, and defensive API writes need production-safe behaviour."
+    - id: outcome-over-output
+      weight: secondary
+      reason: "The product focuses on reliable capture and completion, not feature volume."
+    - id: human-centered-design
+      weight: secondary
+      reason: "Capture, confirmation, and background suggestions should preserve user control."
+  reject: []
+
+patterns:
+  high:
+    adopt:
+      - id: modular-monolith
+        enforcement: advise
+        reason: "Workspace has bounded apps/services: native clients, web, backend, worker, integrations, and docs."
+      - id: client-server
+        enforcement: advise
+        reason: "Native/web clients sync through hosted backend services and PowerSync/Postgres."
+      - id: layered-architecture
+        enforcement: advise
+        reason: "Client, API, worker, integration, and persistence boundaries are explicit in docs and packages."
+  medium:
+    adopt:
+      - id: repository
+        enforcement: advise
+        reason: "TaskStore and backend storage boundaries should stay canonical for task lifecycle behaviour."
+      - id: materialized-view
+        enforcement: advise
+        reason: "PowerSync/read-model style client state is central to offline-capable sync."
+      - id: idempotency
+        enforcement: advise
+        reason: "Capture, sync, and enrichment should tolerate retries without changing task status incorrectly."
+      - id: data-transfer-object
+        enforcement: advise
+        reason: "API/task payloads and worker messages should remain explicit contracts."
+  low:
+    adopt:
+      - id: guard-clause
+        enforcement: advise
+        reason: "Write-path allowlists and status transitions should reject invalid input early."
+      - id: arrange-act-assert
+        enforcement: advise
+        reason: "Tests should prove lifecycle, auth, enrichment, integration, and client behaviours."
+  ban: []
+
+practicePatterns:
+  adopt:
+    - id: product-principles
+      enforcement: advise
+      reason: "Capture-first and confirm-before-save should remain explicit product principles."
+    - id: progressive-disclosure
+      enforcement: advise
+      reason: "Suggestions and enrichment should not overload the capture flow."
+    - id: confirmation-and-undo
+      enforcement: advise
+      reason: "Confirm-before-save and reversible task interactions are core UX patterns."
+    - id: system-status-visibility
+      enforcement: advise
+      reason: "Users need clear sync, enrichment, and task lifecycle state."
+
+phases:
+  write: { enabled: true, mode: advise, failMode: open, llm: false, block: false, maxFindings: 1 }
+  pr: { enabled: true, llm: true, failOn: block }
+  later: { enabled: true }

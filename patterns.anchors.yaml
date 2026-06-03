@@ -1,0 +1,33 @@
+# Candidate canonical anchors for todo. Review before trusting.
+version: 1
+anchors:
+  - symbol: Product contract
+    path: product.md
+    confidence: high
+    reasons:
+      - Defines capture-first, confirm-before-save, and lifecycle expectations.
+  - symbol: Architecture contract
+    path: docs/architecture.md
+    confidence: high
+    reasons:
+      - Documents sync, backend, worker, and lifecycle boundaries.
+  - symbol: Task lifecycle store
+    path: clients/CaptureCore/Sources/CaptureCore/TaskStore.swift
+    confidence: high
+    reasons:
+      - Canonical client-side task lifecycle and capture state implementation.
+  - symbol: Backend write boundary
+    path: backend/src/index.ts
+    confidence: medium
+    reasons:
+      - API/write-path allowlist anchor.
+  - symbol: Enrichment worker
+    path: worker/src/index.ts
+    confidence: medium
+    reasons:
+      - Canonical background enrichment behaviour and status non-mutation rule.
+  - symbol: Beads workflow
+    path: AGENTS.md
+    confidence: medium
+    reasons:
+      - Agent-facing issue tracking and workflow conventions.

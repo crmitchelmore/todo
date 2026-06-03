@@ -27,3 +27,6 @@ clients/**/.swiftpm/
 *.xcuserstate
 integrations/.env.local
 integrations/.env
+
+# Quality Software conformance derived evidence
+.conformance/
