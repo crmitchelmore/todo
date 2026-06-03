@@ -65,14 +65,26 @@ Key environment variables:
 
 ### Deploying code
 
-Source builds use the Railway CLI authenticated with a **project token**:
+Source builds use the Railway CLI authenticated with a Railway token. In this repo, prefer
+`RAILWAY_API_TOKEN` for non-interactive agent/shell deploys:
 
 ```bash
-export RAILWAY_TOKEN=<project-token>
-cd backend          && railway up --ci --service backend   --project <pid> --environment <eid>
-cd infra/powersync  && railway up --ci --service powersync --project <pid> --environment <eid>
-cd worker           && railway up --ci --service worker    --project <pid> --environment <eid>
+export RAILWAY_API_TOKEN=<token>
+cd /path/to/todo
+
+# backend and powersync have Railway root-directory config, so upload from repo root.
+railway up --ci --service backend
+railway up --ci --service powersync
+
+# worker currently has no Railway root-directory config; make worker/ the archive root.
+railway up ./worker --path-as-root --ci --service worker
 ```
+
+> **Upload-root gotcha.** Do not use `--path-as-root` for services that already have a Railway
+> root directory configured (`backend`, `powersync`): Railway will look for `/backend` inside the
+> uploaded archive and fail. Conversely, uploading the repo root for `worker` makes Railpack inspect
+> the monorepo root and fail to infer the Node app; use `./worker --path-as-root` until the service
+> gets a root directory configured in Railway settings.
 
 `infra/powersync/Dockerfile` bakes `service.yaml` + `sync-config.yaml` into the image (so no
 volume mount is needed) and points `POWERSYNC_CONFIG_PATH` at `/config/service.yaml`.
