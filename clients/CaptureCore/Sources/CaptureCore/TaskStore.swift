@@ -31,11 +31,32 @@ public final class TaskStore: @unchecked Sendable {
         try await db.disconnect()
     }
 
-    /// Wipe the local SQLite DB and pending upload queue. Call on every auth boundary (sign-in and
-    /// sign-out) so one account's optimistic, not-yet-uploaded writes can never replay or leak into
-    /// another account's synced view.
+    /// Wipe the local SQLite DB and pending upload queue. Call on a real account boundary (sign-out,
+    /// or sign-in as a *different* user) so one account's optimistic, not-yet-uploaded writes can
+    /// never replay or leak into another account's synced view.
     public func resetLocalData() async throws {
         try await db.disconnectAndClear()
+    }
+
+    private static let lastOwnerKey = "capture.lastOwnerId"
+
+    /// Prepare local storage for the currently signed-in user. Only wipes when the account actually
+    /// changed since the last run — a normal relaunch with the same restored session keeps the local
+    /// DB (and any pending offline writes) intact so they still upload. Does not connect.
+    public func prepareForActiveUser() async {
+        let current = ownerId
+        let last = UserDefaults.standard.string(forKey: Self.lastOwnerKey)
+        if last != current {
+            try? await resetLocalData()
+            UserDefaults.standard.set(current, forKey: Self.lastOwnerKey)
+        }
+    }
+
+    /// Clear local data on sign-out so the next account starts clean and the gate can't briefly show
+    /// the previous user's rows.
+    public func clearActiveUser() async {
+        try? await resetLocalData()
+        UserDefaults.standard.removeObject(forKey: Self.lastOwnerKey)
     }
 
     // MARK: - Capture (hot path)

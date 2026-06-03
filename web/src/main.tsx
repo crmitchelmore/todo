@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { PowerSyncContext } from '@powersync/react';
-import { db, initPowerSync, resetLocalData } from './powersync/db';
+import { db, prepareForActiveUser } from './powersync/db';
 import { isAuthenticated, onAuthChange } from './lib/auth';
 import { SignIn } from './components/SignIn';
 import App from './App';
@@ -14,8 +14,8 @@ function Root() {
 
   useEffect(() => {
     if (authed) {
-      // Fresh sign-in: wipe any prior local data so accounts can't cross-contaminate, then sync.
-      void resetLocalData().then(() => initPowerSync());
+      // Resets only when the account actually changed, otherwise keeps pending offline writes.
+      void prepareForActiveUser();
     }
   }, [authed]);
 

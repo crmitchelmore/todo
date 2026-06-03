@@ -45,7 +45,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             if !startedSync {
                 startedSync = true
                 Task {
-                    try? await viewModel.store.resetLocalData()
+                    await viewModel.store.prepareForActiveUser()
                     await MainActor.run {
                         window.rootViewController = UINavigationController(
                             rootViewController: CaptureViewController(viewModel: viewModel))

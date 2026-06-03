@@ -46,7 +46,7 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
     @objc private func signOut() {
         Task {
             await viewModel.auth.signOut()
-            try? await viewModel.store.resetLocalData()
+            await viewModel.store.clearActiveUser()
         }
     }
 

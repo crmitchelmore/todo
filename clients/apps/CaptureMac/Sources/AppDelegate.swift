@@ -53,7 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if !started {
                 started = true
                 Task {
-                    try? await model.store.resetLocalData()
+                    await model.store.prepareForActiveUser()
                     model.start()
                     captureVC.focusCapture()
                 }
@@ -157,7 +157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func signOut() {
         Task {
             await auth.signOut()
-            try? await model.store.resetLocalData()
+            await model.store.clearActiveUser()
             refreshAuthUI()
         }
     }

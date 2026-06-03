@@ -9,12 +9,12 @@ import { TagFilter } from './components/TagFilter';
 import { dateBucket, type DateBucketKey } from './lib/dates';
 import { decodeTags, tagKey } from './lib/tags';
 import { signOut } from './lib/auth';
-import { resetLocalData } from './powersync/db';
+import { clearActiveUser } from './powersync/db';
 
 /** Sign out and wipe local data so the next account starts clean. */
 async function handleSignOut(): Promise<void> {
   await signOut();
-  await resetLocalData();
+  await clearActiveUser();
 }
 
 /** AND/intersection: a task matches only if it carries every selected tag. */
