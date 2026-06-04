@@ -19,6 +19,10 @@ OBSIDIAN_API_KEY=<local-rest-api-key>
 
 - `searchVault(query)` calls `POST /search/simple/?query=...` with `Authorization: Bearer ...` and returns typed `VaultSearchHit` values.
 - `getNote(path)` calls `GET /vault/{path}` with `Authorization: Bearer ...` and returns a typed `VaultNote`.
+- `appendTasksToDailyNote(tasks, options)` writes Capture tasks back to a daily note using the
+  Obsidian Tasks line format (`- [ ] Title #tag 📅 YYYY-MM-DD`, or `- [x] ... ✅ YYYY-MM-DD` for
+  completed tasks). It defaults to `Daily/YYYY-MM-DD.md` and appends under a `## Capture` heading,
+  creating the note when it does not exist.
 - `buildObsidianSemanticIndex(connector, seedQueries)` uses Local REST search to find candidate notes, fetches each note once, chunks markdown by heading/size, and builds a local deterministic embedding index for task-context retrieval.
 - `healthCheck()` calls the Local REST API root endpoint and reports `ok` only when the configured service is reachable.
 - Connector calls use an 8 second timeout by default so an agent cannot hang indefinitely on vault operations.
@@ -27,4 +31,4 @@ The plugin is currently enabled locally and responds on both `https://127.0.0.1:
 
 ## Security posture
 
-The Obsidian Local REST API token grants access to the local vault API, so store it only as an environment secret on the trusted machine that runs the agent. Capture currently scaffolds read/search behaviour only. Write-back to daily notes is intentionally not wired here; future write methods should keep the existing human-confirm-before-save posture before changing notes.
+The Obsidian Local REST API token grants access to the local vault API, so store it only as an environment secret on the trusted machine that runs the agent. Write-back is an explicit connector method and should only be called after the relevant Capture-side proposal has been confirmed.

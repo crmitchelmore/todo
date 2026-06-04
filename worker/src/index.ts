@@ -1,6 +1,7 @@
 import pg from 'pg';
 import { createHash } from 'crypto';
 import { enrich } from './enrich.js';
+import { discoverTaskContext, type TaskDiscovery } from './discovery.js';
 import { learnCategoryHints, type CategoryHints, type HistoricalTask } from './historyLearning.js';
 
 /**
@@ -151,6 +152,98 @@ async function recordAgentProposal(
   );
 }
 
+async function recordDiscoveryEvent(
+  taskId: string,
+  ownerId: string,
+  discovery: TaskDiscovery
+): Promise<void> {
+  const eventId = deterministicUuid(`${ownerId}:${taskId}:enriched:agent-discovery:${discovery.query}`);
+  await pool.query(
+    `INSERT INTO public.task_events
+       (id, owner_id, task_id, actor, event_type, title, body, metadata)
+     VALUES ($1, $2, $3, 'agent', 'enriched', $4, $5, $6)
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      eventId,
+      ownerId,
+      taskId,
+      'Agent discovery prepared',
+      discoveryBody(discovery),
+      metadataJSON({
+        source: 'agent-discovery',
+        query: discovery.query,
+        location: discovery.location,
+        web: discovery.web,
+        next_actions: discovery.nextActions,
+        confidence: discovery.confidence,
+      }),
+    ]
+  );
+}
+
+async function recordDiscoveryProposal(
+  taskId: string,
+  ownerId: string,
+  discovery: TaskDiscovery
+): Promise<void> {
+  const proposalId = deterministicUuid(`${ownerId}:${taskId}:agent-proposal:discovery:${discovery.query}`);
+  const payload = {
+    task_id: taskId,
+    action_type: 'task_context_lookup',
+    query: discovery.query,
+    location: discovery.location,
+    web: discovery.web,
+    next_actions: discovery.nextActions,
+  };
+  const provenance = {
+    source: 'agent-discovery',
+    worker: 'capture-enrichment',
+    location_source: discovery.location.source,
+    web_source: discovery.web.source,
+  };
+  await pool.query(
+    `INSERT INTO public.agent_proposals
+       (id, owner_id, task_id, proposal_type, status, title, body, payload, provenance, confidence, source)
+     VALUES ($1, $2, $3, 'action', 'pending', $4, $5, $6, $7, $8, 'agent-discovery')
+     ON CONFLICT (id) DO UPDATE
+       SET title = EXCLUDED.title,
+           body = EXCLUDED.body,
+           payload = EXCLUDED.payload,
+           provenance = EXCLUDED.provenance,
+           confidence = EXCLUDED.confidence,
+           source = EXCLUDED.source,
+           updated_at = now()
+     WHERE public.agent_proposals.status = 'pending'`,
+    [
+      proposalId,
+      ownerId,
+      taskId,
+      `Discovery for ${discovery.title}`.slice(0, 160),
+      discoveryBody(discovery),
+      boundedJSON(payload, 8192),
+      boundedJSON(provenance, 4096),
+      discovery.confidence,
+    ]
+  );
+}
+
+function discoveryBody(discovery: TaskDiscovery): string {
+  const results = discovery.web.results
+    .slice(0, 3)
+    .map((result, index) => `${index + 1}. ${result.title}${result.url ? ` — ${result.url}` : ''}`)
+    .join('\n');
+  const actions = discovery.nextActions.map((action) => `- ${action}`).join('\n');
+  const parts = [
+    `Query: ${discovery.query}`,
+    discovery.location.source === 'env'
+      ? `Location: ${discovery.location.label ?? `${discovery.location.latitude}, ${discovery.location.longitude}`}`
+      : 'Location: unavailable',
+    results ? `Top results:\n${results}` : `Web: ${discovery.web.source}`,
+    `Next actions:\n${actions}`,
+  ];
+  return parts.join('\n\n').slice(0, 2000);
+}
+
 const UPDATE_SQL = `
   UPDATE public.tasks
   SET suggested_due_at      = $2,
@@ -195,6 +288,15 @@ async function tick(): Promise<number> {
       if (res.rowCount && res.rowCount > 0) {
         await recordEnrichmentEvent(row.id, row.owner_id, row.title, e);
         await recordAgentProposal(row.id, row.owner_id, row.title, e);
+        const discovery = await discoverTaskContext({
+          id: row.id,
+          ownerId: row.owner_id,
+          title: row.title,
+        });
+        if (discovery) {
+          await recordDiscoveryEvent(row.id, row.owner_id, discovery);
+          await recordDiscoveryProposal(row.id, row.owner_id, discovery);
+        }
         enriched += 1;
         console.log(
           `[worker] enriched ${row.id} -> category=${e.suggestedCategory ?? '∅'} ` +

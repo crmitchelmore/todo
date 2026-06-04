@@ -22,6 +22,27 @@ export interface ObsidianConnectorConfig {
   readonly requestTimeoutMs?: number;
 }
 
+export interface ObsidianTaskWrite {
+  readonly title: string;
+  readonly dueAt?: Date | string | null;
+  readonly completedAt?: Date | string | null;
+  readonly tags?: readonly string[];
+  readonly priority?: number | null;
+}
+
+export interface DailyNoteWriteOptions {
+  readonly date?: Date;
+  readonly path?: string;
+  readonly pathPattern?: string;
+  readonly sectionHeading?: string;
+}
+
+export interface DailyNoteWriteResult {
+  readonly path: string;
+  readonly lines: readonly string[];
+  readonly writtenAt: string;
+}
+
 export class ObsidianConnector implements Connector {
   readonly name: ConnectorName = "obsidian";
 
@@ -133,6 +154,39 @@ export class ObsidianConnector implements Connector {
     };
   }
 
+  async appendTasksToDailyNote(
+    tasks: readonly ObsidianTaskWrite[],
+    options: DailyNoteWriteOptions = {},
+  ): Promise<DailyNoteWriteResult> {
+    const config = this.config();
+    const date = options.date ?? new Date();
+    const path = normaliseNotePath(options.path ?? dailyNotePath(date, options.pathPattern));
+    const heading = normaliseHeading(options.sectionHeading ?? "Capture");
+    const lines = tasks.map(formatTasksPluginLine);
+    if (lines.length === 0) {
+      return { path, lines, writtenAt: new Date().toISOString() };
+    }
+
+    const note = await this.tryGetNote(config, path);
+    const block = `${lines.join("\n")}\n`;
+    if (!note) {
+      const initial = `# ${dateStamp(date)}\n\n## ${heading}\n\n${block}`;
+      await this.putNote(config, path, initial);
+    } else if (hasHeading(note.content, heading)) {
+      await this.patchNote(config, path, block, {
+        Operation: "append",
+        "Target-Type": "heading",
+        Target: heading,
+      });
+    } else {
+      await this.patchNote(config, path, `\n\n## ${heading}\n\n${block}`, {
+        Operation: "append",
+      });
+    }
+
+    return { path, lines, writtenAt: new Date().toISOString() };
+  }
+
   private config(): { apiUrl: string; apiKey: string } {
     const missingEnvVars = this.missingEnvVars();
     if (missingEnvVars.length > 0) {
@@ -158,6 +212,47 @@ export class ObsidianConnector implements Connector {
       clearTimeout(timeout);
     }
   }
+
+  private async tryGetNote(config: { apiUrl: string; apiKey: string }, path: string): Promise<VaultNote | null> {
+    const response = await this.fetchWithTimeout(`${config.apiUrl}/vault/${encodeVaultPath(path)}`, {
+      method: "GET",
+      headers: authHeaders(config.apiKey, { Accept: "text/markdown, text/plain;q=0.9, */*;q=0.1" }),
+    });
+    if (response.status === 404) return null;
+    await assertOk(response, "read Obsidian daily note");
+    return {
+      path,
+      content: await response.text(),
+      contentType: response.headers.get("content-type") ?? "text/markdown",
+      retrievedAt: new Date().toISOString(),
+    };
+  }
+
+  private async putNote(config: { apiUrl: string; apiKey: string }, path: string, content: string): Promise<void> {
+    const response = await this.fetchWithTimeout(`${config.apiUrl}/vault/${encodeVaultPath(path)}`, {
+      method: "PUT",
+      body: content,
+      headers: authHeaders(config.apiKey, { "Content-Type": "text/markdown" }),
+    });
+    await assertOk(response, "create Obsidian daily note");
+  }
+
+  private async patchNote(
+    config: { apiUrl: string; apiKey: string },
+    path: string,
+    content: string,
+    patchHeaders: Record<string, string>,
+  ): Promise<void> {
+    const response = await this.fetchWithTimeout(`${config.apiUrl}/vault/${encodeVaultPath(path)}`, {
+      method: "PATCH",
+      body: content,
+      headers: authHeaders(config.apiKey, {
+        "Content-Type": "text/markdown",
+        ...patchHeaders,
+      }),
+    });
+    await assertOk(response, "append to Obsidian daily note");
+  }
 }
 
 function authHeaders(apiKey: string, headers: Record<string, string> = {}): HeadersInit {
@@ -179,6 +274,80 @@ function nonEmpty(value: string | undefined): string | undefined {
 
 function encodeVaultPath(path: string): string {
   return path.split("/").map(encodeURIComponent).join("/");
+}
+
+function normaliseNotePath(path: string): string {
+  const trimmed = path.trim().replace(/^\/+/, "");
+  if (trimmed.length === 0) throw new Error("Obsidian daily note path must be non-empty.");
+  return trimmed.endsWith(".md") ? trimmed : `${trimmed}.md`;
+}
+
+function dailyNotePath(date: Date, pattern = "Daily/YYYY-MM-DD.md"): string {
+  const yyyy = String(date.getFullYear());
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return pattern
+    .replaceAll("YYYY", yyyy)
+    .replaceAll("MM", mm)
+    .replaceAll("DD", dd);
+}
+
+function dateStamp(date: Date): string {
+  const yyyy = String(date.getFullYear());
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function normaliseHeading(value: string): string {
+  const heading = value.replace(/^#+\s*/, "").trim();
+  if (heading.length === 0) throw new Error("Obsidian daily note section heading must be non-empty.");
+  return heading.slice(0, 120);
+}
+
+function hasHeading(content: string, heading: string): boolean {
+  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^#{1,6}\\s+${escaped}\\s*$`, "im").test(content);
+}
+
+function formatTasksPluginLine(task: ObsidianTaskWrite): string {
+  const title = task.title.replace(/\s+/g, " ").trim();
+  if (title.length === 0) throw new Error("Obsidian task title must be non-empty.");
+  const done = task.completedAt ? "x" : " ";
+  const parts = [`- [${done}] ${title}`];
+  const tags = normaliseTags(task.tags);
+  if (tags.length > 0) parts.push(tags.map((tag) => `#${tag}`).join(" "));
+  const due = toDateStamp(task.dueAt);
+  if (due) parts.push(`📅 ${due}`);
+  const completed = toDateStamp(task.completedAt);
+  if (completed) parts.push(`✅ ${completed}`);
+  const priority = priorityMarker(task.priority);
+  if (priority) parts.push(priority);
+  return parts.join(" ");
+}
+
+function normaliseTags(tags: readonly string[] | undefined): string[] {
+  if (!tags) return [];
+  const out: string[] = [];
+  for (const tag of tags) {
+    const cleaned = tag.trim().toLowerCase().replace(/^#+/, "").replace(/[^a-z0-9/_-]+/g, "-").replace(/^-+|-+$/g, "");
+    if (cleaned.length > 0 && !out.includes(cleaned)) out.push(cleaned);
+  }
+  return out.slice(0, 8);
+}
+
+function toDateStamp(value: Date | string | null | undefined): string | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return dateStamp(date);
+}
+
+function priorityMarker(priority: number | null | undefined): string | null {
+  if (priority === 0) return "⏫";
+  if (priority === 1) return "🔼";
+  if (priority === 3 || priority === 4) return "🔽";
+  return null;
 }
 
 async function assertOk(response: Response, action: string): Promise<void> {
