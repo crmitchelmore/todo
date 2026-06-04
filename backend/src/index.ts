@@ -4,6 +4,15 @@ import pg from 'pg';
 import { SignJWT } from 'jose';
 import { createHash, randomUUID } from 'crypto';
 import {
+  generateAuthenticationOptions,
+  generateRegistrationOptions,
+  verifyAuthenticationResponse,
+  verifyRegistrationResponse,
+  type AuthenticationResponseJSON,
+  type AuthenticatorTransportFuture,
+  type RegistrationResponseJSON,
+} from '@simplewebauthn/server';
+import {
   registerUser,
   loginUser,
   createSession,
@@ -22,6 +31,14 @@ import {
   resetPassword,
   CODE_TTL_LOGIN_MS,
   CODE_TTL_RESET_MS,
+  hashRecoveryCode,
+  hashToken,
+  newMfaChallengeToken,
+  newRecoveryCodes,
+  newTotpSecret,
+  totpUri,
+  userHasTotpEnabled,
+  verifyTotpCode,
 } from './auth.js';
 import { sendEmailBestEffort, loginCodeEmail, resetCodeEmail } from './mailer.js';
 
@@ -42,6 +59,11 @@ const DATABASE_URI = process.env.BACKEND_DATABASE_URI!;
 const JWT_ISSUER = process.env.JWT_ISSUER ?? 'capture';
 const JWT_AUDIENCE = process.env.JWT_AUDIENCE ?? 'powersync';
 const POWERSYNC_URL = process.env.POWERSYNC_PUBLIC_URL ?? 'http://localhost:8080';
+const PUBLIC_WEB_ORIGIN = process.env.PUBLIC_WEB_ORIGIN ?? 'http://localhost:3030';
+const WEBAUTHN_RP_ID = process.env.WEBAUTHN_RP_ID ?? new URL(PUBLIC_WEB_ORIGIN).hostname;
+const WEBAUTHN_RP_NAME = process.env.WEBAUTHN_RP_NAME ?? 'Capture';
+const MFA_CHALLENGE_TTL_MS = 5 * 60_000;
+const MFA_MAX_ATTEMPTS = 5;
 
 const pool = new pg.Pool({ connectionString: DATABASE_URI });
 const { privateKey, publicJwk, kid } = await loadSigningKey();
@@ -134,6 +156,84 @@ app.get('/api/auth/keys', (_req, res) => {
   res.json({ keys: [publicJwk] });
 });
 
+async function createMfaChallenge(userId: string): Promise<string> {
+  const token = newMfaChallengeToken();
+  await pool.query(
+    `INSERT INTO public.auth_mfa_challenges (user_id, token_hash, expires_at)
+     VALUES ($1, $2, $3)`,
+    [userId, hashToken(token), new Date(Date.now() + MFA_CHALLENGE_TTL_MS)]
+  );
+  return token;
+}
+
+async function issueRecoveryCodes(userId: string): Promise<string[]> {
+  const codes = newRecoveryCodes();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `UPDATE public.auth_recovery_codes
+          SET revoked_at = now()
+        WHERE user_id = $1 AND used_at IS NULL AND revoked_at IS NULL`,
+      [userId]
+    );
+    for (const code of codes) {
+      await client.query(
+        `INSERT INTO public.auth_recovery_codes (user_id, code_hash) VALUES ($1, $2)
+         ON CONFLICT (user_id, code_hash) DO NOTHING`,
+        [userId, hashRecoveryCode(code)]
+      );
+    }
+    await client.query('COMMIT');
+    return codes;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function verifySecondFactor(userId: string, code: string): Promise<'totp' | 'recovery' | null> {
+  const cleaned = code.trim();
+  const totp = await pool.query(
+    `SELECT secret FROM public.auth_totp_secrets
+      WHERE user_id = $1 AND enabled_at IS NOT NULL AND disabled_at IS NULL
+      LIMIT 1`,
+    [userId]
+  );
+  if ((totp.rowCount ?? 0) > 0 && verifyTotpCode(totp.rows[0].secret as string, cleaned)) {
+    return 'totp';
+  }
+  const recovery = await pool.query(
+    `UPDATE public.auth_recovery_codes
+        SET used_at = now()
+      WHERE user_id = $1 AND code_hash = $2 AND used_at IS NULL AND revoked_at IS NULL
+      RETURNING id`,
+    [userId, hashRecoveryCode(cleaned)]
+  );
+  return (recovery.rowCount ?? 0) > 0 ? 'recovery' : null;
+}
+
+async function consumeWebAuthnChallenge(
+  challenge: string,
+  purpose: 'registration' | 'authentication',
+  userId: string | null
+): Promise<boolean> {
+  const r = await pool.query(
+    `UPDATE public.auth_webauthn_challenges
+        SET consumed_at = now()
+      WHERE challenge_hash = $1
+        AND purpose = $2
+        AND ($3::uuid IS NULL OR user_id = $3 OR user_id IS NULL)
+        AND consumed_at IS NULL
+        AND expires_at > now()
+      RETURNING id`,
+    [hashToken(challenge), purpose, userId]
+  );
+  return (r.rowCount ?? 0) > 0;
+}
+
 /**
  * Register a new account (email + password) and return an opaque session token. Public endpoint;
  * the unique index on lower(email) enforces one account per email.
@@ -189,11 +289,66 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       return res.status(401).json({ ok: false, error: 'invalid email or password' });
     }
     clearFailures(key);
+    if (await userHasTotpEnabled(pool, userId)) {
+      const challengeToken = await createMfaChallenge(userId);
+      res.json({ ok: true, mfa_required: true, mfa_challenge: challengeToken });
+      return;
+    }
     const sessionToken = await createSession(pool, userId, client);
     res.json({ ok: true, session_token: sessionToken, user_id: userId });
   } catch (err) {
     console.error('login failed:', err);
     res.status(500).json({ ok: false, error: 'login failed' });
+  }
+});
+
+app.post('/api/auth/login/mfa', async (req: Request, res: Response) => {
+  const challengeToken = typeof req.body?.mfa_challenge === 'string' ? req.body.mfa_challenge : '';
+  const code = typeof req.body?.code === 'string' ? req.body.code : '';
+  const clientName: string | null =
+    typeof req.body?.client === 'string' ? req.body.client.slice(0, 32) : null;
+  if (!challengeToken || !code.trim()) {
+    return res.status(400).json({ ok: false, error: 'challenge and code are required' });
+  }
+
+  const conn = await pool.connect();
+  try {
+    await conn.query('BEGIN');
+    const challenge = await conn.query(
+      `SELECT id, user_id, attempts, expires_at
+         FROM public.auth_mfa_challenges
+        WHERE token_hash = $1 AND consumed_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT 1
+        FOR UPDATE`,
+      [hashToken(challengeToken)]
+    );
+    if ((challenge.rowCount ?? 0) === 0) {
+      await conn.query('COMMIT');
+      return res.status(401).json({ ok: false, error: 'invalid or expired challenge' });
+    }
+    const row = challenge.rows[0] as { id: string; user_id: string; attempts: number; expires_at: string };
+    if (new Date(row.expires_at).getTime() < Date.now() || row.attempts >= MFA_MAX_ATTEMPTS) {
+      await conn.query(`UPDATE public.auth_mfa_challenges SET consumed_at = now() WHERE id = $1`, [row.id]);
+      await conn.query('COMMIT');
+      return res.status(401).json({ ok: false, error: 'invalid or expired challenge' });
+    }
+    await conn.query('COMMIT');
+
+    const method = await verifySecondFactor(row.user_id, code);
+    if (!method) {
+      await pool.query(`UPDATE public.auth_mfa_challenges SET attempts = attempts + 1 WHERE id = $1`, [row.id]);
+      return res.status(401).json({ ok: false, error: 'invalid authentication code' });
+    }
+    await pool.query(`UPDATE public.auth_mfa_challenges SET consumed_at = now() WHERE id = $1`, [row.id]);
+    const sessionToken = await createSession(pool, row.user_id, clientName);
+    res.json({ ok: true, session_token: sessionToken, user_id: row.user_id, mfa_method: method });
+  } catch (err) {
+    await conn.query('ROLLBACK').catch(() => {});
+    console.error('mfa login failed:', err);
+    res.status(500).json({ ok: false, error: 'sign-in failed' });
+  } finally {
+    conn.release();
   }
 });
 
@@ -312,6 +467,262 @@ app.post('/api/auth/reset', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('password reset failed:', err);
     res.status(500).json({ ok: false, error: 'reset failed' });
+  }
+});
+
+app.post('/api/auth/totp/setup', requireAuth, async (req: AuthedRequest, res: Response) => {
+  try {
+    const user = await pool.query(`SELECT email FROM public.users WHERE id = $1`, [req.ownerId]);
+    const email = (user.rows[0]?.email as string | null) ?? req.ownerId!;
+    const secret = newTotpSecret();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `UPDATE public.auth_totp_secrets
+            SET disabled_at = now()
+          WHERE user_id = $1 AND enabled_at IS NULL AND disabled_at IS NULL`,
+        [req.ownerId]
+      );
+      await client.query(
+        `INSERT INTO public.auth_totp_secrets (user_id, secret) VALUES ($1, $2)`,
+        [req.ownerId, secret]
+      );
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+    res.json({ ok: true, secret, otpauth_uri: totpUri(email, secret) });
+  } catch (err) {
+    console.error('totp setup failed:', err);
+    res.status(500).json({ ok: false, error: 'setup failed' });
+  }
+});
+
+app.post('/api/auth/totp/verify', requireAuth, async (req: AuthedRequest, res: Response) => {
+  const code = typeof req.body?.code === 'string' ? req.body.code : '';
+  if (!code.trim()) return res.status(400).json({ ok: false, error: 'code is required' });
+  try {
+    const pending = await pool.query(
+      `SELECT id, secret FROM public.auth_totp_secrets
+        WHERE user_id = $1 AND enabled_at IS NULL AND disabled_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [req.ownerId]
+    );
+    if ((pending.rowCount ?? 0) === 0) {
+      return res.status(404).json({ ok: false, error: 'no pending setup' });
+    }
+    const row = pending.rows[0] as { id: string; secret: string };
+    if (!verifyTotpCode(row.secret, code)) {
+      return res.status(401).json({ ok: false, error: 'invalid authentication code' });
+    }
+    await pool.query(`UPDATE public.auth_totp_secrets SET enabled_at = now() WHERE id = $1`, [row.id]);
+    const recoveryCodes = await issueRecoveryCodes(req.ownerId!);
+    res.json({ ok: true, recovery_codes: recoveryCodes });
+  } catch (err) {
+    console.error('totp verify failed:', err);
+    res.status(500).json({ ok: false, error: 'verification failed' });
+  }
+});
+
+app.post('/api/auth/totp/disable', requireAuth, async (req: AuthedRequest, res: Response) => {
+  const code = typeof req.body?.code === 'string' ? req.body.code : '';
+  if (!code.trim()) return res.status(400).json({ ok: false, error: 'code is required' });
+  try {
+    const method = await verifySecondFactor(req.ownerId!, code);
+    if (!method) return res.status(401).json({ ok: false, error: 'invalid authentication code' });
+    await pool.query(
+      `UPDATE public.auth_totp_secrets
+          SET disabled_at = now()
+        WHERE user_id = $1 AND disabled_at IS NULL`,
+      [req.ownerId]
+    );
+    await pool.query(
+      `UPDATE public.auth_recovery_codes
+          SET revoked_at = now()
+        WHERE user_id = $1 AND used_at IS NULL AND revoked_at IS NULL`,
+      [req.ownerId]
+    );
+    res.json({ ok: true, mfa_method: method });
+  } catch (err) {
+    console.error('totp disable failed:', err);
+    res.status(500).json({ ok: false, error: 'disable failed' });
+  }
+});
+
+app.post('/api/auth/recovery-codes/rotate', requireAuth, async (req: AuthedRequest, res: Response) => {
+  const code = typeof req.body?.code === 'string' ? req.body.code : '';
+  if (!code.trim()) return res.status(400).json({ ok: false, error: 'code is required' });
+  try {
+    const method = await verifySecondFactor(req.ownerId!, code);
+    if (!method) return res.status(401).json({ ok: false, error: 'invalid authentication code' });
+    const recoveryCodes = await issueRecoveryCodes(req.ownerId!);
+    res.json({ ok: true, recovery_codes: recoveryCodes, mfa_method: method });
+  } catch (err) {
+    console.error('recovery-code rotation failed:', err);
+    res.status(500).json({ ok: false, error: 'rotation failed' });
+  }
+});
+
+app.post('/api/auth/passkeys/register/options', requireAuth, async (req: AuthedRequest, res: Response) => {
+  try {
+    const user = await pool.query(`SELECT email FROM public.users WHERE id = $1`, [req.ownerId]);
+    const email = (user.rows[0]?.email as string | null) ?? req.ownerId!;
+    const credentials = await pool.query(
+      `SELECT credential_id, transports FROM public.auth_webauthn_credentials
+        WHERE user_id = $1 AND revoked_at IS NULL`,
+      [req.ownerId]
+    );
+    const options = await generateRegistrationOptions({
+      rpName: WEBAUTHN_RP_NAME,
+      rpID: WEBAUTHN_RP_ID,
+      userName: email,
+      userDisplayName: email,
+      userID: Buffer.from(req.ownerId!.replace(/-/g, ''), 'hex'),
+      attestationType: 'none',
+      authenticatorSelection: { residentKey: 'preferred', userVerification: 'preferred' },
+      excludeCredentials: credentials.rows.map((row) => ({
+        id: row.credential_id as string,
+        transports: row.transports as AuthenticatorTransportFuture[],
+      })),
+    });
+    await pool.query(
+      `INSERT INTO public.auth_webauthn_challenges (user_id, purpose, challenge_hash, expires_at)
+       VALUES ($1, 'registration', $2, $3)`,
+      [req.ownerId, hashToken(options.challenge), new Date(Date.now() + 5 * 60_000)]
+    );
+    res.json({ ok: true, options });
+  } catch (err) {
+    console.error('passkey registration options failed:', err);
+    res.status(500).json({ ok: false, error: 'passkey setup failed' });
+  }
+});
+
+app.post('/api/auth/passkeys/register/verify', requireAuth, async (req: AuthedRequest, res: Response) => {
+  const response = req.body?.response as RegistrationResponseJSON | undefined;
+  if (!response) return res.status(400).json({ ok: false, error: 'response is required' });
+  try {
+    const verification = await verifyRegistrationResponse({
+      response,
+      expectedOrigin: PUBLIC_WEB_ORIGIN,
+      expectedRPID: WEBAUTHN_RP_ID,
+      requireUserVerification: false,
+      expectedChallenge: (challenge) => consumeWebAuthnChallenge(challenge, 'registration', req.ownerId!),
+    });
+    if (!verification.verified) {
+      return res.status(401).json({ ok: false, error: 'passkey verification failed' });
+    }
+    const { credential, credentialDeviceType, credentialBackedUp } = verification.registrationInfo;
+    await pool.query(
+      `INSERT INTO public.auth_webauthn_credentials
+         (user_id, credential_id, public_key, counter, transports, device_type, backed_up, name)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (credential_id) DO NOTHING`,
+      [
+        req.ownerId,
+        credential.id,
+        Buffer.from(credential.publicKey),
+        credential.counter,
+        credential.transports ?? [],
+        credentialDeviceType,
+        credentialBackedUp,
+        typeof req.body?.name === 'string' ? req.body.name.slice(0, 80) : null,
+      ]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('passkey registration verify failed:', err);
+    res.status(500).json({ ok: false, error: 'passkey setup failed' });
+  }
+});
+
+app.post('/api/auth/passkeys/login/options', async (req: Request, res: Response) => {
+  const email = normalizeEmail(typeof req.body?.email === 'string' ? req.body.email : '');
+  try {
+    let userId: string | null = null;
+    let allowCredentials: { id: string; transports?: AuthenticatorTransportFuture[] }[] | undefined;
+    if (email) {
+      const user = await pool.query(`SELECT id FROM public.users WHERE lower(email) = $1`, [email]);
+      if ((user.rowCount ?? 0) > 0) {
+        userId = user.rows[0].id as string;
+        const creds = await pool.query(
+          `SELECT credential_id, transports FROM public.auth_webauthn_credentials
+            WHERE user_id = $1 AND revoked_at IS NULL`,
+          [userId]
+        );
+        allowCredentials = creds.rows.map((row) => ({
+          id: row.credential_id as string,
+          transports: row.transports as AuthenticatorTransportFuture[],
+        }));
+      }
+    }
+    const options = await generateAuthenticationOptions({
+      rpID: WEBAUTHN_RP_ID,
+      allowCredentials,
+      userVerification: 'preferred',
+    });
+    await pool.query(
+      `INSERT INTO public.auth_webauthn_challenges (user_id, purpose, challenge_hash, expires_at)
+       VALUES ($1, 'authentication', $2, $3)`,
+      [userId, hashToken(options.challenge), new Date(Date.now() + 5 * 60_000)]
+    );
+    res.json({ ok: true, options });
+  } catch (err) {
+    console.error('passkey login options failed:', err);
+    res.status(500).json({ ok: false, error: 'passkey sign-in failed' });
+  }
+});
+
+app.post('/api/auth/passkeys/login/verify', async (req: Request, res: Response) => {
+  const response = req.body?.response as AuthenticationResponseJSON | undefined;
+  const clientName: string | null =
+    typeof req.body?.client === 'string' ? req.body.client.slice(0, 32) : null;
+  if (!response) return res.status(400).json({ ok: false, error: 'response is required' });
+  try {
+    const stored = await pool.query(
+      `SELECT id, user_id, credential_id, public_key, counter, transports
+         FROM public.auth_webauthn_credentials
+        WHERE credential_id = $1 AND revoked_at IS NULL
+        LIMIT 1`,
+      [response.id]
+    );
+    if ((stored.rowCount ?? 0) === 0) {
+      return res.status(401).json({ ok: false, error: 'passkey not recognised' });
+    }
+    const row = stored.rows[0] as {
+      id: string; user_id: string; credential_id: string; public_key: Buffer; counter: string; transports: string[];
+    };
+    const verification = await verifyAuthenticationResponse({
+      response,
+      expectedOrigin: PUBLIC_WEB_ORIGIN,
+      expectedRPID: WEBAUTHN_RP_ID,
+      requireUserVerification: false,
+      expectedChallenge: (challenge) => consumeWebAuthnChallenge(challenge, 'authentication', row.user_id),
+      credential: {
+        id: row.credential_id,
+        publicKey: new Uint8Array(row.public_key),
+        counter: Number(row.counter),
+        transports: row.transports as AuthenticatorTransportFuture[],
+      },
+    });
+    if (!verification.verified) {
+      return res.status(401).json({ ok: false, error: 'passkey verification failed' });
+    }
+    await pool.query(
+      `UPDATE public.auth_webauthn_credentials
+          SET counter = $1, last_used_at = now()
+        WHERE id = $2`,
+      [verification.authenticationInfo.newCounter, row.id]
+    );
+    const sessionToken = await createSession(pool, row.user_id, clientName);
+    res.json({ ok: true, session_token: sessionToken, user_id: row.user_id });
+  } catch (err) {
+    console.error('passkey login verify failed:', err);
+    res.status(500).json({ ok: false, error: 'passkey sign-in failed' });
   }
 });
 

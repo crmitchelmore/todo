@@ -5,7 +5,7 @@ import {
   type JWK,
   type KeyLike,
 } from 'jose';
-import { createHash, randomBytes, randomInt } from 'crypto';
+import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'crypto';
 import bcrypt from 'bcryptjs';
 import type pg from 'pg';
 
@@ -37,6 +37,16 @@ const MAX_PASSWORD_LEN = 1024; // bound raw input so a giant body can't tie up C
 /** Canonical email form used for storage, the unique index, and login lookup (server-authoritative). */
 export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
+}
+
+export async function userHasTotpEnabled(pool: pg.Pool, userId: string): Promise<boolean> {
+  const r = await pool.query(
+    `SELECT 1 FROM public.auth_totp_secrets
+      WHERE user_id = $1 AND enabled_at IS NOT NULL AND disabled_at IS NULL
+      LIMIT 1`,
+    [userId]
+  );
+  return (r.rowCount ?? 0) > 0;
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -221,6 +231,107 @@ export function hashCode(code: string): string {
   return createHash('sha256').update(code).digest('hex');
 }
 
+// --- TOTP + recovery codes ---------------------------------------------------------------------
+
+const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+const TOTP_STEP_SECONDS = 30;
+const TOTP_DIGITS = 6;
+
+export function newTotpSecret(): string {
+  return base32Encode(randomBytes(20));
+}
+
+function base32Encode(bytes: Uint8Array): string {
+  let bits = 0;
+  let value = 0;
+  let out = '';
+  for (const byte of bytes) {
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      out += BASE32_ALPHABET[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) out += BASE32_ALPHABET[(value << (5 - bits)) & 31];
+  return out;
+}
+
+function base32Decode(secret: string): Buffer {
+  const clean = secret.toUpperCase().replace(/[^A-Z2-7]/g, '');
+  let bits = 0;
+  let value = 0;
+  const out: number[] = [];
+  for (const char of clean) {
+    const idx = BASE32_ALPHABET.indexOf(char);
+    if (idx < 0) continue;
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      out.push((value >>> (bits - 8)) & 255);
+      bits -= 8;
+    }
+  }
+  return Buffer.from(out);
+}
+
+export function totpUri(email: string, secret: string, issuer = 'Capture'): string {
+  const label = `${issuer}:${normalizeEmail(email)}`;
+  const params = new URLSearchParams({
+    secret,
+    issuer,
+    algorithm: 'SHA1',
+    digits: String(TOTP_DIGITS),
+    period: String(TOTP_STEP_SECONDS),
+  });
+  return `otpauth://totp/${encodeURIComponent(label)}?${params.toString()}`;
+}
+
+function totpAt(secret: string, counter: number): string {
+  const msg = Buffer.alloc(8);
+  msg.writeBigUInt64BE(BigInt(counter));
+  const digest = createHmac('sha1', base32Decode(secret)).update(msg).digest();
+  const offset = digest[digest.length - 1] & 0xf;
+  const binary =
+    ((digest[offset] & 0x7f) << 24) |
+    ((digest[offset + 1] & 0xff) << 16) |
+    ((digest[offset + 2] & 0xff) << 8) |
+    (digest[offset + 3] & 0xff);
+  return (binary % 10 ** TOTP_DIGITS).toString().padStart(TOTP_DIGITS, '0');
+}
+
+function safeEqualString(a: string, b: string): boolean {
+  const aa = Buffer.from(a);
+  const bb = Buffer.from(b);
+  return aa.length === bb.length && timingSafeEqual(aa, bb);
+}
+
+export function verifyTotpCode(secret: string, code: string, now = Date.now(), window = 1): boolean {
+  const clean = code.replace(/\s+/g, '');
+  if (!/^\d{6}$/.test(clean)) return false;
+  const counter = Math.floor(now / 1000 / TOTP_STEP_SECONDS);
+  for (let drift = -window; drift <= window; drift++) {
+    if (safeEqualString(totpAt(secret, counter + drift), clean)) return true;
+  }
+  return false;
+}
+
+export function newRecoveryCodes(count = 10): string[] {
+  return Array.from({ length: count }, () => {
+    const raw = randomBytes(6).toString('hex').toUpperCase();
+    return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
+  });
+}
+
+export function hashRecoveryCode(code: string): string {
+  const normalized = code.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return createHash('sha256').update(`capture-recovery:${normalized}`).digest('hex');
+}
+
+export function newMfaChallengeToken(): string {
+  return randomBytes(32).toString('base64url');
+}
+
 /** Idempotently create the auth-codes table + lookup index (auto-migrates on deploy). */
 export async function ensureAuthSchema(pool: pg.Pool): Promise<void> {
   await pool.query(`
@@ -238,6 +349,85 @@ export async function ensureAuthSchema(pool: pg.Pool): Promise<void> {
   await pool.query(
     `CREATE INDEX IF NOT EXISTS auth_codes_lookup_idx
        ON public.auth_codes (lower(email), purpose, consumed_at)`
+  );
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.auth_totp_secrets (
+     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+     user_id     uuid NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+     secret      text NOT NULL,
+     enabled_at  timestamptz,
+     disabled_at timestamptz,
+     created_at  timestamptz NOT NULL DEFAULT now()
+    )`);
+  await pool.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS auth_totp_one_active_idx
+      ON public.auth_totp_secrets (user_id)
+      WHERE enabled_at IS NOT NULL AND disabled_at IS NULL`
+  );
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.auth_recovery_codes (
+     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+     user_id     uuid NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+     code_hash   text NOT NULL,
+     used_at     timestamptz,
+     revoked_at  timestamptz,
+     created_at  timestamptz NOT NULL DEFAULT now(),
+     UNIQUE (user_id, code_hash)
+    )`);
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS auth_recovery_codes_user_active_idx
+      ON public.auth_recovery_codes (user_id)
+      WHERE used_at IS NULL AND revoked_at IS NULL`
+  );
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.auth_mfa_challenges (
+     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+     user_id     uuid NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+     token_hash  text NOT NULL UNIQUE,
+     attempts    integer NOT NULL DEFAULT 0,
+     expires_at  timestamptz NOT NULL,
+     consumed_at timestamptz,
+     created_at  timestamptz NOT NULL DEFAULT now()
+    )`);
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS auth_mfa_challenges_lookup_idx
+      ON public.auth_mfa_challenges (token_hash)
+      WHERE consumed_at IS NULL`
+  );
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.auth_webauthn_credentials (
+     id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+     user_id           uuid NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+     credential_id     text NOT NULL UNIQUE,
+     public_key        bytea NOT NULL,
+     counter           bigint NOT NULL DEFAULT 0,
+     transports        text[] NOT NULL DEFAULT '{}',
+     device_type       text,
+     backed_up         boolean NOT NULL DEFAULT false,
+     name              text,
+     created_at        timestamptz NOT NULL DEFAULT now(),
+     last_used_at      timestamptz,
+     revoked_at        timestamptz
+    )`);
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS auth_webauthn_credentials_user_active_idx
+      ON public.auth_webauthn_credentials (user_id)
+      WHERE revoked_at IS NULL`
+  );
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.auth_webauthn_challenges (
+     id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+     user_id        uuid REFERENCES public.users(id) ON DELETE CASCADE,
+     purpose        text NOT NULL CHECK (purpose IN ('registration', 'authentication')),
+     challenge_hash text NOT NULL UNIQUE,
+     expires_at     timestamptz NOT NULL,
+     consumed_at    timestamptz,
+     created_at     timestamptz NOT NULL DEFAULT now()
+    )`);
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS auth_webauthn_challenges_lookup_idx
+      ON public.auth_webauthn_challenges (challenge_hash, purpose)
+      WHERE consumed_at IS NULL`
   );
 }
 

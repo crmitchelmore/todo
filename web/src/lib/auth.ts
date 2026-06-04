@@ -1,4 +1,5 @@
 import { config } from '../config';
+import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 
 /**
  * Web authentication: email + password exchanged for an opaque backend session token.
@@ -66,7 +67,20 @@ interface AuthResponse {
   ok?: boolean;
   session_token?: string;
   user_id?: string;
+  mfa_required?: boolean;
+  mfa_challenge?: string;
+  options?: unknown;
+  secret?: string;
+  otpauth_uri?: string;
+  recovery_codes?: string[];
   error?: string;
+}
+
+export class MfaRequiredError extends Error {
+  constructor(readonly challenge: string) {
+    super('Enter your authentication code.');
+    this.name = 'MfaRequiredError';
+  }
 }
 
 async function authenticate(path: string, email: string, password: string): Promise<void> {
@@ -76,6 +90,9 @@ async function authenticate(path: string, email: string, password: string): Prom
     body: JSON.stringify({ email: email.trim(), password, client: 'web' })
   });
   const body: AuthResponse = await res.json().catch(() => ({}));
+  if (res.ok && body.ok && body.mfa_required && body.mfa_challenge) {
+    throw new MfaRequiredError(body.mfa_challenge);
+  }
   if (!res.ok || !body.ok || !body.session_token || !body.user_id) {
     throw new Error(body.error ?? `request failed (${res.status})`);
   }
@@ -85,6 +102,10 @@ async function authenticate(path: string, email: string, password: string): Prom
 /** Sign in to an existing account with an email + password. */
 export async function signIn(email: string, password: string): Promise<void> {
   await authenticate('/api/auth/login', email, password);
+}
+
+export async function verifyMfaLogin(challenge: string, code: string): Promise<void> {
+  await postSession('/api/auth/login/mfa', { mfa_challenge: challenge, code: code.trim() });
 }
 
 /** Create a new account with an email + password. */
@@ -137,6 +158,60 @@ export async function requestPasswordReset(email: string): Promise<void> {
 /** Forgot password, step 2: set a new password with the emailed code; signs the user in on success. */
 export async function resetPassword(email: string, code: string, password: string): Promise<void> {
   await postSession('/api/auth/reset', { email: email.trim(), code: code.trim(), password });
+}
+
+async function authedPost(path: string, payload: Record<string, unknown> = {}): Promise<AuthResponse> {
+  const token = getToken();
+  if (!token) throw new Error('Not signed in.');
+  const res = await fetch(`${config.backendUrl}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload)
+  });
+  const body: AuthResponse = await res.json().catch(() => ({}));
+  if (!res.ok || !body.ok) throw new Error(body.error ?? `request failed (${res.status})`);
+  return body;
+}
+
+export async function beginTotpSetup(): Promise<{ secret: string; otpauthUri: string }> {
+  const body = await authedPost('/api/auth/totp/setup');
+  if (!body.secret || !body.otpauth_uri) throw new Error('TOTP setup response was incomplete.');
+  return { secret: body.secret, otpauthUri: body.otpauth_uri };
+}
+
+export async function verifyTotpSetup(code: string): Promise<string[]> {
+  const body = await authedPost('/api/auth/totp/verify', { code: code.trim() });
+  return body.recovery_codes ?? [];
+}
+
+export async function disableTotp(code: string): Promise<void> {
+  await authedPost('/api/auth/totp/disable', { code: code.trim() });
+}
+
+export async function rotateRecoveryCodes(code: string): Promise<string[]> {
+  const body = await authedPost('/api/auth/recovery-codes/rotate', { code: code.trim() });
+  return body.recovery_codes ?? [];
+}
+
+export async function registerPasskey(): Promise<void> {
+  const optionsBody = await authedPost('/api/auth/passkeys/register/options');
+  if (!optionsBody.options) throw new Error('Passkey setup response was incomplete.');
+  const response = await startRegistration({ optionsJSON: optionsBody.options as never });
+  await authedPost('/api/auth/passkeys/register/verify', { response });
+}
+
+export async function signInWithPasskey(email?: string): Promise<void> {
+  const res = await fetch(`${config.backendUrl}/api/auth/passkeys/login/options`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: email?.trim() ?? '' })
+  });
+  const optionsBody: AuthResponse = await res.json().catch(() => ({}));
+  if (!res.ok || !optionsBody.ok || !optionsBody.options) {
+    throw new Error(optionsBody.error ?? `request failed (${res.status})`);
+  }
+  const response = await startAuthentication({ optionsJSON: optionsBody.options as never });
+  await postSession('/api/auth/passkeys/login/verify', { response });
 }
 
 /** Best-effort server revoke, then drop the local session regardless of the network result. */

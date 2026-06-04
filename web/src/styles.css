@@ -928,6 +928,90 @@ input[type='checkbox']:checked::after {
   color: var(--mint); font-family: var(--font-mono);
 }
 
+/* ============================ Account security ============================ */
+.security-panel {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-xl);
+  padding: 18px;
+  background:
+    radial-gradient(80% 100% at 100% 0%, rgba(74, 222, 158, 0.08), transparent 45%),
+    linear-gradient(180deg, rgba(23, 27, 35, 0.92), rgba(12, 14, 18, 0.92));
+  box-shadow: var(--shadow-card);
+}
+.security-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.security-card {
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.025);
+}
+.security-kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mint);
+}
+.security-card h3 {
+  margin: 4px 0 6px;
+  font-family: var(--font-display);
+  font-size: 21px;
+  letter-spacing: -0.02em;
+}
+.security-card p {
+  margin: 0 0 14px;
+  color: var(--text-dim);
+  font-size: 14px;
+}
+.security-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+.security-form input {
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel-solid);
+  color: var(--text);
+  padding: 0 13px;
+  outline: none;
+}
+.security-form input:focus { border-color: var(--signal-line); box-shadow: var(--ring); }
+.security-secret {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border-radius: var(--r-md);
+  border: 1px dashed var(--signal-line);
+  background: var(--signal-soft);
+  overflow-wrap: anywhere;
+}
+.security-secret strong, .security-secret small {
+  font-family: var(--font-mono);
+}
+.security-secret small { color: var(--text-dim); font-size: 11px; }
+.recovery-codes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+.recovery-codes code {
+  border: 1px solid rgba(74, 222, 158, 0.28);
+  border-radius: var(--r-sm);
+  padding: 8px;
+  color: var(--mint);
+  background: var(--mint-soft);
+  font-family: var(--font-mono);
+  text-align: center;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
@@ -936,4 +1020,5 @@ input[type='checkbox']:checked::after {
   .app { padding: 28px 16px 100px; }
   header h1 { font-size: 26px; }
   .capture-bar input { font-size: 16px; }
+  .security-grid { grid-template-columns: 1fr; }
 }

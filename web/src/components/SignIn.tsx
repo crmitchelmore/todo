@@ -6,6 +6,9 @@ import {
   verifyEmailCode,
   requestPasswordReset,
   resetPassword,
+  MfaRequiredError,
+  signInWithPasskey,
+  verifyMfaLogin,
 } from '../lib/auth';
 
 /** Top-level auth views: password tabs, passwordless email-code, or forgot-password reset. */
@@ -23,6 +26,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [mfaChallenge, setMfaChallenge] = useState<string | null>(null);
 
   function go(next: View) {
     setView(next);
@@ -40,6 +44,11 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
       await fn();
       after?.();
     } catch (err) {
+      if (err instanceof MfaRequiredError) {
+        setMfaChallenge(err.challenge);
+        setNote('Enter the 6-digit code from your authenticator app, or a recovery code.');
+        return;
+      }
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
       setBusy(false);
@@ -54,6 +63,15 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
       return setError('Password must be at least 8 characters.');
     }
     run(() => (mode === 'register' ? register(email, password) : signIn(email, password)), onSignedIn);
+  }
+  function handleMfa(e: React.FormEvent) {
+    e.preventDefault();
+    if (!mfaChallenge) return;
+    if (!code.trim()) return setError('Enter your authentication code.');
+    run(() => verifyMfaLogin(mfaChallenge, code), onSignedIn);
+  }
+  function handlePasskey() {
+    run(() => signInWithPasskey(email || undefined), onSignedIn);
   }
 
   // --- passwordless email code ------------------------------------------------------------------
@@ -114,6 +132,32 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
       <h1>Capture</h1>
       <p className="signin-sub">Sign in to sync your todos across your devices.</p>
 
+      {mfaChallenge && (
+        <form className="signin-form" onSubmit={handleMfa}>
+          <input
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            placeholder="Authenticator or recovery code"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            disabled={busy}
+          />
+          <button className="signin-submit" type="submit" disabled={busy}>
+            {busy ? 'Verifying…' : 'Verify & Sign In'}
+          </button>
+          <button
+            type="button"
+            className="signin-link"
+            onClick={() => { setMfaChallenge(null); setCode(''); setNote(null); }}
+          >
+            Back to sign-in
+          </button>
+        </form>
+      )}
+
+      {!mfaChallenge && (
+        <>
       {view === 'password' && (
         <>
           <div className="signin-tabs" role="tablist">
@@ -150,6 +194,11 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
             </button>
           )}
           <div className="signin-divider"><span>or</span></div>
+          {mode === 'signIn' && (
+            <button type="button" className="signin-alt" onClick={handlePasskey} disabled={busy}>
+              Sign in with a passkey
+            </button>
+          )}
           <button type="button" className="signin-alt" onClick={() => go('code')}>
             Email me a sign-in code
           </button>
@@ -210,6 +259,8 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
           <button type="button" className="signin-alt" onClick={() => go('password')}>
             Back to password sign-in
           </button>
+        </>
+      )}
         </>
       )}
 

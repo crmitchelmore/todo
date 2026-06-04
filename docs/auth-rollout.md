@@ -1,6 +1,7 @@
-# Auth rollout runbook — email + password (multi-user)
+# Auth rollout runbook — multi-user auth
 
-Capture uses per-user **email + password** auth (social sign-in is additive later). Each client
+Capture uses per-user **email + password** auth with additive passwordless email-code, web
+passkeys, and TOTP 2FA foundations. Each client
 signs in or registers, the backend issues an **opaque, revocable session token**, and PowerSync
 only syncs the rows each user owns (`WHERE owner_id = auth.user_id()`).
 
@@ -28,22 +29,39 @@ bcrypt's 72-byte truncation limit. Stored self-describing as `bcrypt-sha256$<has
 argon2id migration is a clean swap. Email is normalised (lower+trim) **server-side** before
 insert; a partial unique index on `lower(email)` is the uniqueness + login-lookup path.
 
+Passkeys/TOTP are additive auth material: WebAuthn credentials and challenges are owner-scoped;
+TOTP secrets can be disabled without deleting rows; recovery codes are stored only as hashes and
+returned exactly once on creation/rotation.
+
 ## Endpoints
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | POST | `/api/auth/register` | Create account → `{session_token, user_id}` (409 if email taken) |
 | POST | `/api/auth/login` | `{session_token, user_id}`; generic 401 for unknown email **or** wrong password |
+| POST | `/api/auth/login/mfa` | Complete a password login when `/login` returns `mfa_required` |
 | POST | `/api/auth/logout` | Revoke the current session |
 | POST | `/api/auth/email-code` | Email a one-time sign-in code; always 200 if the email shape is valid |
 | POST | `/api/auth/email-code/verify` | Verify the sign-in code and return `{session_token, user_id}` |
 | POST | `/api/auth/forgot` | Email a password-reset code; always 200 if the email shape is valid |
 | POST | `/api/auth/reset` | Verify reset code, set a new password, revoke old sessions, return a fresh session |
+| POST | `/api/auth/totp/setup` | Start TOTP setup for the signed-in user; returns secret/otpauth URI |
+| POST | `/api/auth/totp/verify` | Verify setup code; enables TOTP and returns one-time recovery codes |
+| POST | `/api/auth/totp/disable` | Disable TOTP after TOTP/recovery verification |
+| POST | `/api/auth/recovery-codes/rotate` | Rotate recovery codes after TOTP/recovery verification |
+| POST | `/api/auth/passkeys/register/options` | WebAuthn registration options for the signed-in user |
+| POST | `/api/auth/passkeys/register/verify` | Verify and store a passkey credential |
+| POST | `/api/auth/passkeys/login/options` | WebAuthn authentication options |
+| POST | `/api/auth/passkeys/login/verify` | Verify passkey assertion and return a session |
 | GET | `/api/auth/token` | Mint a short-lived per-user PowerSync JWT |
 | GET | `/api/auth/keys` | JWKS for PowerSync to verify the sync JWT |
 
 A pre-bcrypt in-memory throttle (10 failed logins / 15 min per ip+email) runs **before** the
 hash compare. `trust proxy` is on so the client IP is the real one behind Railway.
+
+Passkeys require the backend to know the exact browser origin and relying-party ID. For production,
+set `PUBLIC_WEB_ORIGIN=https://<web-host>` and `WEBAUTHN_RP_ID=<web-hostname>` on the backend
+before enabling the web UI broadly.
 
 ## Go-live (DONE on 2026-06-03)
 

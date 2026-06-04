@@ -7,6 +7,7 @@ import { TaskRow } from './components/TaskRow';
 import { TaskDetailPane } from './components/TaskDetailPane';
 import { TagManager } from './components/TagManager';
 import { TagFilter } from './components/TagFilter';
+import { AuthSecurity } from './components/AuthSecurity';
 import { dateBucket, type DateBucketKey } from './lib/dates';
 import { decodeTags, tagKey } from './lib/tags';
 import { signOut } from './lib/auth';
@@ -28,6 +29,7 @@ function matchesTags(task: TaskRecord, selected: string[]): boolean {
 export default function App() {
   const status = useStatus();
   const [showTags, setShowTags] = useState(false);
+  const [showSecurity, setShowSecurity] = useState(false);
   const [filter, setFilter] = useState<string[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -76,6 +78,9 @@ export default function App() {
         <button className="tags-toggle" onClick={() => setShowTags((s) => !s)}>
           {showTags ? 'Close tags' : 'Manage tags'}
         </button>
+        <button className="tags-toggle" onClick={() => setShowSecurity((s) => !s)}>
+          {showSecurity ? 'Close security' : 'Security'}
+        </button>
         <button className="tags-toggle" onClick={() => void handleSignOut()}>
           Sign out
         </button>
@@ -92,6 +97,8 @@ export default function App() {
           <TagManager />
         </section>
       )}
+
+      {showSecurity && <AuthSecurity />}
 
       <div className="workbench-grid">
         <main className="task-stream">

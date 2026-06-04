@@ -15,9 +15,10 @@ const LOCAL = {
   powersyncUrl: 'http://localhost:8080',
 } as const;
 
-const defaults = import.meta.env.DEV ? LOCAL : PRODUCTION;
+const env = import.meta.env ?? {};
+const defaults = env.DEV ? LOCAL : PRODUCTION;
 
 export const config = {
-  backendUrl: import.meta.env.VITE_BACKEND_URL ?? defaults.backendUrl,
-  powersyncUrl: import.meta.env.VITE_POWERSYNC_URL ?? defaults.powersyncUrl,
+  backendUrl: env.VITE_BACKEND_URL ?? defaults.backendUrl,
+  powersyncUrl: env.VITE_POWERSYNC_URL ?? defaults.powersyncUrl,
 } as const;
