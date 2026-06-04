@@ -1,4 +1,5 @@
 import * as chrono from 'chrono-node';
+import type { CategoryHints } from './historyLearning.js';
 
 /**
  * Server-side enrichment. Richer than the on-device suggester (which is deliberately cheap so it
@@ -16,7 +17,7 @@ export interface Enrichment {
 // Broader keyword sets than the client; the server can afford a little more work.
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
   engineering: ['pr', 'pull request', 'merge', 'code review', 'review', 'deploy', 'deployment',
-    'release', 'ship', 'bug', 'fix', 'debug', 'incident', 'on-call', 'oncall', 'pager', 'alert',
+    'release', 'ship', 'bug', 'debug', 'incident', 'on-call', 'oncall', 'pager', 'alert',
     'architecture', 'design doc', 'tech spec', 'spec', 'rfc', 'refactor', 'test', 'tests', 'ci',
     'cd', 'pipeline', 'build', 'infra', 'infrastructure', 'terraform', 'kubernetes', 'docker',
     'api', 'backend', 'frontend', 'database', 'migration', 'jira', 'ticket', 'issue', 'slack',
@@ -28,7 +29,8 @@ const CATEGORY_KEYWORDS: Record<string, string[]> = {
     'coaching', 'feedback', 'promotion', 'career', 'headcount', 'budget review'],
   home: ['clean', 'fix', 'laundry', 'cook', 'tidy', 'bin', 'bins', 'rubbish', 'trash',
     'water plants', 'vacuum', 'repair', 'assemble', 'declutter', 'garden', 'lawn', 'mow',
-    'diy', 'paint', 'plumber', 'electrician', 'kids', 'school run', 'family', 'meal prep'],
+    'diy', 'paint', 'plumber', 'electrician', 'sink', 'tap', 'boiler', 'door', 'kids', 'school run',
+    'family', 'meal prep'],
   errands: ['buy', 'pick up', 'pickup', 'grocery', 'groceries', 'shop', 'shopping', 'post office',
     'pharmacy', 'return', 'collect', 'order', 'drop off', 'parcel', 'package', 'chemist',
     'dry cleaning', 'appointment to run', 'book appointment', 'car wash'],
@@ -65,7 +67,7 @@ const CATEGORY_MATCHERS: ReadonlyArray<{ category: string; patterns: readonly Re
 const URGENCY_MATCHERS = URGENCY_HINTS.map(boundedMatcher);
 let llmDisabledReason: string | null = null;
 
-export function enrichDeterministic(title: string, now = new Date()): Enrichment {
+export function enrichDeterministic(title: string, now = new Date(), historyHints: CategoryHints = {}): Enrichment {
   let suggestedDueAt: string | null = null;
   const parsed = chrono.parse(title, now, { forwardDate: true });
   if (parsed.length > 0) suggestedDueAt = parsed[0].date().toISOString();
@@ -73,9 +75,13 @@ export function enrichDeterministic(title: string, now = new Date()): Enrichment
   let suggestedCategory: string | null = null;
   let best = 0;
   for (const { category, patterns } of CATEGORY_MATCHERS) {
-    const hits = patterns.reduce((n, re) => (re.test(title) ? n + 1 : n), 0);
-    if (hits > best) {
-      best = hits;
+    const builtInHits = patterns.reduce((n, re) => (re.test(title) ? n + 1 : n), 0);
+    const learnedHits = (historyHints[category] ?? [])
+      .map(boundedMatcher)
+      .reduce((n, re) => (re.test(title) ? n + 1 : n), 0);
+    const score = builtInHits + learnedHits * 0.75;
+    if (score > best) {
+      best = score;
       suggestedCategory = category;
     }
   }
@@ -93,19 +99,25 @@ export function enrichDeterministic(title: string, now = new Date()): Enrichment
  * Optional LLM upgrade. Only used when an API key is configured; otherwise we stay fully
  * deterministic and offline. Falls back to the deterministic result on any error.
  */
-export async function enrich(title: string, now = new Date()): Promise<Enrichment> {
+export async function enrich(title: string, now = new Date(), historyHints: CategoryHints = {}): Promise<Enrichment> {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey || llmDisabledReason) return enrichDeterministic(title, now);
+  if (!apiKey || llmDisabledReason) return enrichDeterministic(title, now, historyHints);
 
   try {
     const model = process.env.ENRICH_LLM_MODEL ?? 'gpt-4o-mini';
     const baseUrl = (process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, '');
     const categories = Object.keys(CATEGORY_KEYWORDS);
+    const hintSummary = Object.entries(historyHints)
+      .filter(([, hints]) => hints.length > 0)
+      .map(([category, hints]) => `${category}: ${hints.slice(0, 12).join(', ')}`)
+      .join('; ');
     const sys =
       `You organise todo items. Given a raw capture, return strict JSON: ` +
       `{"category": one of ${JSON.stringify(categories)} or null, ` +
       `"due_at": an ISO-8601 datetime or null, "confidence": 0..1}. ` +
-      `Current time is ${now.toISOString()}. Resolve relative dates against it. Only JSON.`;
+      `Current time is ${now.toISOString()}. Resolve relative dates against it. ` +
+      (hintSummary ? `The user's confirmed-history category hints are: ${hintSummary}. ` : '') +
+      `Only JSON.`;
 
     const resp = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
@@ -141,6 +153,6 @@ export async function enrich(title: string, now = new Date()): Promise<Enrichmen
     return { suggestedDueAt: due, suggestedCategory: cat, confidence: conf, source: 'llm' };
   } catch (err) {
     console.warn('[worker] LLM enrichment failed, falling back to deterministic:', String(err));
-    return enrichDeterministic(title, now);
+    return enrichDeterministic(title, now, historyHints);
   }
 }

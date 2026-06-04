@@ -14,6 +14,13 @@ final class SuggesterTests: XCTestCase {
         XCTAssertEqual(Suggester.category(for: "book dentist appointment").category, "health")
     }
 
+    func testBroaderPersonaTaxonomy() {
+        XCTAssertEqual(Suggester.category(for: "check Sentry logs for the Railway deploy").category, "engineering")
+        XCTAssertEqual(Suggester.category(for: "renew car insurance").category, "finance")
+        XCTAssertEqual(Suggester.category(for: "pick up parcel from the post office").category, "errands")
+        XCTAssertEqual(Suggester.category(for: "repair the kitchen sink tap").category, "home")
+    }
+
     func testCategoryNoneWhenUnmatched() {
         XCTAssertNil(Suggester.category(for: "ponder the universe").category)
     }

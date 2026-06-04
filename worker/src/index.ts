@@ -1,6 +1,7 @@
 import pg from 'pg';
 import { createHash } from 'crypto';
 import { enrich } from './enrich.js';
+import { learnCategoryHints, type CategoryHints, type HistoricalTask } from './historyLearning.js';
 
 /**
  * Capture enrichment worker.
@@ -28,6 +29,16 @@ const SELECT_SQL = `
     AND coalesce(suggestion_source, 'on-device') NOT IN ('server', 'llm')
   ORDER BY created_at ASC
   LIMIT $1
+`;
+
+const HISTORY_SQL = `
+  SELECT owner_id, title, category
+  FROM public.tasks
+  WHERE owner_id = ANY($1::uuid[])
+    AND status IN ('active', 'done')
+    AND category IS NOT NULL
+  ORDER BY COALESCE(confirmed_at, completed_at, updated_at, created_at) DESC
+  LIMIT 500
 `;
 
 function deterministicUuid(input: string): string {
@@ -88,11 +99,26 @@ const UPDATE_SQL = `
 async function tick(): Promise<number> {
   const { rows } = await pool.query(SELECT_SQL, [BATCH]);
   if (rows.length === 0) return 0;
+  const ownerIds = [...new Set(rows.map((row) => row.owner_id as string))];
+  const historyByOwner = new Map<string, CategoryHints>();
+  if (ownerIds.length > 0) {
+    const history = await pool.query(HISTORY_SQL, [ownerIds]);
+    const grouped = new Map<string, HistoricalTask[]>();
+    for (const row of history.rows) {
+      const ownerId = row.owner_id as string;
+      const items = grouped.get(ownerId) ?? [];
+      items.push({ title: row.title as string, category: row.category as string | null });
+      grouped.set(ownerId, items);
+    }
+    for (const [ownerId, items] of grouped) {
+      historyByOwner.set(ownerId, learnCategoryHints(items));
+    }
+  }
 
   let enriched = 0;
   for (const row of rows) {
     try {
-      const e = await enrich(row.title);
+      const e = await enrich(row.title, new Date(), historyByOwner.get(row.owner_id) ?? {});
       const res = await pool.query(UPDATE_SQL, [
         row.id,
         e.suggestedDueAt,

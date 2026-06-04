@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { enrichDeterministic } from './enrich.js';
+import { learnCategoryHints } from './historyLearning.js';
 
 /**
  * Behaviour tests for the auto-organisation pass. These assert observable outcomes a user
@@ -16,6 +17,7 @@ test('classifies the owner\'s real personas', () => {
     ['Review the auth service PR before we deploy', 'engineering'],
     ['Prep talking points for my 1:1 with Sarah', 'leadership'],
     ['Take the bins out and do the laundry', 'home'],
+    ['Repair the kitchen sink tap', 'home'],
     ['Buy milk and pick up a parcel from the post office', 'errands'],
     ['Book a dentist appointment', 'health'],
     ['Pay the council tax bill', 'finance'],
@@ -52,4 +54,15 @@ test('never decides final structure — it only proposes (status is a human deci
   assert.equal(e.source, 'server');
   // Enrichment carries no status/priority field at all; it cannot promote a task.
   assert.deepEqual(Object.keys(e).sort(), ['confidence', 'source', 'suggestedCategory', 'suggestedDueAt']);
+});
+
+test('learns category hints from confirmed history without overriding stronger built-ins', () => {
+  const hints = learnCategoryHints([
+    { title: 'Book football practice with coach', category: 'personal' },
+    { title: 'Pack football kit for Saturday', category: 'personal' },
+    { title: 'Renew hosting certificate', category: 'engineering' },
+  ]);
+
+  assert.equal(enrichDeterministic('sort football boots', NOW, hints).suggestedCategory, 'personal');
+  assert.equal(enrichDeterministic('deploy football stats service', NOW, hints).suggestedCategory, 'engineering');
 });

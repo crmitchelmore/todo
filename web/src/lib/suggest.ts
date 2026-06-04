@@ -2,13 +2,13 @@ import * as chrono from 'chrono-node';
 
 // Lightweight, fully on-device category guesser. Deliberately cheap so it never delays capture.
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
-  engineering: ['pr', 'pull request', 'code review', 'review', 'deploy', 'bug', 'incident', 'on-call', 'architecture', 'spec', 'refactor', 'test', 'ci', 'build', 'infra', 'api', 'jira'],
-  leadership: ['1:1', 'one-on-one', 'performance review', 'hiring', 'interview', 'strategy', 'roadmap', 'planning', 'okr', 'team sync', 'standup', 'retro', 'stakeholder', 'mentor'],
-  home: ['clean', 'fix', 'laundry', 'cook', 'tidy', 'bin', 'water plants', 'repair', 'garden', 'kids', 'family'],
-  errands: ['buy', 'pick up', 'grocery', 'shop', 'post office', 'pharmacy', 'return', 'collect', 'drop off'],
-  health: ['gym', 'run', 'doctor', 'dentist', 'workout', 'meds', 'appointment', 'physio'],
-  finance: ['pay', 'bill', 'tax', 'bank', 'transfer', 'budget', 'renew', 'subscription'],
-  personal: ['call', 'text', 'birthday', 'dinner', 'meet', 'party', 'rsvp', 'friend', 'mum', 'dad']
+  engineering: ['pr', 'pull request', 'merge', 'code review', 'review', 'deploy', 'deployment', 'release', 'ship', 'bug', 'debug', 'incident', 'on-call', 'oncall', 'pager', 'alert', 'architecture', 'design doc', 'tech spec', 'spec', 'rfc', 'refactor', 'test', 'tests', 'ci', 'cd', 'pipeline', 'build', 'infra', 'infrastructure', 'terraform', 'kubernetes', 'docker', 'api', 'backend', 'frontend', 'database', 'migration', 'jira', 'ticket', 'issue', 'slack', 'github', 'branch', 'commit', 'repo', 'monitoring', 'logs', 'sentry', 'railway'],
+  leadership: ['1:1', 'one-on-one', 'one to one', 'performance review', 'review cycle', 'hiring', 'hire', 'interview', 'candidate', 'recruiting', 'strategy', 'roadmap', 'planning', 'plan', 'quarterly', 'okr', 'okrs', 'goal', 'goals', 'team sync', 'standup', 'retro', 'retrospective', 'stakeholder', 'management update', 'exec update', 'leadership', 'mentor', 'mentoring', 'coaching', 'feedback', 'promotion', 'career', 'headcount', 'budget review'],
+  home: ['clean', 'laundry', 'cook', 'tidy', 'bin', 'bins', 'rubbish', 'trash', 'water plants', 'vacuum', 'repair', 'assemble', 'declutter', 'garden', 'lawn', 'mow', 'diy', 'paint', 'plumber', 'electrician', 'sink', 'tap', 'boiler', 'door', 'kids', 'school run', 'family', 'meal prep'],
+  errands: ['buy', 'pick up', 'pickup', 'grocery', 'groceries', 'shop', 'shopping', 'post office', 'pharmacy', 'return', 'collect', 'order', 'drop off', 'parcel', 'package', 'chemist', 'dry cleaning', 'book appointment', 'car wash'],
+  health: ['gym', 'run', 'doctor', 'dentist', 'workout', 'meds', 'medicine', 'appointment', 'physio', 'therapy', 'prescription', 'walk', 'yoga', 'optician', 'checkup', 'blood test', 'vaccine', 'vaccination', 'health'],
+  finance: ['pay', 'bill', 'tax', 'bank', 'transfer', 'budget', 'renew', 'renewal', 'subscription', 'mortgage', 'rent', 'insurance', 'refund', 'invoice', 'expense', 'expenses', 'pension', 'savings', 'accountant', 'hmrc', 'vat'],
+  personal: ['call', 'text', 'birthday', 'dinner', 'meet', 'party', 'rsvp', 'message', 'catch up', 'visit', 'wedding', 'reunion', 'friend', 'friends', 'mum', 'dad', 'parents', 'coffee', 'date night', 'holiday', 'travel']
 };
 
 export interface Suggestion {
