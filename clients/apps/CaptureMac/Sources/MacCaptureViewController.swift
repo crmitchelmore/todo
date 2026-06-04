@@ -4,7 +4,7 @@ import CaptureCore
 final class MacCaptureViewController: NSViewController {
     private let viewModel: MacViewModel
     private let captureField = NSTextField()
-    private let proposedTable = NSTableView()
+    private let proposedTable = FastConfirmTableView()
     private let activeTable = NSTableView()
     private let proposedHeader = NSTextField(labelWithString: "")
     private let activeHeader = NSTextField(labelWithString: "ACTIVE")
@@ -103,6 +103,9 @@ final class MacCaptureViewController: NSViewController {
 
         configure(table: proposedTable, identifier: "proposed")
         configure(table: activeTable, identifier: "active")
+        proposedTable.onConfirmSelected = { [weak self] in self?.confirmSelectedProposal() }
+        proposedTable.onRejectSelected = { [weak self] in self?.rejectSelectedProposal() }
+        proposedTable.onEditSelected = { [weak self] in self?.selectProposedForEditing() }
         let proposedScroll = scroll(proposedTable)
         let activeScroll = scroll(activeTable)
 
@@ -238,6 +241,51 @@ final class MacCaptureViewController: NSViewController {
         guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         captureField.stringValue = "" // instant clear
         viewModel.capture(text)
+    }
+
+    private func selectedProposal() -> TaskItem? {
+        let row = proposedTable.selectedRow
+        guard row >= 0, row < viewModel.proposed.count else { return nil }
+        return viewModel.proposed[row]
+    }
+
+    private func confirmSelectedProposal() {
+        guard let item = selectedProposal() else { return }
+        viewModel.confirm(item)
+    }
+
+    private func rejectSelectedProposal() {
+        guard let item = selectedProposal() else { return }
+        viewModel.reject(item)
+    }
+
+    private func selectProposedForEditing() {
+        guard let item = selectedProposal() else { return }
+        viewModel.select(item)
+    }
+}
+
+private final class FastConfirmTableView: NSTableView {
+    var onConfirmSelected: (() -> Void)?
+    var onRejectSelected: (() -> Void)?
+    var onEditSelected: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        guard selectedRow >= 0,
+              let chars = event.charactersIgnoringModifiers?.lowercased() else {
+            super.keyDown(with: event)
+            return
+        }
+        switch chars {
+        case "\r", "y":
+            onConfirmSelected?()
+        case "\u{1b}", "n", "\u{7f}":
+            onRejectSelected?()
+        case "e":
+            onEditSelected?()
+        default:
+            super.keyDown(with: event)
+        }
     }
 }
 

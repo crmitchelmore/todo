@@ -272,6 +272,19 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
     /// Trailing swipe on an active row: edit its due date (presets + a picker), or mark done.
     func tableView(_ tableView: UITableView,
                    trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        if indexPath.section == 0 {
+            let item = viewModel.proposed[indexPath.row]
+            let reject = UIContextualAction(style: .destructive, title: "Reject") { [weak self] _, _, done in
+                self?.viewModel.reject(item)
+                done(true)
+            }
+            let confirm = UIContextualAction(style: .normal, title: "Confirm") { [weak self] _, _, done in
+                self?.viewModel.confirm(item, title: item.title, dueAt: item.suggestedDueAt, category: item.suggestedCategory, tags: item.tags)
+                done(true)
+            }
+            confirm.backgroundColor = Theme.signal
+            return UISwipeActionsConfiguration(actions: [reject, confirm])
+        }
         guard indexPath.section > 0 else { return nil }
         let item = activeGroup(for: indexPath.section).items[indexPath.row]
         let date = UIContextualAction(style: .normal, title: "Date") { [weak self] _, _, done in
@@ -285,6 +298,20 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         }
         complete.backgroundColor = Theme.mint
         return UISwipeActionsConfiguration(actions: [complete, date])
+    }
+
+    func tableView(_ tableView: UITableView,
+                   leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        guard indexPath.section == 0 else { return nil }
+        let item = viewModel.proposed[indexPath.row]
+        let confirm = UIContextualAction(style: .normal, title: "Confirm") { [weak self] _, _, done in
+            self?.viewModel.confirm(item, title: item.title, dueAt: item.suggestedDueAt, category: item.suggestedCategory, tags: item.tags)
+            done(true)
+        }
+        confirm.backgroundColor = Theme.signal
+        let config = UISwipeActionsConfiguration(actions: [confirm])
+        config.performsFirstActionWithFullSwipe = true
+        return config
     }
 
     private func presentDateEditor(for item: TaskItem) {
