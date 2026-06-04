@@ -1,0 +1,82 @@
+# Candidate conformance evidence map for todo.
+# Best-effort advisory evidence; not an adopted contract until ratified.
+version: 1
+meta:
+  detector: human-review-plus-codebase-onboarding
+  limitations:
+    - Based on repository inspection, not a full generated conformance onboard run.
+    - Polyglot workspace checks need per-package validation before any rule can block.
+patterns:
+  - id: modular-monolith
+    altitude: high
+    confidence: medium
+    evidence:
+      - "Workspace has bounded packages for web, backend, worker, integrations, native clients, and docs."
+    anchors:
+      - README.md
+      - docs/architecture.md
+      - web/package.json
+      - backend/package.json
+      - worker/package.json
+      - integrations/package.json
+      - clients/README.md
+  - id: client-server
+    altitude: high
+    confidence: medium
+    evidence:
+      - "Clients sync through hosted backend services and PowerSync/Postgres boundaries."
+    anchors:
+      - docs/architecture.md
+      - backend/src/index.ts
+      - clients/CaptureCore/Sources/CaptureCore/TaskStore.swift
+  - id: repository
+    altitude: medium
+    confidence: medium
+    evidence:
+      - "TaskStore is the client-side task lifecycle/storage anchor."
+    anchors:
+      - clients/CaptureCore/Sources/CaptureCore/TaskStore.swift
+  - id: idempotency
+    altitude: medium
+    confidence: medium
+    evidence:
+      - "Background enrichment should never change task status and should preserve user-confirmed lifecycle state."
+    anchors:
+      - worker/src/index.ts
+      - README.md
+      - docs/architecture.md
+  - id: guard-clause
+    altitude: low
+    confidence: medium
+    evidence:
+      - "Backend write path uses an allowlist for permitted columns."
+    anchors:
+      - backend/src/index.ts
+capabilities:
+  - id: task-lifecycle
+    title: Task lifecycle state machine
+    status: canonical-bypassed
+    canonical: clients/CaptureCore/Sources/CaptureCore/TaskStore.swift
+    usedIn: 4
+    sample:
+      - README.md
+      - product.md
+      - docs/architecture.md
+      - worker/src/index.ts
+  - id: write-allowlist
+    title: Backend write allowlist
+    status: canonical-bypassed
+    canonical: backend/src/index.ts
+    usedIn: 2
+    sample:
+      - README.md
+      - backend/test/auth.test.ts
+  - id: enrichment-worker
+    title: Background enrichment worker
+    status: canonical-bypassed
+    canonical: worker/src/index.ts
+    usedIn: 3
+    sample:
+      - README.md
+      - docs/architecture.md
+      - worker/src/enrich.test.ts
