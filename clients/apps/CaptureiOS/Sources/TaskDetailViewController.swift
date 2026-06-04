@@ -15,6 +15,7 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
     private let taskId: String
     private var currentTask: TaskItem
     private var events: [TaskEvent] = []
+    private var rollup: TaskRollup = .empty
     private var watchTasks: [Task<Void, Never>] = []
     private var dirty = false
 
@@ -31,6 +32,9 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
     private let priorityControl = UISegmentedControl(items: ["None", "P0", "P1", "P2", "P3", "P4"])
     private let tagsField = UITextField()
     private let notesView = UITextView()
+    private let rollupStack = UIStackView()
+    private let rollupSummaryLabel = UILabel()
+    private let rollupProgress = UIProgressView(progressViewStyle: .bar)
     private let historyStack = UIStackView()
 
     init(viewModel: CaptureViewModel, item: TaskItem) {
@@ -119,6 +123,17 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
         notesView.delegate = self
         notesView.heightAnchor.constraint(equalToConstant: 160).isActive = true
 
+        rollupStack.axis = .vertical
+        rollupStack.spacing = 8
+        rollupSummaryLabel.font = Theme.display(14, .semibold)
+        rollupSummaryLabel.textColor = Theme.textPrimary
+        rollupProgress.trackTintColor = Theme.surfaceHi
+        rollupProgress.progressTintColor = Theme.signal
+        rollupStack.addArrangedSubview(section("Subtasks"))
+        rollupStack.addArrangedSubview(rollupSummaryLabel)
+        rollupStack.addArrangedSubview(rollupProgress)
+        rollupStack.isHidden = true
+
         historyStack.axis = .vertical
         historyStack.spacing = 12
 
@@ -130,6 +145,7 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
         stack.addArrangedSubview(stateLabel)
         stack.addArrangedSubview(titleField)
         stack.addArrangedSubview(actions)
+        stack.addArrangedSubview(rollupStack)
         stack.addArrangedSubview(section("Properties"))
         stack.addArrangedSubview(row(label: "Due", controls: [dueSwitch, duePicker]))
         stack.addArrangedSubview(row(label: "Category", controls: [categoryField]))
@@ -170,10 +186,21 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
                 }
             } catch {}
         }
+        let rollupWatch = Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await rollup in try self.viewModel.store.watchTaskRollup(taskId: self.taskId) {
+                    await MainActor.run {
+                        self.rollup = rollup
+                        self.updateRollup()
+                    }
+                }
+            } catch {}
+        }
         let eventsWatch = Task { [weak self] in
             guard let self else { return }
             do {
-                for try await events in try self.viewModel.store.watchTaskEvents(taskId: self.taskId) {
+                for try await events in try self.viewModel.store.watchTaskAndDescendantEvents(taskId: self.taskId) {
                     await MainActor.run {
                         self.events = events
                         self.rebuildHistory()
@@ -181,7 +208,7 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
                 }
             } catch {}
         }
-        watchTasks.append(contentsOf: [taskWatch, eventsWatch])
+        watchTasks.append(contentsOf: [taskWatch, rollupWatch, eventsWatch])
     }
 
     private func populate(_ task: TaskItem) {
@@ -205,6 +232,18 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
         secondaryButton.setTitle(currentTask.status == .done ? "Reopen" : "Mark done", for: .normal)
         rejectButton.isHidden = !proposed
         duePicker.isEnabled = dueSwitch.isOn
+    }
+
+    private func updateRollup() {
+        guard rollup.total > 0 else {
+            rollupStack.isHidden = true
+            return
+        }
+        rollupStack.isHidden = false
+        let completion = Float(rollup.done) / Float(rollup.total)
+        let percent = Int((completion * 100).rounded())
+        rollupSummaryLabel.text = "\(rollup.done)/\(rollup.total) complete · \(rollup.open) open · \(percent)%"
+        rollupProgress.progress = completion
     }
 
     private func rebuildHistory() {

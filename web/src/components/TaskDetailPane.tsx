@@ -9,6 +9,17 @@ import { TagEditor } from './TagChips';
 
 const CATEGORIES = ['engineering', 'leadership', 'home', 'errands', 'health', 'finance', 'personal', 'inbox'];
 
+type TaskRollupRecord = {
+  total: number;
+  done: number;
+  open: number;
+};
+
+type ScopedTaskEventRecord = TaskEventRecord & {
+  task_title?: string | null;
+  depth?: number | null;
+};
+
 function eventIcon(event: TaskEventRecord): string {
   if (event.actor === 'worker' || event.actor === 'agent') return '◇';
   if (event.event_type === 'completed') return '✓';
@@ -53,8 +64,79 @@ export function TaskDetailPane({
   const [saving, setSaving] = useState(false);
 
   const taskId = task?.id ?? '';
-  const { data: events } = useQuery<TaskEventRecord>(
-    task ? `SELECT * FROM task_events WHERE task_id = ? ORDER BY created_at DESC, id DESC LIMIT 80` : `SELECT * FROM task_events WHERE 0`,
+  const { data: events } = useQuery<ScopedTaskEventRecord>(
+    task
+      ? `
+        WITH RECURSIVE descendants(id, task_title, depth) AS (
+          SELECT id, title, 1 FROM tasks WHERE parent_task_id = ?
+          UNION ALL
+          SELECT t.id, t.title, d.depth + 1
+            FROM tasks t
+            JOIN descendants d ON t.parent_task_id = d.id
+        ),
+        root_events AS (
+          SELECT
+            e.id,
+            e.owner_id,
+            e.task_id,
+            e.actor,
+            e.event_type,
+            e.title,
+            e.body,
+            e.metadata,
+            e.created_at,
+            NULL AS task_title,
+            0 AS depth
+            FROM task_events e
+           WHERE e.task_id = ?
+           ORDER BY e.created_at DESC, e.id DESC
+           LIMIT 80
+        ),
+        descendant_events AS (
+          SELECT
+            e.id,
+            e.owner_id,
+            e.task_id,
+            e.actor,
+            e.event_type,
+            e.title,
+            e.body,
+            e.metadata,
+            e.created_at,
+            d.task_title,
+            d.depth
+            FROM task_events e
+            JOIN descendants d ON e.task_id = d.id
+           ORDER BY e.created_at DESC, e.id DESC
+           LIMIT 80
+        )
+        SELECT * FROM root_events
+        UNION ALL
+        SELECT * FROM descendant_events
+        ORDER BY created_at DESC, id DESC
+      `
+      : `SELECT *, NULL AS task_title, NULL AS depth FROM task_events WHERE 0`,
+    task ? [task.id, task.id] : []
+  );
+  const { data: rollups } = useQuery<TaskRollupRecord>(
+    task
+      ? `
+        WITH RECURSIVE descendants(id) AS (
+          SELECT id FROM tasks WHERE parent_task_id = ?
+          UNION ALL
+          SELECT t.id
+            FROM tasks t
+            JOIN descendants d ON t.parent_task_id = d.id
+        )
+        SELECT
+          COUNT(*) AS total,
+          COALESCE(SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END), 0) AS done,
+          COALESCE(SUM(CASE WHEN status NOT IN ('done', 'cancelled') THEN 1 ELSE 0 END), 0) AS open
+          FROM tasks
+         WHERE id IN (SELECT id FROM descendants)
+           AND status <> 'cancelled'
+      `
+      : `SELECT 0 AS total, 0 AS done, 0 AS open WHERE 0`,
     task ? [task.id] : []
   );
 
@@ -75,6 +157,9 @@ export function TaskDetailPane({
   const suggestedCategory = task?.suggested_category ?? null;
 
   const sortedEvents = useMemo(() => events ?? [], [events]);
+  const rollup = rollups?.[0] ?? { total: 0, done: 0, open: 0 };
+  const hasSubtasks = rollup.total > 0;
+  const completion = hasSubtasks ? Math.round((rollup.done / rollup.total) * 100) : 0;
 
   if (!task) {
     return (
@@ -163,6 +248,20 @@ export function TaskDetailPane({
         )}
       </div>
 
+      {hasSubtasks && (
+        <section className="detail-section detail-rollup">
+          <h3>Subtasks</h3>
+          <div className="rollup-summary">
+            <strong>{rollup.done}/{rollup.total} complete</strong>
+            <span>{rollup.open} open</span>
+            <span>{completion}%</span>
+          </div>
+          <div className="rollup-track" aria-label={`${completion}% of subtasks complete`}>
+            <span style={{ width: `${completion}%` }} />
+          </div>
+        </section>
+      )}
+
       <section className="detail-section">
         <h3>Properties</h3>
         <label className="detail-field">
@@ -222,6 +321,9 @@ export function TaskDetailPane({
                 <div>
                   <div className="timeline-head">
                     <strong>{event.title}</strong>
+                    {(event.depth ?? 0) > 0 && event.task_title && (
+                      <span className="timeline-task">{event.task_title}</span>
+                    )}
                     <span>{confidence(event) ?? event.actor}</span>
                     <time>{eventTime(event.created_at)}</time>
                   </div>

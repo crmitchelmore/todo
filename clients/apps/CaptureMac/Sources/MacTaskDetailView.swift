@@ -25,6 +25,9 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
     private let primaryButton = NSButton(title: "Save changes", target: nil, action: nil)
     private let secondaryButton = NSButton(title: "Mark done", target: nil, action: nil)
     private let rejectButton = NSButton(title: "Reject", target: nil, action: nil)
+    private let rollupStack = NSStackView()
+    private let rollupSummary = NSTextField(labelWithString: "")
+    private let rollupProgress = NSProgressIndicator()
     private let historyStack = NSStackView()
 
     private var currentTask: TaskItem?
@@ -46,6 +49,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
     func render(
         task: TaskItem?,
         events: [TaskEvent],
+        rollup: TaskRollup,
         colourForTag: @escaping (String) -> String,
         onSave: @escaping (MacTaskDetailForm) -> Void,
         onConfirm: @escaping (MacTaskDetailForm) -> Void,
@@ -64,6 +68,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
             isDirty = false
             emptyView.isHidden = false
             formView.isHidden = true
+            updateRollup(.empty)
             rebuildHistory([])
             return
         }
@@ -77,6 +82,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
             isDirty = false
         }
         updateActions(task)
+        updateRollup(rollup)
         rebuildHistory(events)
     }
 
@@ -170,6 +176,21 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         rejectButton.bezelStyle = .rounded
         rejectButton.contentTintColor = Theme.danger
 
+        rollupStack.orientation = .vertical
+        rollupStack.spacing = 8
+        rollupStack.alignment = .leading
+        rollupSummary.font = Theme.display(13, .semibold)
+        rollupSummary.textColor = Theme.textPrimary
+        rollupProgress.isIndeterminate = false
+        rollupProgress.style = .bar
+        rollupProgress.minValue = 0
+        rollupProgress.maxValue = 1
+        rollupProgress.controlSize = .small
+        rollupStack.addArrangedSubview(sectionTitle("Subtasks"))
+        rollupStack.addArrangedSubview(rollupSummary)
+        rollupStack.addArrangedSubview(rollupProgress)
+        rollupProgress.widthAnchor.constraint(greaterThanOrEqualToConstant: 220).isActive = true
+
         historyStack.orientation = .vertical
         historyStack.spacing = 10
         historyStack.alignment = .leading
@@ -182,6 +203,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         formView.addArrangedSubview(stateLabel)
         formView.addArrangedSubview(titleField)
         formView.addArrangedSubview(actionRow)
+        formView.addArrangedSubview(rollupStack)
         formView.addArrangedSubview(sectionTitle("Properties"))
         formView.addArrangedSubview(row(label: "Due", views: [dueEnabled, duePicker]))
         formView.addArrangedSubview(row(label: "Category", views: [categoryBox]))
@@ -227,6 +249,18 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         secondaryButton.title = task.status == .done ? "Reopen" : "Mark done"
         rejectButton.isHidden = !proposed
         duePicker.isEnabled = dueEnabled.state == .on
+    }
+
+    private func updateRollup(_ rollup: TaskRollup) {
+        guard rollup.total > 0 else {
+            rollupStack.isHidden = true
+            return
+        }
+        rollupStack.isHidden = false
+        let completion = Double(rollup.done) / Double(rollup.total)
+        let percent = Int((completion * 100).rounded())
+        rollupSummary.stringValue = "\(rollup.done)/\(rollup.total) complete · \(rollup.open) open · \(percent)%"
+        rollupProgress.doubleValue = completion
     }
 
     private func rebuildHistory(_ events: [TaskEvent]) {

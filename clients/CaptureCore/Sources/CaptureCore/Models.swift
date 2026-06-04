@@ -115,6 +115,22 @@ public struct TaskEvent: Identifiable, Sendable, Equatable {
     }
 }
 
+/// Read-only aggregate for a task's descendants. Parent tasks/projects use this to show progress
+/// without denormalising child state back into the parent row.
+public struct TaskRollup: Sendable, Equatable {
+    public let total: Int
+    public let done: Int
+    public let open: Int
+
+    public init(total: Int, done: Int, open: Int) {
+        self.total = total
+        self.done = done
+        self.open = open
+    }
+
+    public static let empty = TaskRollup(total: 0, done: 0, open: 0)
+}
+
 /// A user-managed label. Projects are represented by task/subtask hierarchy, while tags remain
 /// lightweight labels.
 /// Mirrors `public.tags` in Postgres and the client SQLite schema.

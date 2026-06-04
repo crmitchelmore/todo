@@ -18,6 +18,7 @@ final class MacViewModel {
     private(set) var tagFilter: Set<String> = []          // lowercased names; AND semantics
     private(set) var selectedTask: TaskItem?
     private(set) var selectedEvents: [TaskEvent] = []
+    private(set) var selectedRollup: TaskRollup = .empty
 
     private var observers: [() -> Void] = []
     private var started = false
@@ -167,8 +168,10 @@ final class MacViewModel {
         detailTasks.removeAll()
         selectedTask = item
         selectedEvents = []
+        selectedRollup = .empty
         notify()
         watchSelectedTask(id: item.id)
+        watchSelectedRollup(id: item.id)
         watchSelectedEvents(id: item.id)
     }
 
@@ -177,6 +180,7 @@ final class MacViewModel {
         detailTasks.removeAll()
         selectedTask = nil
         selectedEvents = []
+        selectedRollup = .empty
         notify()
     }
 
@@ -188,7 +192,26 @@ final class MacViewModel {
                     await MainActor.run {
                         guard self.selectedTask?.id == id else { return }
                         self.selectedTask = task
-                        if task == nil { self.selectedEvents = [] }
+                        if task == nil {
+                            self.selectedEvents = []
+                            self.selectedRollup = .empty
+                        }
+                        self.notify()
+                    }
+                }
+            } catch {}
+        }
+        detailTasks.append(t)
+    }
+
+    private func watchSelectedRollup(id: String) {
+        let t = Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await rollup in try self.store.watchTaskRollup(taskId: id) {
+                    await MainActor.run {
+                        guard self.selectedTask?.id == id else { return }
+                        self.selectedRollup = rollup
                         self.notify()
                     }
                 }
@@ -201,7 +224,7 @@ final class MacViewModel {
         let t = Task { [weak self] in
             guard let self else { return }
             do {
-                for try await events in try self.store.watchTaskEvents(taskId: id) {
+                for try await events in try self.store.watchTaskAndDescendantEvents(taskId: id) {
                     await MainActor.run {
                         guard self.selectedTask?.id == id else { return }
                         self.selectedEvents = events

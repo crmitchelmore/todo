@@ -201,6 +201,7 @@ final class MacCaptureViewController: NSViewController {
         detailView.render(
             task: viewModel.selectedTask,
             events: viewModel.selectedEvents,
+            rollup: viewModel.selectedRollup,
             colourForTag: color,
             onSave: { [weak self] form in self?.viewModel.saveDetail(form) },
             onConfirm: { [weak self] form in self?.viewModel.confirmDetail(form) },

@@ -333,6 +333,94 @@ public final class TaskStore: @unchecked Sendable {
         )
     }
 
+    public func watchTaskRollup(taskId: String) throws -> AsyncThrowingStream<TaskRollup, Error> {
+        let rows = try db.watch(
+            sql: """
+            WITH RECURSIVE descendants(id) AS (
+                SELECT id FROM \(TASKS_TABLE) WHERE parent_task_id = ?
+                UNION ALL
+                SELECT t.id
+                  FROM \(TASKS_TABLE) t
+                  JOIN descendants d ON t.parent_task_id = d.id
+            )
+            SELECT
+                COUNT(*) AS total,
+                COALESCE(SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END), 0) AS done,
+                COALESCE(SUM(CASE WHEN status NOT IN ('done', 'cancelled') THEN 1 ELSE 0 END), 0) AS open
+              FROM \(TASKS_TABLE)
+             WHERE id IN (SELECT id FROM descendants)
+               AND status <> 'cancelled'
+            """,
+            parameters: [taskId],
+            mapper: Self.mapTaskRollup
+        )
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    for try await batch in rows {
+                        continuation.yield(batch.first ?? .empty)
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { @Sendable _ in task.cancel() }
+        }
+    }
+
+    public func watchTaskAndDescendantEvents(taskId: String, limit: Int = 80) throws -> AsyncThrowingStream<[TaskEvent], Error> {
+        try db.watch(
+            sql: """
+            WITH RECURSIVE descendants(id, task_title, depth) AS (
+                SELECT id, title, 1 FROM \(TASKS_TABLE) WHERE parent_task_id = ?
+                UNION ALL
+                SELECT t.id, t.title, d.depth + 1
+                  FROM \(TASKS_TABLE) t
+                  JOIN descendants d ON t.parent_task_id = d.id
+            ),
+            root_events AS (
+                SELECT
+                    e.id,
+                    e.owner_id,
+                    e.task_id,
+                    e.actor,
+                    e.event_type,
+                    e.title,
+                    e.body,
+                    e.metadata,
+                    e.created_at
+                  FROM \(TASK_EVENTS_TABLE) e
+                 WHERE e.task_id = ?
+                 ORDER BY e.created_at DESC, e.id DESC
+                 LIMIT ?
+            ),
+            descendant_events AS (
+                SELECT
+                    e.id,
+                    e.owner_id,
+                    e.task_id,
+                    e.actor,
+                    e.event_type,
+                    d.task_title || ': ' || e.title AS title,
+                    e.body,
+                    e.metadata,
+                    e.created_at
+                  FROM \(TASK_EVENTS_TABLE) e
+                  JOIN descendants d ON e.task_id = d.id
+                 ORDER BY e.created_at DESC, e.id DESC
+                 LIMIT ?
+            )
+            SELECT * FROM root_events
+            UNION ALL
+            SELECT * FROM descendant_events
+            ORDER BY created_at DESC, id DESC
+            """,
+            parameters: [taskId, taskId, limit, limit],
+            mapper: Self.mapTaskEvent
+        )
+    }
+
     // MARK: - Tags (metadata for management + colours)
 
     public func watchTags() throws -> AsyncThrowingStream<[Tag], Error> {
@@ -490,6 +578,14 @@ public final class TaskStore: @unchecked Sendable {
             body: try cursor.getStringOptional(name: "body"),
             metadata: try cursor.getStringOptional(name: "metadata"),
             createdAt: ISO8601.date(try cursor.getStringOptional(name: "created_at"))
+        )
+    }
+
+    static func mapTaskRollup(_ cursor: SqlCursor) throws -> TaskRollup {
+        TaskRollup(
+            total: (try cursor.getIntOptional(name: "total")) ?? 0,
+            done: (try cursor.getIntOptional(name: "done")) ?? 0,
+            open: (try cursor.getIntOptional(name: "open")) ?? 0
         )
     }
 
