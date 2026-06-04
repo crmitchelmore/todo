@@ -182,37 +182,29 @@ async function issueSessionOrMfa(
   res.json({ ok: true, session_token: sessionToken, user_id: userId, ...(options.extra ?? {}) });
 }
 
-async function issueRecoveryCodes(userId: string): Promise<string[]> {
-  const codes = newRecoveryCodes();
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+async function storeRecoveryCodes(client: pg.PoolClient, userId: string, codes: string[]): Promise<void> {
+  await client.query(
+    `UPDATE public.auth_recovery_codes
+        SET revoked_at = now()
+      WHERE user_id = $1 AND used_at IS NULL AND revoked_at IS NULL`,
+    [userId]
+  );
+  for (const code of codes) {
     await client.query(
-      `UPDATE public.auth_recovery_codes
-          SET revoked_at = now()
-        WHERE user_id = $1 AND used_at IS NULL AND revoked_at IS NULL`,
-      [userId]
+      `INSERT INTO public.auth_recovery_codes (user_id, code_hash) VALUES ($1, $2)
+       ON CONFLICT (user_id, code_hash) DO NOTHING`,
+      [userId, hashRecoveryCode(code)]
     );
-    for (const code of codes) {
-      await client.query(
-        `INSERT INTO public.auth_recovery_codes (user_id, code_hash) VALUES ($1, $2)
-         ON CONFLICT (user_id, code_hash) DO NOTHING`,
-        [userId, hashRecoveryCode(code)]
-      );
-    }
-    await client.query('COMMIT');
-    return codes;
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
-    throw err;
-  } finally {
-    client.release();
   }
 }
 
-async function verifySecondFactor(userId: string, code: string): Promise<'totp' | 'recovery' | null> {
+async function verifySecondFactor(
+  client: pg.Pool | pg.PoolClient,
+  userId: string,
+  code: string
+): Promise<'totp' | 'recovery' | null> {
   const cleaned = code.trim();
-  const totp = await pool.query(
+  const totp = await client.query(
     `SELECT secret FROM public.auth_totp_secrets
       WHERE user_id = $1 AND enabled_at IS NOT NULL AND disabled_at IS NULL
       LIMIT 1`,
@@ -221,7 +213,7 @@ async function verifySecondFactor(userId: string, code: string): Promise<'totp' 
   if ((totp.rowCount ?? 0) > 0 && verifyTotpCode(totp.rows[0].secret as string, cleaned)) {
     return 'totp';
   }
-  const recovery = await pool.query(
+  const recovery = await client.query(
     `UPDATE public.auth_recovery_codes
         SET used_at = now()
       WHERE user_id = $1 AND code_hash = $2 AND used_at IS NULL AND revoked_at IS NULL
@@ -343,15 +335,15 @@ app.post('/api/auth/login/mfa', async (req: Request, res: Response) => {
       await conn.query('COMMIT');
       return res.status(401).json({ ok: false, error: 'invalid or expired challenge' });
     }
-    await conn.query('COMMIT');
-
-    const method = await verifySecondFactor(row.user_id, code);
+    const method = await verifySecondFactor(conn, row.user_id, code);
     if (!method) {
-      await pool.query(`UPDATE public.auth_mfa_challenges SET attempts = attempts + 1 WHERE id = $1`, [row.id]);
+      await conn.query(`UPDATE public.auth_mfa_challenges SET attempts = attempts + 1 WHERE id = $1`, [row.id]);
+      await conn.query('COMMIT');
       return res.status(401).json({ ok: false, error: 'invalid authentication code' });
     }
-    await pool.query(`UPDATE public.auth_mfa_challenges SET consumed_at = now() WHERE id = $1`, [row.id]);
-    const sessionToken = await createSession(pool, row.user_id, clientName);
+    await conn.query(`UPDATE public.auth_mfa_challenges SET consumed_at = now() WHERE id = $1`, [row.id]);
+    const sessionToken = await createSession(conn, row.user_id, clientName);
+    await conn.query('COMMIT');
     res.json({ ok: true, session_token: sessionToken, user_id: row.user_id, mfa_method: method });
   } catch (err) {
     await conn.query('ROLLBACK').catch(() => {});
@@ -513,66 +505,95 @@ app.post('/api/auth/totp/setup', requireAuth, async (req: AuthedRequest, res: Re
 app.post('/api/auth/totp/verify', requireAuth, async (req: AuthedRequest, res: Response) => {
   const code = typeof req.body?.code === 'string' ? req.body.code : '';
   if (!code.trim()) return res.status(400).json({ ok: false, error: 'code is required' });
+  const conn = await pool.connect();
   try {
-    const pending = await pool.query(
+    await conn.query('BEGIN');
+    const pending = await conn.query(
       `SELECT id, secret FROM public.auth_totp_secrets
         WHERE user_id = $1 AND enabled_at IS NULL AND disabled_at IS NULL
         ORDER BY created_at DESC
-        LIMIT 1`,
+        LIMIT 1
+        FOR UPDATE`,
       [req.ownerId]
     );
     if ((pending.rowCount ?? 0) === 0) {
+      await conn.query('COMMIT');
       return res.status(404).json({ ok: false, error: 'no pending setup' });
     }
     const row = pending.rows[0] as { id: string; secret: string };
     if (!verifyTotpCode(row.secret, code)) {
+      await conn.query('COMMIT');
       return res.status(401).json({ ok: false, error: 'invalid authentication code' });
     }
-    await pool.query(`UPDATE public.auth_totp_secrets SET enabled_at = now() WHERE id = $1`, [row.id]);
-    const recoveryCodes = await issueRecoveryCodes(req.ownerId!);
+    await conn.query(`UPDATE public.auth_totp_secrets SET enabled_at = now() WHERE id = $1`, [row.id]);
+    const recoveryCodes = newRecoveryCodes();
+    await storeRecoveryCodes(conn, req.ownerId!, recoveryCodes);
+    await conn.query('COMMIT');
     res.json({ ok: true, recovery_codes: recoveryCodes });
   } catch (err) {
+    await conn.query('ROLLBACK').catch(() => {});
     console.error('totp verify failed:', err);
     res.status(500).json({ ok: false, error: 'verification failed' });
+  } finally {
+    conn.release();
   }
 });
 
 app.post('/api/auth/totp/disable', requireAuth, async (req: AuthedRequest, res: Response) => {
   const code = typeof req.body?.code === 'string' ? req.body.code : '';
   if (!code.trim()) return res.status(400).json({ ok: false, error: 'code is required' });
+  const conn = await pool.connect();
   try {
-    const method = await verifySecondFactor(req.ownerId!, code);
-    if (!method) return res.status(401).json({ ok: false, error: 'invalid authentication code' });
-    await pool.query(
+    await conn.query('BEGIN');
+    const method = await verifySecondFactor(conn, req.ownerId!, code);
+    if (!method) {
+      await conn.query('COMMIT');
+      return res.status(401).json({ ok: false, error: 'invalid authentication code' });
+    }
+    await conn.query(
       `UPDATE public.auth_totp_secrets
           SET disabled_at = now()
         WHERE user_id = $1 AND disabled_at IS NULL`,
       [req.ownerId]
     );
-    await pool.query(
+    await conn.query(
       `UPDATE public.auth_recovery_codes
           SET revoked_at = now()
         WHERE user_id = $1 AND used_at IS NULL AND revoked_at IS NULL`,
       [req.ownerId]
     );
+    await conn.query('COMMIT');
     res.json({ ok: true, mfa_method: method });
   } catch (err) {
+    await conn.query('ROLLBACK').catch(() => {});
     console.error('totp disable failed:', err);
     res.status(500).json({ ok: false, error: 'disable failed' });
+  } finally {
+    conn.release();
   }
 });
 
 app.post('/api/auth/recovery-codes/rotate', requireAuth, async (req: AuthedRequest, res: Response) => {
   const code = typeof req.body?.code === 'string' ? req.body.code : '';
   if (!code.trim()) return res.status(400).json({ ok: false, error: 'code is required' });
+  const conn = await pool.connect();
   try {
-    const method = await verifySecondFactor(req.ownerId!, code);
-    if (!method) return res.status(401).json({ ok: false, error: 'invalid authentication code' });
-    const recoveryCodes = await issueRecoveryCodes(req.ownerId!);
+    await conn.query('BEGIN');
+    const method = await verifySecondFactor(conn, req.ownerId!, code);
+    if (!method) {
+      await conn.query('COMMIT');
+      return res.status(401).json({ ok: false, error: 'invalid authentication code' });
+    }
+    const recoveryCodes = newRecoveryCodes();
+    await storeRecoveryCodes(conn, req.ownerId!, recoveryCodes);
+    await conn.query('COMMIT');
     res.json({ ok: true, recovery_codes: recoveryCodes, mfa_method: method });
   } catch (err) {
+    await conn.query('ROLLBACK').catch(() => {});
     console.error('recovery-code rotation failed:', err);
     res.status(500).json({ ok: false, error: 'rotation failed' });
+  } finally {
+    conn.release();
   }
 });
 

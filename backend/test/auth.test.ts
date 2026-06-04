@@ -182,3 +182,38 @@ test('passkey WebAuthn registration and login require user verification', () => 
   const requireUvMatches = source.match(/requireUserVerification:\s*true/g) ?? [];
   assert.ok(requireUvMatches.length >= 2, 'registration and login verification must require UV');
 });
+
+test('MFA login consumes challenge, second factor, and session in one transaction', () => {
+  const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+  const start = source.indexOf("app.post('/api/auth/login/mfa'");
+  assert.notEqual(start, -1, 'missing MFA login route');
+  const end = source.indexOf("\n});", start);
+  const body = source.slice(start, end);
+  assert.match(body, /await conn\.query\('BEGIN'\)/);
+  assert.match(body, /FOR UPDATE/);
+  assert.match(body, /const method = await verifySecondFactor\(conn,/);
+  assert.match(body, /SET consumed_at = now\(\) WHERE id = \$1/);
+  assert.match(body, /const sessionToken = await createSession\(conn,/);
+  assert.doesNotMatch(body, /await conn\.query\('COMMIT'\);\s*const method = await verifySecondFactor/s);
+});
+
+test('TOTP enable, disable, and recovery rotation keep related MFA writes transactional', () => {
+  const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+  const routeBodies = [
+    { route: "app.post('/api/auth/totp/verify'", required: [/FOR UPDATE/, /storeRecoveryCodes\(conn,/] },
+    { route: "app.post('/api/auth/totp/disable'", required: [/verifySecondFactor\(conn,/, /auth_recovery_codes/] },
+    { route: "app.post('/api/auth/recovery-codes/rotate'", required: [/verifySecondFactor\(conn,/, /storeRecoveryCodes\(conn,/] },
+  ];
+
+  for (const { route, required } of routeBodies) {
+    const start = source.indexOf(route);
+    assert.notEqual(start, -1, `missing route ${route}`);
+    const end = source.indexOf("\n});", start);
+    const body = source.slice(start, end);
+    assert.match(body, /const conn = await pool\.connect\(\)/, `${route} must use a dedicated client`);
+    assert.match(body, /await conn\.query\('BEGIN'\)/, `${route} must begin a transaction`);
+    assert.match(body, /await conn\.query\('COMMIT'\)/, `${route} must commit a successful mutation`);
+    assert.match(body, /await conn\.query\('ROLLBACK'\)\.catch/, `${route} must roll back on failure`);
+    for (const pattern of required) assert.match(body, pattern, `${route} missed ${pattern}`);
+  }
+});

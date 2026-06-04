@@ -92,7 +92,7 @@ export function hashToken(token: string): string {
 }
 
 export async function createSession(
-  pool: pg.Pool,
+  pool: pg.Pool | pg.PoolClient,
   userId: string,
   client: string | null,
   ttlDays = 30
