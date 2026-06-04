@@ -115,6 +115,53 @@ public struct TaskEvent: Identifiable, Sendable, Equatable {
     }
 }
 
+/// User-attached image preview associated with a task. The row is synced so every detail pane can
+/// render the history thumbnail; callers should pre-compress images before inserting.
+public struct TaskAttachment: Identifiable, Sendable, Equatable {
+    public let id: String
+    public var ownerId: String
+    public var taskId: String
+    public var filename: String?
+    public var mimeType: String
+    public var byteSize: Int
+    public var previewDataURL: String
+    public var createdAt: Date?
+
+    public init(
+        id: String,
+        ownerId: String,
+        taskId: String,
+        filename: String? = nil,
+        mimeType: String,
+        byteSize: Int,
+        previewDataURL: String,
+        createdAt: Date? = nil
+    ) {
+        self.id = id
+        self.ownerId = ownerId
+        self.taskId = taskId
+        self.filename = filename
+        self.mimeType = mimeType
+        self.byteSize = byteSize
+        self.previewDataURL = previewDataURL
+        self.createdAt = createdAt
+    }
+}
+
+public struct TaskAttachmentDraft: Sendable, Equatable {
+    public var filename: String?
+    public var mimeType: String
+    public var byteSize: Int
+    public var previewDataURL: String
+
+    public init(filename: String? = nil, mimeType: String, byteSize: Int, previewDataURL: String) {
+        self.filename = filename
+        self.mimeType = mimeType
+        self.byteSize = byteSize
+        self.previewDataURL = previewDataURL
+    }
+}
+
 /// Read-only aggregate for a task's descendants. Parent tasks/projects use this to show progress
 /// without denormalising child state back into the parent row.
 public struct TaskRollup: Sendable, Equatable {

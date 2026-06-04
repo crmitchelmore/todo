@@ -5,14 +5,17 @@ import CaptureCore
 /// individual items instead of pasting collapsed single-line text.
 final class CapturePasteTextField: UITextField {
     var onPasteList: ((String) -> Bool)?
+    var onPasteImages: (([UIImage]) -> Bool)?
 
     override func paste(_ sender: Any?) {
         if let s = UIPasteboard.general.string, onPasteList?(s) == true { return }
+        if let images = UIPasteboard.general.images, !images.isEmpty, onPasteImages?(images) == true { return }
+        if let image = UIPasteboard.general.image, onPasteImages?([image]) == true { return }
         super.paste(sender)
     }
 }
 
-final class CaptureViewController: UIViewController, UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate {
+final class CaptureViewController: UIViewController, UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate, UIDropInteractionDelegate {
     private let viewModel: CaptureViewModel
     private let captureField = CapturePasteTextField()
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
@@ -126,6 +129,11 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
             self.captureField.text = ""
             return true
         }
+        captureField.onPasteImages = { [weak self] images in
+            self?.capture(images: images, suggestedName: nil)
+            return true
+        }
+        captureField.addInteraction(UIDropInteraction(delegate: self))
         captureField.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(captureField)
         NSLayoutConstraint.activate([
@@ -207,6 +215,31 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         textField.text = "" // instant clear = perceived speed
         viewModel.capture(text) // background, not awaited
         return false // keep keyboard up for rapid capture
+    }
+
+    private func capture(images: [UIImage], suggestedName: String?) {
+        let drafts = images.prefix(4).compactMap { ImageAttachmentEncoder.draft(from: $0, filename: suggestedName) }
+        guard !drafts.isEmpty else {
+            showBanner("That image was too large to attach.", isError: true)
+            return
+        }
+        let text = (captureField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        captureField.text = ""
+        viewModel.capture(text.isEmpty ? (drafts.first?.filename ?? "Image attachment") : text, attachments: drafts)
+    }
+
+    func dropInteraction(_ interaction: UIDropInteraction, canHandle session: UIDropSession) -> Bool {
+        session.canLoadObjects(ofClass: UIImage.self)
+    }
+
+    func dropInteraction(_ interaction: UIDropInteraction, performDrop session: UIDropSession) {
+        session.loadObjects(ofClass: UIImage.self) { [weak self] objects in
+            let images = objects.compactMap { $0 as? UIImage }
+            guard !images.isEmpty else { return }
+            DispatchQueue.main.async {
+                self?.capture(images: images, suggestedName: nil)
+            }
+        }
     }
 
     // MARK: - Table (section 0 = proposed; sections 1… = active date buckets)

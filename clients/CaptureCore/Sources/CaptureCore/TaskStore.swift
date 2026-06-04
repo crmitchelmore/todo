@@ -68,10 +68,11 @@ public final class TaskStore: @unchecked Sendable {
     /// Instant capture: generates an id, fires a local insert + background
     /// enrichment, and returns immediately. Never blocks on the network or an LLM.
     @discardableResult
-    public func capture(_ raw: String) -> String {
+    public func capture(_ raw: String, attachments: [TaskAttachmentDraft] = []) -> String {
         let title = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let id = UUID().uuidString.lowercased()
-        guard !title.isEmpty else { return id }
+        let effectiveTitle = title.isEmpty ? (attachments.first?.filename ?? "Image attachment") : title
+        guard !effectiveTitle.isEmpty else { return id }
         let ownerId = self.ownerId
         Task.detached { [db] in
             let now = ISO8601.string(Date())
@@ -81,11 +82,58 @@ public final class TaskStore: @unchecked Sendable {
                     (id, owner_id, title, status, source, created_at, updated_at)
                 VALUES (?, ?, ?, 'proposed', 'capture', ?, ?)
                 """,
-                parameters: [id, ownerId, title, now, now]
+                parameters: [id, ownerId, effectiveTitle, now, now]
             )
-            await Self.enrich(db: db, id: id, title: title)
+            await Self.insertAttachments(db: db, ownerId: ownerId, taskId: id, attachments: attachments, createdAt: now)
+            await Self.enrich(db: db, id: id, title: effectiveTitle)
         }
         return id
+    }
+
+    public func addAttachment(taskId: String, attachment: TaskAttachmentDraft) async throws {
+        try await Self.insertAttachment(db: db, ownerId: ownerId, taskId: taskId, attachment: attachment, createdAt: ISO8601.string(Date()))
+    }
+
+    static func insertAttachments(
+        db: PowerSyncDatabaseProtocol,
+        ownerId: String,
+        taskId: String,
+        attachments: [TaskAttachmentDraft],
+        createdAt: String
+    ) async {
+        for attachment in attachments {
+            _ = try? await insertAttachment(db: db, ownerId: ownerId, taskId: taskId, attachment: attachment, createdAt: createdAt)
+        }
+    }
+
+    static func insertAttachment(
+        db: PowerSyncDatabaseProtocol,
+        ownerId: String,
+        taskId: String,
+        attachment: TaskAttachmentDraft,
+        createdAt: String
+    ) async throws {
+        guard attachment.byteSize > 0,
+              attachment.byteSize <= 512 * 1024,
+              attachment.previewDataURL.hasPrefix("data:\(attachment.mimeType);base64,")
+        else { return }
+        try await db.execute(
+            sql: """
+            INSERT INTO \(TASK_ATTACHMENTS_TABLE)
+                (id, owner_id, task_id, filename, mime_type, byte_size, preview_data_url, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            parameters: [
+                UUID().uuidString.lowercased(),
+                ownerId,
+                taskId,
+                attachment.filename?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+                attachment.mimeType,
+                attachment.byteSize,
+                attachment.previewDataURL,
+                createdAt
+            ]
+        )
     }
 
     private static func enrich(db: PowerSyncDatabaseProtocol, id: String, title: String) async {
@@ -333,6 +381,40 @@ public final class TaskStore: @unchecked Sendable {
         )
     }
 
+    public func watchTaskAndDescendantAttachments(taskId: String, limit: Int = 80) throws -> AsyncThrowingStream<[TaskAttachment], Error> {
+        try db.watch(
+            sql: """
+            WITH RECURSIVE descendants(id) AS (
+                SELECT id FROM \(TASKS_TABLE) WHERE parent_task_id = ?
+                UNION ALL
+                SELECT t.id
+                  FROM \(TASKS_TABLE) t
+                  JOIN descendants d ON t.parent_task_id = d.id
+            ),
+            root_attachments AS (
+                SELECT *
+                  FROM \(TASK_ATTACHMENTS_TABLE)
+                 WHERE task_id = ?
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT ?
+            ),
+            descendant_attachments AS (
+                SELECT a.*
+                  FROM \(TASK_ATTACHMENTS_TABLE) a
+                  JOIN descendants d ON a.task_id = d.id
+                 ORDER BY a.created_at DESC, a.id DESC
+                 LIMIT ?
+            )
+            SELECT * FROM root_attachments
+            UNION ALL
+            SELECT * FROM descendant_attachments
+            ORDER BY created_at DESC, id DESC
+            """,
+            parameters: [taskId, taskId, limit, limit],
+            mapper: Self.mapTaskAttachment
+        )
+    }
+
     public func watchTaskRollup(taskId: String) throws -> AsyncThrowingStream<TaskRollup, Error> {
         let rows = try db.watch(
             sql: """
@@ -577,6 +659,19 @@ public final class TaskStore: @unchecked Sendable {
             title: try cursor.getString(name: "title"),
             body: try cursor.getStringOptional(name: "body"),
             metadata: try cursor.getStringOptional(name: "metadata"),
+            createdAt: ISO8601.date(try cursor.getStringOptional(name: "created_at"))
+        )
+    }
+
+    static func mapTaskAttachment(_ cursor: SqlCursor) throws -> TaskAttachment {
+        TaskAttachment(
+            id: try cursor.getString(name: "id"),
+            ownerId: (try cursor.getStringOptional(name: "owner_id")) ?? "",
+            taskId: try cursor.getString(name: "task_id"),
+            filename: try cursor.getStringOptional(name: "filename"),
+            mimeType: try cursor.getString(name: "mime_type"),
+            byteSize: (try cursor.getIntOptional(name: "byte_size")) ?? 0,
+            previewDataURL: try cursor.getString(name: "preview_data_url"),
             createdAt: ISO8601.date(try cursor.getStringOptional(name: "created_at"))
         )
     }

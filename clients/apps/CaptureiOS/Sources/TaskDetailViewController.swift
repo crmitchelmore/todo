@@ -15,12 +15,13 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
     private let taskId: String
     private var currentTask: TaskItem
     private var events: [TaskEvent] = []
+    private var attachments: [TaskAttachment] = []
     private var rollup: TaskRollup = .empty
     private var watchTasks: [Task<Void, Never>] = []
     private var feasibilityTask: Task<Void, Never>?
     private var dirty = false
 
-    private let scrollView = UIScrollView()
+    private let keyboardSafeView = KeyboardAvoidingScrollView()
     private let stack = UIStackView()
     private let stateLabel = UILabel()
     private let titleField = UITextField()
@@ -64,12 +65,12 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
     }
 
     private func build() {
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(scrollView)
+        keyboardSafeView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(keyboardSafeView)
         stack.axis = .vertical
         stack.spacing = 16
         stack.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.addSubview(stack)
+        keyboardSafeView.contentView.addSubview(stack)
 
         stateLabel.font = Theme.mono(12, .semibold)
         stateLabel.textColor = Theme.signal
@@ -166,15 +167,15 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
         stack.addArrangedSubview(historyStack)
 
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            stack.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 18),
-            stack.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor, constant: -16),
-            stack.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -24),
-            stack.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor, constant: -32)
+            keyboardSafeView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            keyboardSafeView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            keyboardSafeView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            keyboardSafeView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            stack.topAnchor.constraint(equalTo: keyboardSafeView.contentView.topAnchor, constant: 18),
+            stack.leadingAnchor.constraint(equalTo: keyboardSafeView.contentView.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: keyboardSafeView.contentView.trailingAnchor, constant: -16),
+            stack.bottomAnchor.constraint(equalTo: keyboardSafeView.contentView.bottomAnchor, constant: -24),
+            stack.widthAnchor.constraint(equalTo: keyboardSafeView.scrollView.frameLayoutGuide.widthAnchor, constant: -32)
         ])
     }
 
@@ -193,6 +194,7 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
                         self.updateActions()
                     }
                 }
+
             } catch {}
         }
         let rollupWatch = Task { [weak self] in
@@ -204,6 +206,7 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
                         self.updateRollup()
                     }
                 }
+
             } catch {}
         }
         let eventsWatch = Task { [weak self] in
@@ -217,7 +220,18 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
                 }
             } catch {}
         }
-        watchTasks.append(contentsOf: [taskWatch, rollupWatch, eventsWatch])
+        let attachmentsWatch = Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await attachments in try self.viewModel.store.watchTaskAndDescendantAttachments(taskId: self.taskId) {
+                    await MainActor.run {
+                        self.attachments = attachments
+                        self.rebuildHistory()
+                    }
+                }
+            } catch {}
+        }
+        watchTasks.append(contentsOf: [taskWatch, rollupWatch, eventsWatch, attachmentsWatch])
     }
 
     private func populate(_ task: TaskItem) {
@@ -258,7 +272,7 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
 
     private func rebuildHistory() {
         historyStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        guard !events.isEmpty else {
+        guard !events.isEmpty || !attachments.isEmpty else {
             let empty = UILabel()
             empty.text = "No synced history yet. Capture, confirmation, edits and AI updates appear here."
             empty.font = Theme.display(13, .regular)
@@ -267,9 +281,49 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
             historyStack.addArrangedSubview(empty)
             return
         }
+        for attachment in attachments {
+            historyStack.addArrangedSubview(attachmentRow(attachment))
+        }
         for event in events {
             historyStack.addArrangedSubview(historyRow(event))
         }
+    }
+
+    private func attachmentRow(_ attachment: TaskAttachment) -> UIView {
+        let icon = UILabel()
+        icon.text = "▧"
+        icon.font = Theme.display(18, .semibold)
+        icon.textColor = Theme.textTertiary
+        icon.widthAnchor.constraint(equalToConstant: 22).isActive = true
+
+        let title = UILabel()
+        title.text = "Attached image"
+        title.font = Theme.display(14, .semibold)
+        title.textColor = Theme.textPrimary
+        let meta = UILabel()
+        meta.text = "\(attachment.mimeType) · \(eventTime(attachment.createdAt))"
+        meta.font = Theme.mono(11)
+        meta.textColor = Theme.textTertiary
+
+        let imageView = UIImageView()
+        imageView.contentMode = .scaleAspectFill
+        imageView.clipsToBounds = true
+        imageView.layer.cornerRadius = 12
+        imageView.backgroundColor = Theme.surfaceHi
+        imageView.heightAnchor.constraint(equalToConstant: 180).isActive = true
+        imageView.widthAnchor.constraint(lessThanOrEqualToConstant: 280).isActive = true
+        if let image = UIImage(dataURL: attachment.previewDataURL) {
+            imageView.image = image
+        }
+
+        let text = UIStackView(arrangedSubviews: [title, meta, imageView])
+        text.axis = .vertical
+        text.spacing = 6
+        let row = UIStackView(arrangedSubviews: [icon, text])
+        row.axis = .horizontal
+        row.alignment = .top
+        row.spacing = 8
+        return row
     }
 
     private func historyRow(_ event: TaskEvent) -> UIView {

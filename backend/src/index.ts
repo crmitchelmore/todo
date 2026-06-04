@@ -45,6 +45,7 @@ import {
   parseAgentProposalDecision,
   serializeResumePayload,
 } from './agentDecision.js';
+import { validateAttachmentData } from './attachments.js';
 import { sendEmailBestEffort, loginCodeEmail, resetCodeEmail } from './mailer.js';
 
 /**
@@ -152,6 +153,9 @@ const ALLOWED_COLUMNS: Record<string, Set<string>> = {
   ]),
   tags: new Set([
     'id', 'owner_id', 'name', 'color', 'created_at', 'updated_at'
+  ]),
+  task_attachments: new Set([
+    'id', 'owner_id', 'task_id', 'filename', 'mime_type', 'byte_size', 'preview_data_url', 'created_at'
   ])
 };
 const READ_ONLY_SYNC_TABLES = new Set(['task_events', 'agent_proposals']);
@@ -889,6 +893,10 @@ async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Prom
     throw new Error(`table not allowed: ${table}`);
   }
 
+  if (table === 'task_attachments') {
+    return applyAttachmentOp(client, op, ownerId);
+  }
+
   if (op.op === 'DELETE') {
     if (table === 'tasks') await markLinkedAgentProposals(client, ownerId, op.id, 'rejected', false);
     const result = await client.query(`DELETE FROM ${table} WHERE id = $1 AND owner_id = $2`, [op.id, ownerId]);
@@ -932,6 +940,52 @@ async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Prom
     return applied;
   }
   return false;
+}
+
+async function applyAttachmentOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Promise<boolean> {
+  if (op.op === 'DELETE') {
+    const result = await client.query(
+      `DELETE FROM public.task_attachments WHERE id = $1 AND owner_id = $2`,
+      [op.id, ownerId]
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  if (op.op !== 'PUT') return false;
+  const data = sanitize('task_attachments', { ...(op.data ?? {}), id: op.id, owner_id: ownerId });
+  const valid = validateAttachmentData(data);
+  if (!valid) return false;
+
+  const task = await client.query(
+    `SELECT 1 FROM public.tasks WHERE id = $1 AND owner_id = $2 LIMIT 1`,
+    [valid.task_id, ownerId]
+  );
+  if ((task.rowCount ?? 0) === 0) return false;
+
+  const createdAt = valid.created_at ?? new Date().toISOString();
+  const result = await client.query(
+    `INSERT INTO public.task_attachments
+       (id, owner_id, task_id, filename, mime_type, byte_size, preview_data_url, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (id) DO UPDATE
+       SET filename = EXCLUDED.filename,
+           mime_type = EXCLUDED.mime_type,
+           byte_size = EXCLUDED.byte_size,
+           preview_data_url = EXCLUDED.preview_data_url
+     WHERE public.task_attachments.owner_id = $2
+       AND public.task_attachments.task_id = $3`,
+    [
+      op.id,
+      ownerId,
+      valid.task_id,
+      valid.filename,
+      valid.mime_type,
+      valid.byte_size,
+      valid.preview_data_url,
+      createdAt,
+    ]
+  );
+  return (result.rowCount ?? 0) > 0;
 }
 
 async function markLinkedAgentProposals(

@@ -109,9 +109,9 @@ final class CaptureViewModel {
         tasks.append(t)
     }
 
-    func capture(_ text: String) {
+    func capture(_ text: String, attachments: [TaskAttachmentDraft] = []) {
         if ingestIfList(text) { return }
-        store.capture(text) // instant, non-blocking
+        store.capture(text, attachments: attachments) // instant, non-blocking
     }
 
     /// If `text` is a markdown / checkbox list, ingest each line as its own item (nested lines

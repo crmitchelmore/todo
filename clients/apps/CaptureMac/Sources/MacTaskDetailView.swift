@@ -66,6 +66,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
     func render(
         task: TaskItem?,
         events: [TaskEvent],
+        attachments: [TaskAttachment],
         rollup: TaskRollup,
         colourForTag: @escaping (String) -> String,
         onSave: @escaping (MacTaskDetailForm) -> Void,
@@ -86,7 +87,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
             emptyView.isHidden = false
             formView.isHidden = true
             updateRollup(.empty)
-            rebuildHistory([])
+            rebuildHistory([], attachments: [])
             return
         }
 
@@ -100,7 +101,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         }
         updateActions(task)
         updateRollup(rollup)
-        rebuildHistory(events)
+        rebuildHistory(events, attachments: attachments)
     }
 
     override func keyDown(with event: NSEvent) {
@@ -284,18 +285,54 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         rollupProgress.doubleValue = completion
     }
 
-    private func rebuildHistory(_ events: [TaskEvent]) {
+    private func rebuildHistory(_ events: [TaskEvent], attachments: [TaskAttachment]) {
         historyStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        guard !events.isEmpty else {
+        guard !events.isEmpty || !attachments.isEmpty else {
             let empty = NSTextField(wrappingLabelWithString: "No synced history yet. Capture, confirmation, edits and AI updates appear here.")
             empty.font = Theme.display(12, .regular)
             empty.textColor = Theme.textTertiary
             historyStack.addArrangedSubview(empty)
             return
         }
+        for attachment in attachments {
+            historyStack.addArrangedSubview(attachmentRow(attachment))
+        }
         for event in events {
             historyStack.addArrangedSubview(historyRow(event))
         }
+    }
+
+    private func attachmentRow(_ attachment: TaskAttachment) -> NSView {
+        let icon = NSTextField(labelWithString: "▧")
+        icon.font = Theme.display(16, .semibold)
+        icon.textColor = Theme.textTertiary
+
+        let title = NSTextField(labelWithString: "Attached image")
+        title.font = Theme.display(13, .semibold)
+        title.textColor = Theme.textPrimary
+        let meta = NSTextField(labelWithString: "\(attachment.mimeType) · \(eventTime(attachment.createdAt))")
+        meta.font = Theme.mono(10)
+        meta.textColor = Theme.textTertiary
+
+        let imageView = NSImageView()
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        imageView.wantsLayer = true
+        imageView.layer?.cornerRadius = 10
+        imageView.layer?.masksToBounds = true
+        imageView.layer?.backgroundColor = Theme.surfaceHi.cgColor
+        imageView.widthAnchor.constraint(equalToConstant: 240).isActive = true
+        imageView.heightAnchor.constraint(equalToConstant: 160).isActive = true
+        imageView.image = NSImage(dataURL: attachment.previewDataURL)
+
+        let text = NSStackView(views: [title, meta, imageView])
+        text.orientation = .vertical
+        text.alignment = .leading
+        text.spacing = 6
+        let row = NSStackView(views: [icon, text])
+        row.orientation = .horizontal
+        row.alignment = .top
+        row.spacing = 8
+        return row
     }
 
     private func historyRow(_ event: TaskEvent) -> NSView {
@@ -438,5 +475,14 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
             formatter.dateFormat = "d MMM"
         }
         return formatter.string(from: date)
+    }
+}
+
+private extension NSImage {
+    convenience init?(dataURL: String) {
+        guard let comma = dataURL.firstIndex(of: ",") else { return nil }
+        let payload = String(dataURL[dataURL.index(after: comma)...])
+        guard let data = Data(base64Encoded: payload) else { return nil }
+        self.init(data: data)
     }
 }

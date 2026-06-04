@@ -18,6 +18,7 @@ final class MacViewModel {
     private(set) var tagFilter: Set<String> = []          // lowercased names; AND semantics
     private(set) var selectedTask: TaskItem?
     private(set) var selectedEvents: [TaskEvent] = []
+    private(set) var selectedAttachments: [TaskAttachment] = []
     private(set) var selectedRollup: TaskRollup = .empty
 
     private var observers: [() -> Void] = []
@@ -134,9 +135,9 @@ final class MacViewModel {
         tasks.append(t)
     }
 
-    func capture(_ text: String) {
+    func capture(_ text: String, attachments: [TaskAttachmentDraft] = []) {
         if ingestIfList(text) { return }
-        store.capture(text)
+        store.capture(text, attachments: attachments)
     }
 
     /// If `text` is a markdown / checkbox list, ingest each line as its own item (nested lines
@@ -168,11 +169,13 @@ final class MacViewModel {
         detailTasks.removeAll()
         selectedTask = item
         selectedEvents = []
+        selectedAttachments = []
         selectedRollup = .empty
         notify()
         watchSelectedTask(id: item.id)
         watchSelectedRollup(id: item.id)
         watchSelectedEvents(id: item.id)
+        watchSelectedAttachments(id: item.id)
     }
 
     func clearSelection() {
@@ -180,6 +183,7 @@ final class MacViewModel {
         detailTasks.removeAll()
         selectedTask = nil
         selectedEvents = []
+        selectedAttachments = []
         selectedRollup = .empty
         notify()
     }
@@ -228,6 +232,22 @@ final class MacViewModel {
                     await MainActor.run {
                         guard self.selectedTask?.id == id else { return }
                         self.selectedEvents = events
+                        self.notify()
+                    }
+                }
+            } catch {}
+        }
+        detailTasks.append(t)
+    }
+
+    private func watchSelectedAttachments(id: String) {
+        let t = Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await attachments in try self.store.watchTaskAndDescendantAttachments(taskId: id) {
+                    await MainActor.run {
+                        guard self.selectedTask?.id == id else { return }
+                        self.selectedAttachments = attachments
                         self.notify()
                     }
                 }

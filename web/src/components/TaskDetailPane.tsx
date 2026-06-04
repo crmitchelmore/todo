@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@powersync/react';
-import type { TaskEventRecord, TaskRecord } from '../powersync/schema';
+import type { TaskAttachmentRecord, TaskEventRecord, TaskRecord } from '../powersync/schema';
 import { confirm, reject, setDone, updateTask } from '../lib/tasks';
 import { decodeTags } from '../lib/tags';
 import { formatDue } from '../lib/format';
@@ -16,6 +16,11 @@ type TaskRollupRecord = {
 };
 
 type ScopedTaskEventRecord = TaskEventRecord & {
+  task_title?: string | null;
+  depth?: number | null;
+};
+
+type ScopedTaskAttachmentRecord = TaskAttachmentRecord & {
   task_title?: string | null;
   depth?: number | null;
 };
@@ -139,6 +144,58 @@ export function TaskDetailPane({
       : `SELECT 0 AS total, 0 AS done, 0 AS open WHERE 0`,
     task ? [task.id] : []
   );
+  const { data: attachments } = useQuery<ScopedTaskAttachmentRecord>(
+    task
+      ? `
+        WITH RECURSIVE descendants(id, task_title, depth) AS (
+          SELECT id, title, 1 FROM tasks WHERE parent_task_id = ?
+          UNION ALL
+          SELECT t.id, t.title, d.depth + 1
+            FROM tasks t
+            JOIN descendants d ON t.parent_task_id = d.id
+        ),
+        root_attachments AS (
+          SELECT
+            a.id,
+            a.owner_id,
+            a.task_id,
+            a.filename,
+            a.mime_type,
+            a.byte_size,
+            a.preview_data_url,
+            a.created_at,
+            NULL AS task_title,
+            0 AS depth
+            FROM task_attachments a
+           WHERE a.task_id = ?
+           ORDER BY a.created_at DESC, a.id DESC
+           LIMIT 80
+        ),
+        descendant_attachments AS (
+          SELECT
+            a.id,
+            a.owner_id,
+            a.task_id,
+            a.filename,
+            a.mime_type,
+            a.byte_size,
+            a.preview_data_url,
+            a.created_at,
+            d.task_title,
+            d.depth
+            FROM task_attachments a
+            JOIN descendants d ON a.task_id = d.id
+           ORDER BY a.created_at DESC, a.id DESC
+           LIMIT 80
+        )
+        SELECT * FROM root_attachments
+        UNION ALL
+        SELECT * FROM descendant_attachments
+        ORDER BY created_at DESC, id DESC
+      `
+      : `SELECT *, NULL AS task_title, NULL AS depth FROM task_attachments WHERE 0`,
+    task ? [task.id, task.id] : []
+  );
 
   useEffect(() => {
     if (!task) return;
@@ -157,6 +214,7 @@ export function TaskDetailPane({
   const suggestedCategory = task?.suggested_category ?? null;
 
   const sortedEvents = useMemo(() => events ?? [], [events]);
+  const sortedAttachments = useMemo(() => attachments ?? [], [attachments]);
   const rollup = rollups?.[0] ?? { total: 0, done: 0, open: 0 };
   const hasSubtasks = rollup.total > 0;
   const completion = hasSubtasks ? Math.round((rollup.done / rollup.total) * 100) : 0;
@@ -311,10 +369,28 @@ export function TaskDetailPane({
 
       <section className="detail-section detail-history">
         <h3>AI + activity history</h3>
-        {sortedEvents.length === 0 ? (
+        {sortedEvents.length === 0 && sortedAttachments.length === 0 ? (
           <p className="history-empty">No synced history yet. Capture, confirmation, edits and AI updates appear here.</p>
         ) : (
           <div className="timeline">
+            {sortedAttachments.map((attachment) => (
+              <article className="timeline-event actor-user timeline-attachment" key={attachment.id}>
+                <span className="timeline-icon">▧</span>
+                <div>
+                  <div className="timeline-head">
+                    <strong>Attached image</strong>
+                    {(attachment.depth ?? 0) > 0 && attachment.task_title && (
+                      <span className="timeline-task">{attachment.task_title}</span>
+                    )}
+                    <span>{attachment.mime_type}</span>
+                    <time>{eventTime(attachment.created_at)}</time>
+                  </div>
+                  {attachment.preview_data_url && (
+                    <img src={attachment.preview_data_url} alt={attachment.filename ?? 'Attached image'} />
+                  )}
+                </div>
+              </article>
+            ))}
             {sortedEvents.map((event) => (
               <article className={`timeline-event actor-${event.actor}`} key={event.id}>
                 <span className="timeline-icon">{eventIcon(event)}</span>

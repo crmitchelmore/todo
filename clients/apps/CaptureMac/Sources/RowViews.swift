@@ -5,10 +5,47 @@ import CaptureCore
 /// checkbox list, it ingests each line as its own item instead of pasting collapsed text.
 final class CapturePasteTextView: NSTextView {
     var onPasteList: ((String) -> Bool)?
+    var onPasteImages: (([NSImage]) -> Bool)?
 
     override func paste(_ sender: Any?) {
         if let s = NSPasteboard.general.string(forType: .string), onPasteList?(s) == true { return }
+        if let images = NSPasteboard.general.readObjects(forClasses: [NSImage.self]) as? [NSImage],
+           !images.isEmpty,
+           onPasteImages?(images) == true { return }
         super.paste(sender)
+    }
+}
+
+final class AttachmentCaptureTextField: NSTextField {
+    var onDroppedImages: (([NSImage]) -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes([.tiff, .png, .fileURL])
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        registerForDraggedTypes([.tiff, .png, .fileURL])
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        images(from: sender.draggingPasteboard).isEmpty ? [] : .copy
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let imgs = images(from: sender.draggingPasteboard)
+        guard !imgs.isEmpty else { return false }
+        onDroppedImages?(imgs)
+        return true
+    }
+
+    private func images(from pasteboard: NSPasteboard) -> [NSImage] {
+        if let images = pasteboard.readObjects(forClasses: [NSImage.self]) as? [NSImage], !images.isEmpty {
+            return images
+        }
+        guard let urls = pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL] else { return [] }
+        return urls.compactMap { NSImage(contentsOf: $0) }
     }
 }
 

@@ -313,6 +313,7 @@ header h1::after {
 .capture-bar {
   position: relative;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   margin-bottom: 36px;
@@ -322,6 +323,10 @@ header h1::after {
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-card);
   transition: box-shadow 0.25s, border-color 0.25s;
+}
+.capture-bar.dragging {
+  border-color: var(--signal-line);
+  box-shadow: var(--ring), var(--shadow-card);
 }
 .capture-bar::before {
   content: '⌁';
@@ -367,6 +372,33 @@ header h1::after {
 .capture-bar button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 10px 24px -8px var(--signal-deep); }
 .capture-bar button:active:not(:disabled) { transform: translateY(0); }
 .capture-bar button:disabled { opacity: 0.35; cursor: default; box-shadow: none; }
+.capture-attachments {
+  flex-basis: 100%;
+  display: flex;
+  gap: 8px;
+  padding: 0 0 6px 20px;
+}
+.capture-bar .capture-attachment {
+  width: 54px;
+  height: 42px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--panel-2);
+  box-shadow: none;
+}
+.capture-bar .capture-attachment:hover {
+  transform: translateY(-1px);
+  border-color: var(--danger);
+  box-shadow: 0 10px 22px -16px var(--danger);
+}
+.capture-attachment img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
 
 .kbd {
   font-family: var(--font-mono);
@@ -1017,6 +1049,17 @@ h2::after { content: ''; flex: 1; height: 1px; background: var(--line); }
   color: var(--text-dim);
   font-size: 13px;
   line-height: 1.4;
+}
+.timeline-attachment img {
+  display: block;
+  width: min(100%, 280px);
+  max-height: 220px;
+  object-fit: cover;
+  margin-top: 8px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line-strong);
+  background: var(--panel-2);
+  box-shadow: var(--shadow-card);
 }
 
 @media (max-width: 980px) {

@@ -2,22 +2,47 @@ import { db, ownerId } from '../powersync/db';
 import { suggest } from './suggest';
 import { parseMarkdownList, type ParsedCaptureItem } from './markdownList';
 import { encodeTags, ensureTags, normalizeTags } from './tags';
+import type { AttachmentDraft } from './attachments';
 
 /**
  * Capture is the hot path: ONE instant local INSERT, nothing awaited on the network or an LLM.
  * Enrichment is fired off in the background and patches the row when ready.
  */
-export async function capture(raw: string): Promise<string> {
+export async function capture(raw: string, attachments: AttachmentDraft[] = []): Promise<string> {
   const title = raw.trim();
-  if (!title) return '';
+  if (!title && attachments.length === 0) return '';
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
+  const effectiveTitle = title || attachments[0]?.filename || 'Image attachment';
   await db.execute(
     `INSERT INTO tasks (id, owner_id, title, status, source, created_at, updated_at)
      VALUES (?, ?, ?, 'proposed', 'capture', ?, ?)`,
-    [id, ownerId(), title, now, now]
+    [id, ownerId(), effectiveTitle, now, now]
   );
-  void enrich(id, title);
+  for (const attachment of attachments) {
+    await addAttachment(id, attachment, now);
+  }
+  void enrich(id, effectiveTitle);
+  return id;
+}
+
+export async function addAttachment(taskId: string, attachment: AttachmentDraft, createdAt = new Date().toISOString()): Promise<string> {
+  const id = crypto.randomUUID();
+  await db.execute(
+    `INSERT INTO task_attachments
+       (id, owner_id, task_id, filename, mime_type, byte_size, preview_data_url, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      ownerId(),
+      taskId,
+      attachment.filename,
+      attachment.mime_type,
+      attachment.byte_size,
+      attachment.preview_data_url,
+      createdAt,
+    ]
+  );
   return id;
 }
 

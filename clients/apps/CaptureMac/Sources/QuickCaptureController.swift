@@ -10,11 +10,20 @@ final class CapturePanel: NSPanel {
 /// Owns the floating quick-capture surface: one big text field. Enter captures instantly (the write
 /// is local-first and returns immediately) and hides the panel; Esc dismisses without saving.
 @MainActor
-final class QuickCaptureController: NSObject, NSTextFieldDelegate {
+final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
     private let viewModel: MacViewModel
     private let panel: CapturePanel
-    private let field = NSTextField()
+    private let field = AttachmentCaptureTextField()
     private let hint = NSTextField(labelWithString: "⏎ capture   ·   esc dismiss")
+    private lazy var pasteFieldEditor: CapturePasteTextView = {
+        let tv = CapturePasteTextView()
+        tv.isFieldEditor = true
+        tv.onPasteImages = { [weak self] images in
+            self?.capture(images: images)
+            return true
+        }
+        return tv
+    }()
 
     init(viewModel: MacViewModel) {
         self.viewModel = viewModel
@@ -30,6 +39,7 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate {
     }
 
     private func configurePanel() {
+        panel.delegate = self
         panel.level = .floating
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
@@ -59,6 +69,7 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate {
         field.delegate = self
         field.target = self
         field.action = #selector(submit)
+        field.onDroppedImages = { [weak self] images in self?.capture(images: images) }
         field.translatesAutoresizingMaskIntoConstraints = false
 
         hint.font = Theme.mono(11, .medium)
@@ -129,6 +140,14 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate {
         hide()
     }
 
+    private func capture(images: [NSImage]) {
+        let drafts = images.prefix(4).compactMap { MacImageAttachmentEncoder.draft(from: $0) }
+        guard !drafts.isEmpty else { return }
+        let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        viewModel.capture(text.isEmpty ? (drafts.first?.filename ?? "Image attachment") : text, attachments: drafts)
+        hide()
+    }
+
     // Esc to dismiss; Enter handled by the field's action.
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         if selector == #selector(NSResponder.cancelOperation(_:)) {
@@ -136,5 +155,9 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate {
             return true
         }
         return false
+    }
+
+    func windowWillReturnFieldEditor(_ sender: NSWindow, to client: Any?) -> Any? {
+        (client as AnyObject) === field ? pasteFieldEditor : nil
     }
 }

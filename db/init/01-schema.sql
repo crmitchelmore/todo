@@ -266,6 +266,36 @@ create index if not exists task_events_owner_task_created_idx
 create index if not exists task_events_owner_created_idx
   on public.task_events (owner_id, created_at desc, id desc);
 
+-- User-attached images. The synced row stores bounded preview data only, so task history can render
+-- instantly on every device without pushing full-resolution blobs through PowerSync.
+create table if not exists public.task_attachments (
+  id               uuid primary key default gen_random_uuid(),
+  owner_id         uuid not null,
+  task_id          uuid not null,
+  filename         text,
+  mime_type        text not null,
+  byte_size        integer not null,
+  preview_data_url text not null,
+  created_at       timestamptz not null default now(),
+
+  constraint task_attachments_owner_task_fk
+    foreign key (owner_id, task_id)
+    references public.tasks(owner_id, id)
+    on delete cascade,
+  constraint task_attachments_mime_chk
+    check (mime_type in ('image/jpeg', 'image/png', 'image/webp', 'image/gif')),
+  constraint task_attachments_byte_size_chk
+    check (byte_size between 1 and 524288),
+  constraint task_attachments_filename_len_chk
+    check (filename is null or char_length(filename) between 1 and 160),
+  constraint task_attachments_preview_len_chk
+    check (octet_length(preview_data_url) <= 819200),
+  constraint task_attachments_preview_data_url_chk
+    check (left(preview_data_url, 11) = 'data:image/')
+);
+create index if not exists task_attachments_owner_task_created_idx
+  on public.task_attachments (owner_id, task_id, created_at desc, id desc);
+
 -- Server/agent-owned proposals that are surfaced through existing confirm-card task rows.
 -- Clients read this provenance/confidence stream, but do not upload rows to it.
 create table if not exists public.agent_proposals (
@@ -308,4 +338,4 @@ create index if not exists agent_proposals_owner_task_status_idx
   where task_id is not null;
 
 -- PowerSync logical replication publication.
-create publication powersync for table public.tasks, public.tags, public.task_events, public.agent_proposals;
+create publication powersync for table public.tasks, public.tags, public.task_events, public.task_attachments, public.agent_proposals;

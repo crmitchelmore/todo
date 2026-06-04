@@ -12,6 +12,7 @@ final class SignInViewController: UIViewController {
     private let auth: AuthStore
     private let onSignedIn: () -> Void
     private var mode: Mode = .signIn
+    private let keyboardSafeView = KeyboardAvoidingScrollView()
 
     private let segmented = UISegmentedControl(items: ["Sign In", "Create Account"])
     private let emailField = UITextField()
@@ -102,11 +103,21 @@ final class SignInViewController: UIViewController {
         stack.setCustomSpacing(28, after: subtitle)
         stack.setCustomSpacing(20, after: submit)
         stack.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(stack)
+        keyboardSafeView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(keyboardSafeView)
+        keyboardSafeView.contentView.addSubview(stack)
+        let centreY = stack.centerYAnchor.constraint(equalTo: keyboardSafeView.scrollView.frameLayoutGuide.centerYAnchor)
+        centreY.priority = .defaultLow
         NSLayoutConstraint.activate([
-            stack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
-            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
+            keyboardSafeView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            keyboardSafeView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            keyboardSafeView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            keyboardSafeView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            stack.topAnchor.constraint(greaterThanOrEqualTo: keyboardSafeView.contentView.topAnchor, constant: 32),
+            stack.leadingAnchor.constraint(equalTo: keyboardSafeView.contentView.leadingAnchor, constant: 32),
+            stack.trailingAnchor.constraint(equalTo: keyboardSafeView.contentView.trailingAnchor, constant: -32),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: keyboardSafeView.contentView.bottomAnchor, constant: -32),
+            centreY,
             emailField.heightAnchor.constraint(equalToConstant: 48),
             passwordField.heightAnchor.constraint(equalToConstant: 48),
             submit.heightAnchor.constraint(equalToConstant: 50)

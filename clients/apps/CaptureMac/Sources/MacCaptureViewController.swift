@@ -3,7 +3,7 @@ import CaptureCore
 
 final class MacCaptureViewController: NSViewController {
     private let viewModel: MacViewModel
-    private let captureField = NSTextField()
+    private let captureField = AttachmentCaptureTextField()
     private let proposedTable = FastConfirmTableView()
     private let activeTable = NSTableView()
     private let proposedHeader = NSTextField(labelWithString: "")
@@ -59,6 +59,10 @@ final class MacCaptureViewController: NSViewController {
             self.captureField.stringValue = ""
             return true
         }
+        tv.onPasteImages = { [weak self] images in
+            self?.capture(images: images)
+            return true
+        }
         return tv
     }()
 
@@ -88,6 +92,7 @@ final class MacCaptureViewController: NSViewController {
         captureField.bezelStyle = .roundedBezel
         captureField.focusRingType = .none
         captureField.translatesAutoresizingMaskIntoConstraints = false
+        captureField.onDroppedImages = { [weak self] images in self?.capture(images: images) }
 
         proposedHeader.font = Theme.mono(11, .semibold)
         proposedHeader.textColor = Theme.signal
@@ -217,6 +222,7 @@ final class MacCaptureViewController: NSViewController {
         detailView.render(
             task: viewModel.selectedTask,
             events: viewModel.selectedEvents,
+            attachments: viewModel.selectedAttachments,
             rollup: viewModel.selectedRollup,
             colourForTag: color,
             onSave: { [weak self] form in self?.viewModel.saveDetail(form) },
@@ -241,6 +247,14 @@ final class MacCaptureViewController: NSViewController {
         guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         captureField.stringValue = "" // instant clear
         viewModel.capture(text)
+    }
+
+    private func capture(images: [NSImage]) {
+        let drafts = images.prefix(4).compactMap { MacImageAttachmentEncoder.draft(from: $0) }
+        guard !drafts.isEmpty else { return }
+        let text = captureField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        captureField.stringValue = ""
+        viewModel.capture(text.isEmpty ? (drafts.first?.filename ?? "Image attachment") : text, attachments: drafts)
     }
 
     private func selectedProposal() -> TaskItem? {
