@@ -21,3 +21,7 @@ streams:
     auto_subscribe: true
     queries:
       - SELECT * FROM task_events WHERE owner_id = auth.user_id()
+  agent_proposals:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM agent_proposals WHERE owner_id = auth.user_id()

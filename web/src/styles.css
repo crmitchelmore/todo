@@ -470,6 +470,28 @@ h2::after { content: ''; flex: 1; height: 1px; background: var(--line); }
   margin-bottom: 14px;
   padding-right: 80px;
 }
+.agent-proposal {
+  margin: -8px 0 16px;
+  padding: 10px 12px;
+  border: 1px solid rgba(139, 123, 255, 0.24);
+  border-radius: var(--r-sm);
+  background: rgba(139, 123, 255, 0.08);
+}
+.agent-proposal span {
+  display: block;
+  margin-bottom: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--iris);
+}
+.agent-proposal p {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.45;
+}
 .card-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .card-row label {
   font-family: var(--font-mono);

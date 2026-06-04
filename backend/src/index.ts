@@ -149,6 +149,7 @@ const ALLOWED_COLUMNS: Record<string, Set<string>> = {
     'id', 'owner_id', 'name', 'color', 'created_at', 'updated_at'
   ])
 };
+const READ_ONLY_SYNC_TABLES = new Set(['task_events', 'agent_proposals']);
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
@@ -857,9 +858,13 @@ function taskEventForOp(op: CrudOp, applied: boolean): Omit<TaskEventInput, 'own
  */
 async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Promise<boolean> {
   const table = op.type;
-  if (!ALLOWED_COLUMNS[table]) throw new Error(`table not allowed: ${table}`);
+  if (!ALLOWED_COLUMNS[table]) {
+    if (READ_ONLY_SYNC_TABLES.has(table)) return false;
+    throw new Error(`table not allowed: ${table}`);
+  }
 
   if (op.op === 'DELETE') {
+    if (table === 'tasks') await markLinkedAgentProposals(client, ownerId, op.id, 'rejected', false);
     const result = await client.query(`DELETE FROM ${table} WHERE id = $1 AND owner_id = $2`, [op.id, ownerId]);
     return (result.rowCount ?? 0) > 0;
   }
@@ -881,7 +886,9 @@ async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Prom
       `ON CONFLICT (id) DO UPDATE SET ${updates.join(', ')} ` +
       `WHERE ${table}.owner_id = ${ownerParam}`;
     const result = await client.query(sql, [...vals, ownerId]);
-    return (result.rowCount ?? 0) > 0;
+    const applied = (result.rowCount ?? 0) > 0;
+    if (applied && table === 'tasks') await markTaskProposalDecision(client, ownerId, op.id, data);
+    return applied;
   }
 
   if (op.op === 'PATCH') {
@@ -894,9 +901,45 @@ async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Prom
       `UPDATE ${table} SET ${setClause} WHERE id = $${vals.length - 1} AND owner_id = $${vals.length}`,
       vals
     );
-    return (result.rowCount ?? 0) > 0;
+    const applied = (result.rowCount ?? 0) > 0;
+    if (applied && table === 'tasks') await markTaskProposalDecision(client, ownerId, op.id, data);
+    return applied;
   }
   return false;
+}
+
+async function markLinkedAgentProposals(
+  client: pg.PoolClient,
+  ownerId: string,
+  taskId: string,
+  status: 'accepted' | 'rejected',
+  applied: boolean
+): Promise<void> {
+  await client.query(
+    `UPDATE public.agent_proposals
+        SET status = $3,
+            decided_at = COALESCE(decided_at, now()),
+            applied_at = CASE WHEN $4 THEN COALESCE(applied_at, now()) ELSE applied_at END,
+            updated_at = now()
+      WHERE owner_id = $1
+        AND task_id = $2
+        AND status = 'pending'`,
+    [ownerId, taskId, status, applied]
+  );
+}
+
+async function markTaskProposalDecision(
+  client: pg.PoolClient,
+  ownerId: string,
+  taskId: string,
+  data: Record<string, unknown>
+): Promise<void> {
+  const status = typeof data.status === 'string' ? data.status : null;
+  if (status === 'active' || status === 'confirmed') {
+    await markLinkedAgentProposals(client, ownerId, taskId, 'accepted', true);
+  } else if (status === 'cancelled') {
+    await markLinkedAgentProposals(client, ownerId, taskId, 'rejected', false);
+  }
 }
 
 /**

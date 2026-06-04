@@ -4,6 +4,7 @@ import PowerSync
 public let TASKS_TABLE = "tasks"
 public let TAGS_TABLE = "tags"
 public let TASK_EVENTS_TABLE = "task_events"
+public let AGENT_PROPOSALS_TABLE = "agent_proposals"
 
 /// Client-side SQLite schema. Mirrors Postgres `public.tasks` / `public.tags`. The `id`
 /// column is auto-created by PowerSync — never declare it.
@@ -64,6 +65,35 @@ public let AppSchema = Schema(
             Index(name: "by_task_created", columns: [
                 IndexedColumn.ascending("task_id"),
                 IndexedColumn.ascending("created_at")
+            ])
+        ]
+    ),
+    Table(
+        name: AGENT_PROPOSALS_TABLE,
+        columns: [
+            .text("owner_id"),
+            .text("task_id"),
+            .text("proposal_type"),
+            .text("status"),
+            .text("title"),
+            .text("body"),
+            .text("payload"),
+            .text("provenance"),
+            .real("confidence"),
+            .text("source"),
+            .text("created_at"),
+            .text("updated_at"),
+            .text("decided_at"),
+            .text("applied_at")
+        ],
+        indexes: [
+            Index(name: "by_status", columns: [
+                IndexedColumn.ascending("status"),
+                IndexedColumn.ascending("created_at")
+            ]),
+            Index(name: "by_task_status", columns: [
+                IndexedColumn.ascending("task_id"),
+                IndexedColumn.ascending("status")
             ])
         ]
     )

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useStatus, useQuery } from '@powersync/react';
-import type { TaskRecord } from './powersync/schema';
+import type { AgentProposalRecord, TaskRecord } from './powersync/schema';
 import { CaptureBar } from './components/CaptureBar';
 import { ConfirmCard } from './components/ConfirmCard';
 import { TaskRow } from './components/TaskRow';
@@ -42,6 +42,11 @@ export default function App() {
   const { data: done } = useQuery<TaskRecord>(
     `SELECT * FROM tasks WHERE status = 'done' ORDER BY completed_at DESC LIMIT 20`
   );
+  const { data: pendingProposals } = useQuery<AgentProposalRecord>(
+    `SELECT * FROM agent_proposals
+      WHERE status = 'pending' AND task_id IS NOT NULL
+      ORDER BY created_at DESC`
+  );
 
   const filteredActive = useMemo(() => active.filter((t) => matchesTags(t, filter)), [active, filter]);
   const filteredDone = useMemo(() => done.filter((t) => matchesTags(t, filter)), [done, filter]);
@@ -53,6 +58,13 @@ export default function App() {
     () => allVisibleTasks.find((t) => t.id === selectedId) ?? null,
     [allVisibleTasks, selectedId]
   );
+  const proposalByTaskId = useMemo(() => {
+    const map = new Map<string, AgentProposalRecord>();
+    for (const proposal of pendingProposals) {
+      if (proposal.task_id && !map.has(proposal.task_id)) map.set(proposal.task_id, proposal);
+    }
+    return map;
+  }, [pendingProposals]);
 
   useEffect(() => {
     if (selectedId && !selectedTask) setSelectedId(null);
@@ -108,7 +120,7 @@ export default function App() {
                     <button className="open-detail" onClick={() => setSelectedId(t.id)}>
                       Inspect
                     </button>
-                    <ConfirmCard task={t} />
+                    <ConfirmCard task={t} proposal={proposalByTaskId.get(t.id) ?? null} />
                   </div>
                 ))}
               </div>

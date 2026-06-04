@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { TaskRecord } from '../powersync/schema';
+import type { AgentProposalRecord, TaskRecord } from '../powersync/schema';
 import { confirm, reject } from '../lib/tasks';
 import { decodeTags } from '../lib/tags';
 import { formatDue } from '../lib/format';
@@ -16,7 +16,7 @@ function isButtonLikeTarget(target: EventTarget | null): boolean {
 
 // A proposed item awaiting the mandatory quick human confirmation.
 // Pre-filled with on-device suggestions; focused card shortcuts: Enter/Y accepts, Esc/N rejects.
-export function ConfirmCard({ task }: { task: TaskRecord }) {
+export function ConfirmCard({ task, proposal }: { task: TaskRecord; proposal?: AgentProposalRecord | null }) {
   const [title, setTitle] = useState(task.title ?? '');
   const [due, setDue] = useState<string | null>(task.suggested_due_at ?? null);
   const [category, setCategory] = useState<string | null>(task.suggested_category ?? null);
@@ -58,6 +58,16 @@ export function ConfirmCard({ task }: { task: TaskRecord }) {
       }}
     >
       <input className="card-title" value={title} onChange={(e) => setTitle(e.target.value)} />
+
+      {proposal && (
+        <div className="agent-proposal">
+          <span>
+            {proposal.source || 'agent'} · {(proposal.proposal_type ?? 'proposal').replaceAll('_', ' ')}
+            {typeof proposal.confidence === 'number' ? ` · ${Math.round(proposal.confidence * 100)}%` : ''}
+          </span>
+          <p>{proposal.body || proposal.title}</p>
+        </div>
+      )}
 
       <div className="card-row">
         <label>Due</label>

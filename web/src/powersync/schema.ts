@@ -51,9 +51,30 @@ const task_events = new Table(
   { indexes: { by_task_created: ['task_id', 'created_at'] } }
 );
 
-export const AppSchema = new Schema({ tasks, tags, task_events });
+const agent_proposals = new Table(
+  {
+    owner_id: column.text,
+    task_id: column.text,
+    proposal_type: column.text,
+    status: column.text,
+    title: column.text,
+    body: column.text,
+    payload: column.text,
+    provenance: column.text,
+    confidence: column.real,
+    source: column.text,
+    created_at: column.text,
+    updated_at: column.text,
+    decided_at: column.text,
+    applied_at: column.text
+  },
+  { indexes: { by_status: ['status', 'created_at'], by_task_status: ['task_id', 'status'] } }
+);
+
+export const AppSchema = new Schema({ tasks, tags, task_events, agent_proposals });
 
 export type Database = (typeof AppSchema)['types'];
 export type TaskRecord = Database['tasks'];
 export type TagRecord = Database['tags'];
 export type TaskEventRecord = Database['task_events'];
+export type AgentProposalRecord = Database['agent_proposals'];
