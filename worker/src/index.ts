@@ -2,6 +2,8 @@ import pg from 'pg';
 import { createHash } from 'crypto';
 import { enrich } from './enrich.js';
 import { discoverTaskContext, type TaskDiscovery } from './discovery.js';
+import { parseAgentHandoffMetadata, type AgentHandoffRequest } from './handoff.js';
+import { interruptForHumanDecision } from './hitl.js';
 import { learnCategoryHints, type CategoryHints, type HistoricalTask } from './historyLearning.js';
 
 /**
@@ -41,6 +43,41 @@ const HISTORY_SQL = `
   ORDER BY COALESCE(confirmed_at, completed_at, updated_at, created_at) DESC
   LIMIT 500
 `;
+
+const HANDOFF_REQUEST_SQL = `
+  SELECT
+    req.id AS request_event_id,
+    req.owner_id,
+    req.task_id,
+    req.metadata,
+    t.title
+  FROM public.task_events req
+  JOIN public.tasks t
+    ON t.owner_id = req.owner_id
+   AND t.id = req.task_id
+  WHERE req.event_type = 'agent_requested'
+    AND req.metadata IS NOT NULL
+    AND (req.metadata::jsonb ->> 'request_id') IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1
+        FROM public.task_events done
+       WHERE done.owner_id = req.owner_id
+         AND done.task_id = req.task_id
+         AND done.event_type IN ('agent_completed', 'agent_failed')
+         AND done.metadata IS NOT NULL
+         AND done.metadata::jsonb ->> 'request_id' = req.metadata::jsonb ->> 'request_id'
+    )
+  ORDER BY req.created_at ASC
+  LIMIT $1
+`;
+
+interface HandoffRequestRow {
+  request_event_id: string;
+  owner_id: string;
+  task_id: string;
+  metadata: string | null;
+  title: string;
+}
 
 function deterministicUuid(input: string): string {
   const chars = createHash('sha256').update(input).digest('hex').slice(0, 32).split('');
@@ -227,6 +264,153 @@ async function recordDiscoveryProposal(
   );
 }
 
+async function recordHandoffCompletionEvent(
+  row: HandoffRequestRow,
+  request: AgentHandoffRequest,
+  discovery: TaskDiscovery
+): Promise<void> {
+  const eventId = deterministicUuid(`${row.owner_id}:${row.task_id}:agent-completed:${request.requestId}`);
+  await pool.query(
+    `INSERT INTO public.task_events
+       (id, owner_id, task_id, actor, event_type, title, body, metadata)
+     VALUES ($1, $2, $3, 'agent', 'agent_completed', $4, $5, $6)
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      eventId,
+      row.owner_id,
+      row.task_id,
+      request.mode === 'attempt' ? 'AI attempt plan ready' : 'AI research ready',
+      discoveryBody(discovery),
+      metadataJSON({
+        request_id: request.requestId,
+        mode: request.mode,
+        instructions: request.instructions,
+        source: 'agent-handoff',
+        query: discovery.query,
+        location: discovery.location,
+        web: discovery.web,
+        next_actions: discovery.nextActions,
+        confidence: discovery.confidence,
+      }),
+    ]
+  );
+}
+
+async function recordHandoffFailureEvent(
+  row: HandoffRequestRow,
+  request: AgentHandoffRequest | null,
+  error: unknown
+): Promise<void> {
+  const requestId = request?.requestId ?? row.request_event_id;
+  const eventId = deterministicUuid(`${row.owner_id}:${row.task_id}:agent-failed:${requestId}`);
+  await pool.query(
+    `INSERT INTO public.task_events
+       (id, owner_id, task_id, actor, event_type, title, body, metadata)
+     VALUES ($1, $2, $3, 'agent', 'agent_failed', 'AI handoff failed', $4, $5)
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      eventId,
+      row.owner_id,
+      row.task_id,
+      String(error).slice(0, 2000),
+      metadataJSON({
+        request_id: requestId,
+        mode: request?.mode ?? 'unknown',
+        source: 'agent-handoff',
+      }),
+    ]
+  );
+}
+
+async function recordHandoffResearchProposal(
+  row: HandoffRequestRow,
+  request: AgentHandoffRequest,
+  discovery: TaskDiscovery
+): Promise<void> {
+  const proposalId = deterministicUuid(`${row.owner_id}:${row.task_id}:agent-handoff:${request.requestId}:research`);
+  await pool.query(
+    `INSERT INTO public.agent_proposals
+       (id, owner_id, task_id, proposal_type, status, title, body, payload, provenance, confidence, source)
+     VALUES ($1, $2, $3, 'task_update', 'pending', $4, $5, $6, $7, $8, 'agent-handoff')
+     ON CONFLICT (id) DO UPDATE
+       SET title = EXCLUDED.title,
+           body = EXCLUDED.body,
+           payload = EXCLUDED.payload,
+           provenance = EXCLUDED.provenance,
+           confidence = EXCLUDED.confidence,
+           source = EXCLUDED.source,
+           updated_at = now()
+     WHERE public.agent_proposals.status = 'pending'`,
+    [
+      proposalId,
+      row.owner_id,
+      row.task_id,
+      request.mode === 'attempt' ? 'AI attempt research brief' : 'AI research brief',
+      discoveryBody(discovery),
+      boundedJSON({
+        task_id: row.task_id,
+        request_id: request.requestId,
+        action_type: 'task_context_lookup',
+        handoff_mode: request.mode,
+        instructions: request.instructions,
+        query: discovery.query,
+        location: discovery.location,
+        web: discovery.web,
+        next_actions: discovery.nextActions,
+      }, 8192),
+      boundedJSON({
+        source: 'agent-handoff',
+        request_event_id: row.request_event_id,
+        worker: 'capture-enrichment',
+      }, 4096),
+      discovery.confidence,
+    ]
+  );
+}
+
+async function recordAttemptApprovalGate(
+  row: HandoffRequestRow,
+  request: AgentHandoffRequest,
+  discovery: TaskDiscovery
+): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await interruptForHumanDecision(client, {
+      ownerId: row.owner_id,
+      taskId: row.task_id,
+      threadId: `task-${row.task_id}-${request.requestId}`,
+      checkpointKey: `attempt:${request.requestId}`,
+      interruptBefore: 'external_action',
+      actionType: 'attempt_task',
+      title: 'Approve AI attempt plan',
+      body: `${discoveryBody(discovery)}\n\nApproval records consent for the next agent turn; external execution still needs the Mac Mini/OpenClaw executor wired in.`,
+      payload: {
+        task_id: row.task_id,
+        request_id: request.requestId,
+        handoff_mode: request.mode,
+        instructions: request.instructions,
+        discovery,
+      },
+      provenance: {
+        source: 'agent-handoff',
+        request_event_id: row.request_event_id,
+      },
+      confidence: discovery.confidence,
+      source: 'agent-handoff',
+      riskLevel: 'medium',
+      reversible: false,
+      mutatesExternalState: true,
+    });
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 function discoveryBody(discovery: TaskDiscovery): string {
   const results = discovery.web.results
     .slice(0, 3)
@@ -244,6 +428,39 @@ function discoveryBody(discovery: TaskDiscovery): string {
   return parts.join('\n\n').slice(0, 2000);
 }
 
+async function processAgentHandoffRequests(): Promise<number> {
+  const { rows } = await pool.query<HandoffRequestRow>(HANDOFF_REQUEST_SQL, [BATCH]);
+  let processed = 0;
+  for (const row of rows) {
+    const request = parseAgentHandoffMetadata(row.metadata);
+    if (!request) {
+      await recordHandoffFailureEvent(row, null, 'invalid handoff metadata');
+      continue;
+    }
+    try {
+      const discovery = await discoverTaskContext(
+        { id: row.task_id, ownerId: row.owner_id, title: row.title },
+        { force: true, instructions: request.instructions }
+      );
+      if (!discovery) {
+        await recordHandoffFailureEvent(row, request, 'handoff discovery returned no result');
+        continue;
+      }
+      await recordHandoffResearchProposal(row, request, discovery);
+      if (request.mode === 'attempt') {
+        await recordAttemptApprovalGate(row, request, discovery);
+      }
+      await recordHandoffCompletionEvent(row, request, discovery);
+      processed += 1;
+      console.log(`[worker] handoff ${request.mode} ${request.requestId} -> task=${row.task_id}`);
+    } catch (err) {
+      await recordHandoffFailureEvent(row, request, err);
+      console.error(`[worker] failed handoff ${request.requestId}:`, String(err));
+    }
+  }
+  return processed;
+}
+
 const UPDATE_SQL = `
   UPDATE public.tasks
   SET suggested_due_at      = $2,
@@ -256,8 +473,9 @@ const UPDATE_SQL = `
 `;
 
 async function tick(): Promise<number> {
+  const handoffs = await processAgentHandoffRequests();
   const { rows } = await pool.query(SELECT_SQL, [BATCH]);
-  if (rows.length === 0) return 0;
+  if (rows.length === 0) return handoffs;
   const ownerIds = [...new Set(rows.map((row) => row.owner_id as string))];
   const historyByOwner = new Map<string, CategoryHints>();
   if (ownerIds.length > 0) {
@@ -307,7 +525,7 @@ async function tick(): Promise<number> {
       console.error(`[worker] failed to enrich ${row.id}:`, String(err));
     }
   }
-  return enriched;
+  return enriched + handoffs;
 }
 
 async function main() {

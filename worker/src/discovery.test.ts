@@ -85,3 +85,15 @@ test('falls back to a search action when web search is not configured', async ()
   assert.deepEqual(discovery.web.results, []);
   assert.ok(discovery.nextActions[0].includes('Run web search'));
 });
+
+test('explicit handoff forces discovery for ordinary task titles', async () => {
+  const discovery = await discoverTaskContext(
+    { id: 'task-3', ownerId: 'owner-1', title: 'Prepare board deck' },
+    { env: {}, force: true, instructions: 'find the latest metrics to include' },
+  );
+
+  assert.ok(discovery);
+  assert.equal(discovery.query, 'Prepare board deck find the latest metrics to include');
+  assert.equal(discovery.web.source, 'not_configured');
+  assert.ok(discovery.nextActions[0].includes('Run web search'));
+});

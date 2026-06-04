@@ -255,7 +255,18 @@ create table if not exists public.task_events (
   constraint task_events_actor_chk
     check (actor in ('user', 'system', 'worker', 'agent', 'api')),
   constraint task_events_type_chk
-    check (event_type in ('captured', 'confirmed', 'updated', 'completed', 'reopened', 'deleted', 'enriched')),
+    check (event_type in (
+      'captured',
+      'confirmed',
+      'updated',
+      'completed',
+      'reopened',
+      'deleted',
+      'enriched',
+      'agent_requested',
+      'agent_completed',
+      'agent_failed'
+    )),
   constraint task_events_title_len_chk check (char_length(title) between 1 and 160),
   constraint task_events_body_len_chk check (body is null or char_length(body) <= 2000),
   constraint task_events_metadata_len_chk check (metadata is null or octet_length(metadata) <= 4096),
@@ -265,6 +276,12 @@ create index if not exists task_events_owner_task_created_idx
   on public.task_events (owner_id, task_id, created_at desc, id desc);
 create index if not exists task_events_owner_created_idx
   on public.task_events (owner_id, created_at desc, id desc);
+create index if not exists task_events_agent_requests_idx
+  on public.task_events (created_at asc, owner_id, task_id)
+  where event_type = 'agent_requested';
+create index if not exists task_events_agent_results_request_idx
+  on public.task_events (owner_id, task_id, ((metadata::jsonb ->> 'request_id')))
+  where event_type in ('agent_completed', 'agent_failed') and metadata is not null;
 
 -- User-attached images. The synced row stores bounded preview data only, so task history can render
 -- instantly on every device without pushing full-resolution blobs through PowerSync.

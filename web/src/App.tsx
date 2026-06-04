@@ -9,6 +9,7 @@ import { TagManager } from './components/TagManager';
 import { TagFilter } from './components/TagFilter';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ApprovalQueue } from './components/ApprovalQueue';
+import { AgentOperationsPanel } from './components/AgentOperationsPanel';
 import { dateBucket, type DateBucketKey } from './lib/dates';
 import { decodeTags, tagKey } from './lib/tags';
 import { signOut } from './lib/auth';
@@ -107,6 +108,13 @@ export default function App() {
           {status.connected ? 'synced' : 'offline'}
         </span>
       </header>
+
+      <AgentOperationsPanel
+        captureCount={proposed.length}
+        actionProposals={actionProposals}
+        researchProposals={pendingProposals}
+        connected={status.connected}
+      />
 
       <CaptureBar />
 

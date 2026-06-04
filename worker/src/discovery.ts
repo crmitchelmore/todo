@@ -112,14 +112,17 @@ export async function discoverTaskContext(
     env?: DiscoveryEnv;
     fetchImpl?: FetchLike;
     now?: Date;
+    force?: boolean;
+    instructions?: string | null;
   } = {}
 ): Promise<TaskDiscovery | null> {
-  if (!shouldDiscoverTask(task.title)) return null;
+  if (!options.force && !shouldDiscoverTask(task.title)) return null;
   const env = options.env ?? process.env;
   const location = locationContextFromEnv(env);
-  const query = discoveryQueryFor(task.title, location);
+  const querySeed = [task.title, options.instructions ?? ''].join(' ').replace(/\s+/g, ' ').trim();
+  const query = discoveryQueryFor(querySeed || task.title, location);
   const web = await fetchWebContext(query, env, options.fetchImpl ?? fetch);
-  const nextActions = nextActionsFor(task.title, location, web);
+  const nextActions = nextActionsFor(querySeed || task.title, location, web);
   const confidence = discoveryConfidence(location, web);
 
   return {

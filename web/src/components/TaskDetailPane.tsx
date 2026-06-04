@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@powersync/react';
-import type { TaskAttachmentRecord, TaskEventRecord, TaskRecord } from '../powersync/schema';
+import type { AgentProposalRecord, TaskAttachmentRecord, TaskEventRecord, TaskRecord } from '../powersync/schema';
+import { requestAgentHandoff, type AgentHandoffMode } from '../lib/agentHandoff';
+import { decideAgentProposal, proposalMeta } from '../lib/proposals';
 import { confirm, reject, setDone, updateTask } from '../lib/tasks';
 import { decodeTags } from '../lib/tags';
 import { formatDue } from '../lib/format';
@@ -26,6 +28,8 @@ type ScopedTaskAttachmentRecord = TaskAttachmentRecord & {
 };
 
 function eventIcon(event: TaskEventRecord): string {
+  if (event.event_type === 'agent_requested') return '↗';
+  if (event.event_type === 'agent_failed') return '!';
   if (event.actor === 'worker' || event.actor === 'agent') return '◇';
   if (event.event_type === 'completed') return '✓';
   if (event.event_type === 'captured') return '⌁';
@@ -67,6 +71,9 @@ export function TaskDetailPane({
   const [tags, setTags] = useState<string[]>([]);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [handoffInstructions, setHandoffInstructions] = useState('');
+  const [handoffBusy, setHandoffBusy] = useState<AgentHandoffMode | null>(null);
+  const [handoffMessage, setHandoffMessage] = useState<string | null>(null);
 
   const taskId = task?.id ?? '';
   const { data: events } = useQuery<ScopedTaskEventRecord>(
@@ -196,6 +203,15 @@ export function TaskDetailPane({
       : `SELECT *, NULL AS task_title, NULL AS depth FROM task_attachments WHERE 0`,
     task ? [task.id, task.id] : []
   );
+  const { data: taskProposals } = useQuery<AgentProposalRecord>(
+    task
+      ? `SELECT * FROM agent_proposals
+          WHERE task_id = ? AND status = 'pending'
+          ORDER BY created_at DESC
+          LIMIT 12`
+      : `SELECT * FROM agent_proposals WHERE 0`,
+    task ? [task.id] : []
+  );
 
   useEffect(() => {
     if (!task) return;
@@ -215,6 +231,7 @@ export function TaskDetailPane({
 
   const sortedEvents = useMemo(() => events ?? [], [events]);
   const sortedAttachments = useMemo(() => attachments ?? [], [attachments]);
+  const pendingTaskProposals = useMemo(() => taskProposals ?? [], [taskProposals]);
   const rollup = rollups?.[0] ?? { total: 0, done: 0, open: 0 };
   const hasSubtasks = rollup.total > 0;
   const completion = hasSubtasks ? Math.round((rollup.done / rollup.total) * 100) : 0;
@@ -265,6 +282,32 @@ export function TaskDetailPane({
     }
   }
 
+  async function handoff(mode: AgentHandoffMode) {
+    if (!task) return;
+    setHandoffBusy(mode);
+    setHandoffMessage(null);
+    try {
+      await requestAgentHandoff(task.id, mode, handoffInstructions.trim() || null);
+      setHandoffInstructions('');
+      setHandoffMessage(mode === 'attempt'
+        ? 'Attempt requested. The agent will research first, then pause before external action.'
+        : 'Research requested. Results will land in the history and briefs.');
+    } catch (err) {
+      setHandoffMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setHandoffBusy(null);
+    }
+  }
+
+  async function decideBrief(id: string, decision: 'accepted' | 'rejected') {
+    setSaving(true);
+    try {
+      await decideAgentProposal(id, decision);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <aside
       className="detail-pane"
@@ -305,6 +348,59 @@ export function TaskDetailPane({
           </>
         )}
       </div>
+
+      <section className="detail-section detail-agent-loop">
+        <div className="agent-loop-head">
+          <div>
+            <h3>AI loop</h3>
+            <p>Hand this task to the agent for one research turn, or ask it to prepare an attempted execution plan.</p>
+          </div>
+          <span className="agent-loop-badge">human gated</span>
+        </div>
+        <textarea
+          className="agent-loop-input"
+          value={handoffInstructions}
+          onChange={(e) => setHandoffInstructions(e.target.value)}
+          placeholder="Optional direction: what should the agent look for, avoid, or try first?"
+          maxLength={1000}
+        />
+        <div className="agent-loop-actions">
+          <button className="primary" type="button" disabled={handoffBusy !== null} onClick={() => void handoff('research')}>
+            {handoffBusy === 'research' ? 'Requesting…' : 'Research'}
+          </button>
+          <button className="ghost agent-attempt" type="button" disabled={handoffBusy !== null} onClick={() => void handoff('attempt')}>
+            {handoffBusy === 'attempt' ? 'Preparing…' : 'Attempt plan'}
+          </button>
+        </div>
+        {handoffMessage && <p className="agent-loop-message">{handoffMessage}</p>}
+        {pendingTaskProposals.length > 0 && (
+          <div className="agent-briefs">
+            {pendingTaskProposals.map((proposal) => {
+              const meta = proposalMeta(proposal);
+              const action = proposal.proposal_type === 'action';
+              return (
+                <article key={proposal.id} className={`agent-brief ${action ? 'agent-brief-action' : ''}`}>
+                  <span>{proposal.source || 'agent'} · {meta.actionType.replaceAll('_', ' ')}</span>
+                  <strong>{proposal.title}</strong>
+                  <p>{proposal.body || 'The agent has prepared context for this task.'}</p>
+                  {action ? (
+                    <em>Review this in the approval queue before the agent continues.</em>
+                  ) : (
+                    <div className="agent-brief-actions">
+                      <button className="ghost" type="button" disabled={saving} onClick={() => void decideBrief(proposal.id, 'accepted')}>
+                        Archive useful
+                      </button>
+                      <button className="ghost" type="button" disabled={saving} onClick={() => void decideBrief(proposal.id, 'rejected')}>
+                        Dismiss
+                      </button>
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       {hasSubtasks && (
         <section className="detail-section detail-rollup">

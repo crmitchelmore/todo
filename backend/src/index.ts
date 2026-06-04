@@ -45,6 +45,7 @@ import {
   parseAgentProposalDecision,
   serializeResumePayload,
 } from './agentDecision.js';
+import { agentHandoffRequestId, parseAgentHandoffInput } from './agentHandoff.js';
 import { validateAttachmentData } from './attachments.js';
 import { sendEmailBestEffort, loginCodeEmail, resetCodeEmail } from './mailer.js';
 
@@ -58,6 +59,7 @@ import { sendEmailBestEffort, loginCodeEmail, resetCodeEmail } from './mailer.js
  *  - GET  /api/auth/token    Mint a short-lived per-user RS256 JWT + the PowerSync endpoint URL.
  *  - PUT  /api/data          Apply a batch of client CRUD ops to Postgres (owner-scoped write path).
  *  - POST /api/capture       Lightweight ingest for out-of-process surfaces (extensions/intents).
+ *  - POST /api/tasks/:id/agent-handoff  Queue a server-owned AI research/attempt request.
  */
 
 const PORT = Number(process.env.BACKEND_PORT ?? 6060);
@@ -86,6 +88,7 @@ app.use(express.json({ limit: '5mb' }));
 const FAIL_WINDOW_MS = 15 * 60_000;
 const FAIL_MAX = 10;
 const failures = new Map<string, { count: number; resetAt: number }>();
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function attemptKey(ip: string, email: string): string {
   return `${ip}|${email}`;
@@ -782,7 +785,17 @@ interface CrudOp {
   data?: Record<string, unknown>;
 }
 
-type TaskEventType = 'captured' | 'confirmed' | 'updated' | 'completed' | 'reopened' | 'deleted' | 'enriched';
+type TaskEventType =
+  | 'captured'
+  | 'confirmed'
+  | 'updated'
+  | 'completed'
+  | 'reopened'
+  | 'deleted'
+  | 'enriched'
+  | 'agent_requested'
+  | 'agent_completed'
+  | 'agent_failed';
 
 interface TaskEventInput {
   ownerId: string;
@@ -1110,9 +1123,67 @@ app.post('/api/capture', requireAuth, async (req: AuthedRequest, res: Response) 
   }
 });
 
+app.post('/api/tasks/:id/agent-handoff', requireAuth, async (req: AuthedRequest, res: Response) => {
+  const taskId = req.params.id;
+  if (!UUID_RE.test(taskId)) {
+    return res.status(400).json({ ok: false, error: 'valid task id is required' });
+  }
+  const input = parseAgentHandoffInput(req.body);
+  if (!input) {
+    return res.status(400).json({ ok: false, error: 'mode must be research or attempt' });
+  }
+
+  const ownerId = req.ownerId!;
+  const requestId = agentHandoffRequestId({ ownerId, taskId, mode: input.mode, instructions: input.instructions });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const task = await client.query(
+      `SELECT id, title, status
+         FROM public.tasks
+        WHERE id = $1 AND owner_id = $2
+        LIMIT 1`,
+      [taskId, ownerId]
+    );
+    if ((task.rowCount ?? 0) === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: 'task not found' });
+    }
+    const taskTitle = String(task.rows[0]?.title ?? '');
+    const modeLabel = input.mode === 'attempt' ? 'AI attempt requested' : 'AI research requested';
+    await recordTaskEvent(client, {
+      ownerId,
+      taskId,
+      actor: 'user',
+      eventType: 'agent_requested',
+      title: modeLabel,
+      body: input.instructions ?? (
+        input.mode === 'attempt'
+          ? 'Try to work out the next safe execution step before asking for approval.'
+          : 'Research context and propose the next useful action.'
+      ),
+      metadata: {
+        request_id: requestId,
+        mode: input.mode,
+        instructions: input.instructions,
+        task_title: taskTitle.slice(0, 160),
+      },
+      idempotencyKey: requestId,
+    });
+    await client.query('COMMIT');
+    return res.status(202).json({ ok: true, request_id: requestId });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('agent handoff request failed:', err);
+    return res.status(500).json({ ok: false, error: 'agent handoff failed' });
+  } finally {
+    client.release();
+  }
+});
+
 app.post('/api/agent/proposals/:id/decision', requireAuth, async (req: AuthedRequest, res: Response) => {
   const proposalId = req.params.id;
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(proposalId)) {
+  if (!UUID_RE.test(proposalId)) {
     return res.status(400).json({ ok: false, error: 'valid proposal id is required' });
   }
 
