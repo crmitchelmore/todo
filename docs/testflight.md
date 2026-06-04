@@ -39,6 +39,9 @@ App Store Connect validation is stricter than local simulator builds:
 - iPad orientation metadata must include all required iPad orientations, even if the iPhone UI is
   portrait-first.
 - The Share Extension bundle version/build must match the containing app's version/build.
+- EventKit-linked bundles must include calendar purpose strings (`NSCalendarsUsageDescription` and
+  `NSCalendarsFullAccessUsageDescription`) explaining that Capture reads calendar availability to
+  suggest realistic due dates and show whether there is time for a task.
 
 ## One-time bootstrap (register IDs + create the app record)
 ```bash
