@@ -17,6 +17,7 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
     private var events: [TaskEvent] = []
     private var rollup: TaskRollup = .empty
     private var watchTasks: [Task<Void, Never>] = []
+    private var feasibilityTask: Task<Void, Never>?
     private var dirty = false
 
     private let scrollView = UIScrollView()
@@ -28,6 +29,7 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
     private let rejectButton = UIButton(type: .system)
     private let dueSwitch = UISwitch()
     private let duePicker = UIDatePicker()
+    private let feasibilityLabel = UILabel()
     private let categoryField = UITextField()
     private let priorityControl = UISegmentedControl(items: ["None", "P0", "P1", "P2", "P3", "P4"])
     private let tagsField = UITextField()
@@ -56,7 +58,10 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
         startWatching()
     }
 
-    deinit { watchTasks.forEach { $0.cancel() } }
+    deinit {
+        watchTasks.forEach { $0.cancel() }
+        feasibilityTask?.cancel()
+    }
 
     private func build() {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -96,6 +101,9 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
         duePicker.preferredDatePickerStyle = .compact
         duePicker.tintColor = Theme.signal
         duePicker.addTarget(self, action: #selector(markDirty), for: .valueChanged)
+        feasibilityLabel.font = Theme.display(13, .regular)
+        feasibilityLabel.textColor = Theme.textSecondary
+        feasibilityLabel.numberOfLines = 0
 
         categoryField.placeholder = "engineering, home, inbox…"
         categoryField.textColor = Theme.textPrimary
@@ -148,6 +156,7 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
         stack.addArrangedSubview(rollupStack)
         stack.addArrangedSubview(section("Properties"))
         stack.addArrangedSubview(row(label: "Due", controls: [dueSwitch, duePicker]))
+        stack.addArrangedSubview(row(label: "Calendar", controls: [feasibilityLabel]))
         stack.addArrangedSubview(row(label: "Category", controls: [categoryField]))
         stack.addArrangedSubview(row(label: "Priority", controls: [priorityControl]))
         stack.addArrangedSubview(row(label: "Tags", controls: [tagsField]))
@@ -217,6 +226,7 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
         dueSwitch.isOn = task.dueAt != nil
         duePicker.date = task.dueAt ?? task.suggestedDueAt ?? Date()
         duePicker.isEnabled = dueSwitch.isOn
+        refreshFeasibility(for: task.dueAt ?? task.suggestedDueAt)
         categoryField.text = task.category ?? task.suggestedCategory
         let priority = task.priority.flatMap { (0...4).contains($0) ? $0 : nil }
         priorityControl.selectedSegmentIndex = (priority ?? -1) + 1
@@ -340,7 +350,29 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
 
     @objc private func markDirty() {
         dirty = true
+        duePicker.isEnabled = dueSwitch.isOn
+        refreshFeasibility(for: dueSwitch.isOn ? duePicker.date : nil)
         updateActions()
+    }
+
+    private func refreshFeasibility(for dueAt: Date?) {
+        feasibilityTask?.cancel()
+        guard let dueAt else {
+            feasibilityLabel.text = "Set a due date to check your calendar load."
+            return
+        }
+        feasibilityLabel.text = "Checking calendar…"
+        #if canImport(EventKit)
+        let scorer = CalendarFeasibility(provider: EventKitCalendarProvider())
+        feasibilityTask = Task { [weak self] in
+            let assessment = await scorer.assess(dueAt: dueAt)
+            await MainActor.run {
+                self?.feasibilityLabel.text = "\(assessment.label) — \(assessment.detail)"
+            }
+        }
+        #else
+        feasibilityLabel.text = "Calendar checks are unavailable on this platform."
+        #endif
     }
 
     func textViewDidChange(_ textView: UITextView) { markDirty() }

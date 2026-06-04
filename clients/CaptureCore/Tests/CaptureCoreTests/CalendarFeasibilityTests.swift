@@ -59,6 +59,8 @@ final class CalendarFeasibilityTests: XCTestCase {
             return XCTFail("expected assessed result, got \(assessment)")
         }
         XCTAssertEqual(score, .conflicted)
+        XCTAssertEqual(assessment.label, "Time conflict")
+        XCTAssertEqual(assessment.detail, "Due time overlaps Roadmap review.")
         XCTAssertEqual(evidence.busyMinutes, BusyMinutes(30))
         XCTAssertEqual(evidence.overlappingEventTitles, ["Roadmap review"])
         XCTAssertEqual(evidence.nearbyEventTitles, ["Roadmap review"])
@@ -82,6 +84,7 @@ final class CalendarFeasibilityTests: XCTestCase {
             return XCTFail("expected assessed result, got \(assessment)")
         }
         XCTAssertEqual(score, .tight)
+        XCTAssertEqual(assessment.label, "Tight fit")
         XCTAssertEqual(evidence.busyMinutes, BusyMinutes(100))
         XCTAssertEqual(evidence.overlappingEventTitles, ["Product sync"])
     }

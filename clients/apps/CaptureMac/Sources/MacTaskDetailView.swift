@@ -19,6 +19,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
     private let notesView = NSTextView()
     private let dueEnabled = NSButton(checkboxWithTitle: "Due", target: nil, action: nil)
     private let duePicker = NSDatePicker()
+    private let feasibilityLabel = NSTextField(wrappingLabelWithString: "")
     private let categoryBox = NSComboBox()
     private let priorityPopup = NSPopUpButton()
     private let tagsField = NSTextField()
@@ -38,6 +39,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
     private var onConfirm: ((MacTaskDetailForm) -> Void)?
     private var onReject: (() -> Void)?
     private var onDone: ((Bool) -> Void)?
+    private var feasibilityTask: Task<Void, Never>?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -45,6 +47,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    deinit { feasibilityTask?.cancel() }
 
     func applyTheme() {
         layer?.backgroundColor = Theme.surface.cgColor
@@ -54,6 +57,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         notesView.textColor = Theme.textPrimary
         notesView.backgroundColor = Theme.surfaceHi
         dueEnabled.contentTintColor = Theme.signal
+        feasibilityLabel.textColor = Theme.textSecondary
         rejectButton.contentTintColor = Theme.danger
         rollupSummary.textColor = Theme.textPrimary
         if let currentTask { updateActions(currentTask) }
@@ -153,6 +157,8 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         duePicker.datePickerElements = [.yearMonthDay, .hourMinute]
         duePicker.target = self
         duePicker.action = #selector(markDirty)
+        feasibilityLabel.font = Theme.display(12, .regular)
+        feasibilityLabel.textColor = Theme.textSecondary
 
         categoryBox.addItem(withObjectValue: "")
         categoryBox.addItems(withObjectValues: CAPTURE_CATEGORIES)
@@ -219,6 +225,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         formView.addArrangedSubview(rollupStack)
         formView.addArrangedSubview(sectionTitle("Properties"))
         formView.addArrangedSubview(row(label: "Due", views: [dueEnabled, duePicker]))
+        formView.addArrangedSubview(row(label: "Calendar", views: [feasibilityLabel]))
         formView.addArrangedSubview(row(label: "Category", views: [categoryBox]))
         formView.addArrangedSubview(row(label: "Priority", views: [priorityPopup]))
         formView.addArrangedSubview(row(label: "Tags", views: [tagsField]))
@@ -246,6 +253,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         dueEnabled.state = task.dueAt == nil ? .off : .on
         duePicker.dateValue = task.dueAt ?? task.suggestedDueAt ?? Date()
         duePicker.isEnabled = dueEnabled.state == .on
+        refreshFeasibility(for: task.dueAt ?? task.suggestedDueAt)
         categoryBox.stringValue = task.category ?? task.suggestedCategory ?? ""
         let priority = task.priority.flatMap { (0...4).contains($0) ? $0 : nil }
         priorityPopup.selectItem(at: (priority ?? -1) + 1)
@@ -365,7 +373,28 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
     @objc private func markDirty() {
         isDirty = true
         duePicker.isEnabled = dueEnabled.state == .on
+        refreshFeasibility(for: dueEnabled.state == .on ? duePicker.dateValue : nil)
         if let task = currentTask { updateActions(task) }
+    }
+
+    private func refreshFeasibility(for dueAt: Date?) {
+        feasibilityTask?.cancel()
+        guard let dueAt else {
+            feasibilityLabel.stringValue = "Set a due date to check your calendar load."
+            return
+        }
+        feasibilityLabel.stringValue = "Checking calendar…"
+        #if canImport(EventKit)
+        let scorer = CalendarFeasibility(provider: EventKitCalendarProvider())
+        feasibilityTask = Task { [weak self] in
+            let assessment = await scorer.assess(dueAt: dueAt)
+            await MainActor.run {
+                self?.feasibilityLabel.stringValue = "\(assessment.label) — \(assessment.detail)"
+            }
+        }
+        #else
+        feasibilityLabel.stringValue = "Calendar checks are unavailable on this platform."
+        #endif
     }
 
     func controlTextDidChange(_ obj: Notification) { markDirty() }

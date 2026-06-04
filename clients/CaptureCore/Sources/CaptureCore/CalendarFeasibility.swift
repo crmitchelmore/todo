@@ -131,6 +131,47 @@ public enum FeasibilityAssessment: Equatable, Sendable {
     case assessed(FeasibilityScore, FeasibilityEvidence)
 }
 
+public extension FeasibilityScore {
+    var label: String {
+        switch self {
+        case .clear: return "Calendar clear"
+        case .tight: return "Tight fit"
+        case .conflicted: return "Time conflict"
+        }
+    }
+}
+
+public extension FeasibilityAssessment {
+    var label: String {
+        switch self {
+        case .permissionRequired:
+            return "Calendar permission needed"
+        case .unavailable:
+            return "Calendar unavailable"
+        case let .assessed(score, _):
+            return score.label
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .permissionRequired:
+            return "Enable calendar access to check whether this due time is realistic."
+        case .unavailable(.calendarUnavailable):
+            return "Calendar data is unavailable on this device."
+        case .unavailable(.eventReadFailed):
+            return "Calendar events could not be read."
+        case let .assessed(.clear, evidence):
+            return "No conflicts in the focus window; \(evidence.busyMinutes.value)m already booked."
+        case let .assessed(.tight, evidence):
+            return "\(evidence.busyMinutes.value)m booked near this due time across \(evidence.overlappingEventCount) event(s)."
+        case let .assessed(.conflicted, evidence):
+            let title = evidence.overlappingEventTitles.first ?? "another event"
+            return "Due time overlaps \(title)."
+        }
+    }
+}
+
 public struct CalendarFeasibility: Sendable {
     private let provider: any CalendarProvider
     private let configuration: CalendarFeasibilityConfiguration
