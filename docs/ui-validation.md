@@ -59,7 +59,7 @@ Prerequisites:
 1. `xcodebuildmcp`: Node 18+ and Xcode 16+; optional global install with `brew tap getsentry/xcodebuildmcp && brew install xcodebuildmcp`.
 2. `ios-simulator-mcp`: Node, Xcode simulators, and IDB (`brew tap facebook/fb && brew install idb-companion` plus the Python `idb` client if needed).
 3. `peekaboo`: install with `brew install steipete/tap/peekaboo` or run the MCP server with `npx -y @steipete/peekaboo`. Grant Screen Recording and Accessibility to the terminal/agent app; run `peekaboo permissions status` to verify. Event Synthesizing is optional for background input.
-4. `webwright`: use for repeatable browser workflows such as App Store Connect / Apple Developer portal checks when an official API or CLI cannot do the job. Keep generated scripts and screenshots as artefacts; do not store Apple passwords or 2FA material.
+4. `webwright`: use for repeatable browser workflows such as App Store Connect / Apple Developer portal checks when an official API or CLI cannot do the job. On this machine, Apple Developer portal work can often reuse the already signed-in Safari session via AppleScript/Peekaboo; prefer that over creating a fresh browser profile that asks for Apple ID and 2FA again. Keep generated scripts and screenshots as artefacts; do not store Apple passwords or 2FA material.
 
 ## Agent workflow
 
