@@ -10,6 +10,8 @@
 	<string>$(PRODUCT_NAME)</string>
 	<key>CAPTURE_API_SECRET</key>
 	<string>$(CAPTURE_API_SECRET)</string>
+	<key>CAPTURE_KEYCHAIN_ACCESS_GROUP</key>
+	<string>$(AppIdentifierPrefix)dev.crmitchelmore.capture.session</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>

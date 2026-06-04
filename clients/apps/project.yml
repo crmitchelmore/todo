@@ -32,6 +32,8 @@ targets:
         product: CaptureCore
       - target: CaptureShare
         embed: true
+      - target: CaptureWidget
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.crmitchelmore.capture.ios
@@ -45,8 +47,13 @@ targets:
       properties:
         CFBundleDisplayName: Capture
         CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.crmitchelmore.capture.quick-capture
+            CFBundleURLSchemes:
+              - capture
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CAPTURE_API_SECRET: $(CAPTURE_API_SECRET)
+        CAPTURE_KEYCHAIN_ACCESS_GROUP: $(AppIdentifierPrefix)dev.crmitchelmore.capture.session
         NSCalendarsUsageDescription: Capture reads your calendar availability to suggest realistic due dates and show whether you have time for a task.
         NSCalendarsFullAccessUsageDescription: Capture reads your calendar availability to suggest realistic due dates and show whether you have time for a task.
         UILaunchScreen: {}
@@ -80,6 +87,20 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: CaptureShare/Info.plist
         CODE_SIGN_ENTITLEMENTS: CaptureShare/CaptureShare.entitlements
+
+  CaptureWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - CaptureWidget
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.crmitchelmore.capture.ios.widget
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: CaptureWidget/Info.plist
+        CODE_SIGN_ENTITLEMENTS: CaptureWidget/CaptureWidget.entitlements
+        APPLICATION_EXTENSION_API_ONLY: YES
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
 
   CaptureMac:
     type: application

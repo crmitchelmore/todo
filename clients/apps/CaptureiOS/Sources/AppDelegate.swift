@@ -20,6 +20,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     private lazy var auth = AuthStore(config: config)
     private lazy var viewModel = CaptureViewModel(auth: auth, config: config)
     private var startedSync = false
+    private var shouldFocusQuickCapture = false
 
     func scene(
         _ scene: UIScene,
@@ -38,6 +39,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
         refreshRoot()
         window.makeKeyAndVisible()
+        handle(urlContexts: connectionOptions.urlContexts)
     }
 
     @MainActor
@@ -51,6 +53,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
                     await MainActor.run {
                         window.rootViewController = UINavigationController(
                             rootViewController: CaptureViewController(viewModel: viewModel))
+                        self.focusQuickCaptureIfNeeded()
                     }
                     await drainOutbox()
                 }
@@ -70,7 +73,32 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         Task { await drainOutbox() }
     }
 
+    func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+        handle(urlContexts: URLContexts)
+    }
+
     private func drainOutbox() async {
         await config.drainOutbox(token: auth)
+    }
+
+    private func handle(urlContexts: Set<UIOpenURLContext>) {
+        guard urlContexts.contains(where: { $0.url.isQuickCaptureURL }) else { return }
+        shouldFocusQuickCapture = true
+        focusQuickCaptureIfNeeded()
+    }
+
+    @MainActor
+    private func focusQuickCaptureIfNeeded() {
+        guard shouldFocusQuickCapture,
+              let nav = window?.rootViewController as? UINavigationController,
+              let capture = nav.viewControllers.first as? CaptureViewController else { return }
+        shouldFocusQuickCapture = false
+        capture.focusCaptureField()
+    }
+}
+
+private extension URL {
+    var isQuickCaptureURL: Bool {
+        scheme == "capture" && (host == "quick-capture" || path == "/quick-capture")
     }
 }

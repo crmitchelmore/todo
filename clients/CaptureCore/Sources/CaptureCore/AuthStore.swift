@@ -38,6 +38,8 @@ private struct BackendAuthResponse: Decodable {
 /// call `signIn(email:password:client:)` or `register(email:password:client:)`. State changes are
 /// broadcast via `onChange` so a view controller can swap between the sign-in gate and capture UI.
 public final class AuthStore: @unchecked Sendable, TokenProviding {
+    private static let sessionService = "dev.crmitchelmore.capture.session"
+
     private let backendURL: URL
     private let keychain: Keychain
     private let session: URLSession
@@ -50,11 +52,24 @@ public final class AuthStore: @unchecked Sendable, TokenProviding {
     public init(config: CaptureConfig, session: URLSession = .shared) {
         self.backendURL = config.backendURL
         self.session = session
-        self.keychain = Keychain(
-            service: "dev.crmitchelmore.capture.session",
+        let configuredKeychain = Keychain(
+            service: Self.sessionService,
             accessGroup: config.keychainAccessGroup
         )
-        self.current = keychain.loadSession()
+        self.keychain = configuredKeychain
+        if let session = configuredKeychain.loadSession() {
+            self.current = session
+        } else if config.keychainAccessGroup != nil {
+            let legacyKeychain = Keychain(service: Self.sessionService, accessGroup: nil)
+            let legacySession = legacyKeychain.loadSession()
+            self.current = legacySession
+            if let legacySession {
+                configuredKeychain.save(legacySession)
+                legacyKeychain.clear()
+            }
+        } else {
+            self.current = nil
+        }
     }
 
     public var currentSession: AuthSession? {

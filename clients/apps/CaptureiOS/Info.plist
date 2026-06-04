@@ -4,6 +4,8 @@
 <dict>
 	<key>CAPTURE_API_SECRET</key>
 	<string>$(CAPTURE_API_SECRET)</string>
+	<key>CAPTURE_KEYCHAIN_ACCESS_GROUP</key>
+	<string>$(AppIdentifierPrefix)dev.crmitchelmore.capture.session</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -20,6 +22,17 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>dev.crmitchelmore.capture.quick-capture</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>capture</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>NSAppTransportSecurity</key>

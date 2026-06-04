@@ -11,7 +11,7 @@ public struct CaptureConfig: Sendable {
     /// Shared App Group container id for the offline capture outbox (used by extensions/intents).
     public var appGroupId: String?
     /// Keychain access group that lets the main app, Share Extension and App Intents read the same
-    /// Sign in with Apple session. Nil => the process's default access group (main app only).
+    /// session. Nil => the process's default access group (main app only).
     public var keychainAccessGroup: String?
 
     public init(
@@ -45,13 +45,15 @@ public struct CaptureConfig: Sendable {
         backendHost: String,
         powersyncHost: String,
         ownerId: String = "00000000-0000-0000-0000-000000000001",
-        appGroupId: String? = "group.dev.crmitchelmore.capture"
+        appGroupId: String? = "group.dev.crmitchelmore.capture",
+        keychainAccessGroup: String? = nil
     ) -> CaptureConfig {
         CaptureConfig(
             backendURL: URL(string: "https://\(backendHost)")!,
             powersyncURL: URL(string: "https://\(powersyncHost)")!,
             ownerId: ownerId,
-            appGroupId: appGroupId
+            appGroupId: appGroupId,
+            keychainAccessGroup: keychainAccessGroup
         )
     }
 
@@ -67,11 +69,45 @@ public struct CaptureConfig: Sendable {
     /// dev without code changes.
     public static func fromEnvironment(
         backendHost: String? = ProcessInfo.processInfo.environment["CAPTURE_BACKEND_HOST"],
-        powersyncHost: String? = ProcessInfo.processInfo.environment["CAPTURE_POWERSYNC_HOST"]
+        powersyncHost: String? = ProcessInfo.processInfo.environment["CAPTURE_POWERSYNC_HOST"],
+        keychainAccessGroup: String? = ProcessInfo.processInfo.environment["CAPTURE_KEYCHAIN_ACCESS_GROUP"]
     ) -> CaptureConfig {
-        guard let backendHost, !backendHost.isEmpty,
-              let powersyncHost, !powersyncHost.isEmpty else { return .production }
-        return .remote(backendHost: backendHost, powersyncHost: powersyncHost)
+        let infoBackendHost = infoString("CAPTURE_BACKEND_HOST")
+        let infoPowerSyncHost = infoString("CAPTURE_POWERSYNC_HOST")
+        let accessGroup = resolvedKeychainAccessGroup(keychainAccessGroup ?? infoString("CAPTURE_KEYCHAIN_ACCESS_GROUP"))
+
+        guard let backendHost = nonEmpty(backendHost) ?? nonEmpty(infoBackendHost),
+              let powersyncHost = nonEmpty(powersyncHost) ?? nonEmpty(infoPowerSyncHost) else {
+            var config = CaptureConfig.production
+            config.keychainAccessGroup = accessGroup
+            return config
+        }
+        return .remote(
+            backendHost: backendHost,
+            powersyncHost: powersyncHost,
+            keychainAccessGroup: accessGroup
+        )
+    }
+
+    private static func infoString(_ key: String) -> String? {
+        Bundle.main.object(forInfoDictionaryKey: key) as? String
+    }
+
+    private static func nonEmpty(_ raw: String?) -> String? {
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
+    }
+
+    private static func resolvedKeychainAccessGroup(_ raw: String?) -> String? {
+        guard let group = nonEmpty(raw) else { return nil }
+        if group.contains("$(") {
+            let bundleIdentifier = Bundle.main.bundleIdentifier ?? ""
+            guard bundleIdentifier.hasPrefix("dev.crmitchelmore.capture.ios") else { return nil }
+            return "8X4ZN58TYH.dev.crmitchelmore.capture.session"
+        }
+        return group
     }
 
     /// Ingress for out-of-process surfaces (Share Extension, App Intents): backend POST with an
