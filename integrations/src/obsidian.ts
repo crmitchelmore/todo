@@ -9,6 +9,7 @@ import {
 } from "./types.js";
 
 const OBSIDIAN_ENV_VARS = ["OBSIDIAN_API_URL", "OBSIDIAN_API_KEY"] as const;
+const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
 
 type ObsidianEnv = Partial<Record<(typeof OBSIDIAN_ENV_VARS)[number], string>>;
 
@@ -18,6 +19,7 @@ export interface ObsidianConnectorConfig {
   readonly apiUrl?: string;
   readonly apiKey?: string;
   readonly fetch?: Fetch;
+  readonly requestTimeoutMs?: number;
 }
 
 export class ObsidianConnector implements Connector {
@@ -26,11 +28,13 @@ export class ObsidianConnector implements Connector {
   private readonly apiUrl?: string;
   private readonly apiKey?: string;
   private readonly fetchImpl: Fetch;
+  private readonly requestTimeoutMs: number;
 
   constructor(config: ObsidianConnectorConfig = {}) {
     this.apiUrl = normaliseBaseUrl(config.apiUrl ?? process.env.OBSIDIAN_API_URL);
     this.apiKey = nonEmpty(config.apiKey ?? process.env.OBSIDIAN_API_KEY);
     this.fetchImpl = config.fetch ?? fetch;
+    this.requestTimeoutMs = config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   }
 
   static fromEnv(env: ObsidianEnv = process.env): ObsidianConnector {
@@ -57,13 +61,37 @@ export class ObsidianConnector implements Connector {
       };
     }
 
-    return {
-      name: this.name,
-      configured: true,
-      status: "ok",
-      checkedAt: new Date().toISOString(),
-      message: "Obsidian credentials are present; live vault calls are only made when connector methods are invoked.",
-    };
+    const config = this.config();
+    try {
+      const response = await this.fetchWithTimeout(`${config.apiUrl}/`, {
+        method: "GET",
+        headers: authHeaders(config.apiKey, { Accept: "application/json" }),
+      });
+      if (!response.ok) {
+        return {
+          name: this.name,
+          configured: true,
+          status: "error",
+          checkedAt: new Date().toISOString(),
+          message: `Obsidian Local REST API health probe failed with HTTP ${response.status}.`,
+        };
+      }
+      return {
+        name: this.name,
+        configured: true,
+        status: "ok",
+        checkedAt: new Date().toISOString(),
+        message: "Obsidian Local REST API is reachable with configured credentials.",
+      };
+    } catch (error) {
+      return {
+        name: this.name,
+        configured: true,
+        status: "error",
+        checkedAt: new Date().toISOString(),
+        message: `Obsidian Local REST API health probe failed: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
   }
 
   async searchVault(query: string): Promise<readonly VaultSearchHit[]> {
@@ -73,8 +101,9 @@ export class ObsidianConnector implements Connector {
       return [];
     }
 
-    const response = await this.fetchImpl(`${config.apiUrl}/search/simple/?query=${encodeURIComponent(trimmedQuery)}`, {
+    const response = await this.fetchWithTimeout(`${config.apiUrl}/search/simple/?query=${encodeURIComponent(trimmedQuery)}`, {
       method: "POST",
+      body: "",
       headers: authHeaders(config.apiKey, { Accept: "application/json" }),
     });
 
@@ -90,7 +119,7 @@ export class ObsidianConnector implements Connector {
       throw new Error("Obsidian note path must be non-empty.");
     }
 
-    const response = await this.fetchImpl(`${config.apiUrl}/vault/${encodeVaultPath(notePath)}`, {
+    const response = await this.fetchWithTimeout(`${config.apiUrl}/vault/${encodeVaultPath(notePath)}`, {
       method: "GET",
       headers: authHeaders(config.apiKey, { Accept: "text/markdown, text/plain;q=0.9, */*;q=0.1" }),
     });
@@ -118,6 +147,16 @@ export class ObsidianConnector implements Connector {
     if (!this.apiUrl) missing.push("OBSIDIAN_API_URL");
     if (!this.apiKey) missing.push("OBSIDIAN_API_KEY");
     return missing;
+  }
+
+  private async fetchWithTimeout(input: string, init: RequestInit): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+    try {
+      return await this.fetchImpl(input, { ...init, signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }
 

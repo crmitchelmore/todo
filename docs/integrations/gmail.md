@@ -17,7 +17,7 @@ read-only, and never modifies flags or deletes mail.
 
 ```sh
 GMAIL_IMAP_USER=you@gmail.com
-GMAIL_IMAP_APP_PASSWORD=your-16-char-app-password
+GMAIL_IMAP_APP_PASSWORD=placeholder
 # optional overrides (defaults shown)
 # GMAIL_IMAP_HOST=imap.gmail.com
 # GMAIL_IMAP_PORT=993
