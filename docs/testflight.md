@@ -15,6 +15,31 @@ automatically. There are no `.p12` or provisioning-profile secrets to manage.
 - `dev.crmitchelmore.capture.ios.share` — Share extension
 - `dev.crmitchelmore.capture.mac` — macOS app
 
+## Apple Developer portal prerequisites
+
+The App Group identifier existing is not enough for TestFlight signing. In **Certificates,
+Identifiers & Profiles → Identifiers → App IDs**, both iOS App IDs must have the same group
+explicitly assigned:
+
+1. `dev.crmitchelmore.capture.ios` → App Groups → tick `group.dev.crmitchelmore.capture`.
+2. `dev.crmitchelmore.capture.ios.share` → App Groups → tick `group.dev.crmitchelmore.capture`.
+
+The Share Extension may also have other groups assigned, but it must include the plain
+`group.dev.crmitchelmore.capture` group used by the app entitlement. Creating only
+`group.dev.crmitchelmore.capture.ios.share` does not satisfy the extension entitlement.
+
+If Apple invalidates profiles after saving the App Group assignment, rerun the TestFlight workflow;
+cloud signing regenerates the required profiles automatically.
+
+## Store validation gotchas
+
+App Store Connect validation is stricter than local simulator builds:
+
+- The 1024x1024 App Store icon must be fully opaque (no alpha channel).
+- iPad orientation metadata must include all required iPad orientations, even if the iPhone UI is
+  portrait-first.
+- The Share Extension bundle version/build must match the containing app's version/build.
+
 ## One-time bootstrap (register IDs + create the app record)
 ```bash
 pip install pyjwt cryptography
