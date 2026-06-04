@@ -10,7 +10,9 @@
 ## Local Mac app refresh
 
 - Before validating or dogfooding the Mac app on this machine, run `scripts/refresh-mac-app.sh`.
-- The script pulls/rebases, builds, moves old `/Applications` and `~/Applications` Capture bundles to `/tmp/todo/...`, installs `/Applications/CaptureMac.app`, and launches it.
+- After committing and pushing changes that affect the macOS app, run `scripts/refresh-mac-app.sh`.
+- The script pulls/rebases, builds, moves old `/Applications` and `~/Applications` Capture bundles to `/tmp/todo/capture-mac-old-installs/<timestamp>/`, installs `/Applications/CaptureMac.app`, and launches it.
+- Do not manually delete old app installs; move them aside or use the script.
 
 ## PowerSync/Railway rollouts
 
