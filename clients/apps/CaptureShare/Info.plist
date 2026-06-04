@@ -25,6 +25,10 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Capture reads your calendar availability to suggest realistic due dates and show whether you have time for a task.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Capture reads your calendar availability to suggest realistic due dates and show whether you have time for a task.</string>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionPointIdentifier</key>
