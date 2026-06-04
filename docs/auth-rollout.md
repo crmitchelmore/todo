@@ -31,9 +31,10 @@ insert; a partial unique index on `lower(email)` is the uniqueness + login-looku
 
 Passkeys/TOTP are additive auth material: WebAuthn credentials and challenges are owner-scoped;
 TOTP secrets can be disabled without deleting rows; recovery codes are stored only as hashes and
-returned exactly once on creation/rotation. Every first-factor session issuance path must go
-through MFA-aware session issuance. Passkey login is treated as MFA-equivalent only because
-registration and login both require WebAuthn user verification.
+returned exactly once on creation/rotation. Web passkeys and the native iOS/macOS passkey surfaces
+use the same backend WebAuthn endpoints. Every first-factor session issuance path must go through
+MFA-aware session issuance. Passkey login is treated as MFA-equivalent only because registration
+and login both require WebAuthn user verification.
 
 ## Endpoints
 
@@ -63,7 +64,9 @@ hash compare. `trust proxy` is on so the client IP is the real one behind Railwa
 
 Passkeys require the backend to know the exact browser origin and relying-party ID. For production,
 set `PUBLIC_WEB_ORIGIN=https://<web-host>` and `WEBAUTHN_RP_ID=<web-hostname>` on the backend
-before enabling the web UI broadly.
+before enabling the web UI broadly. Native iOS/macOS passkeys additionally require Apple Associated
+Domains (`webcredentials:<WEBAUTHN_RP_ID>`) and a real device/signed build to verify end-to-end;
+the current native code is build-verified but not live-device verified.
 
 ## Go-live (DONE on 2026-06-03)
 

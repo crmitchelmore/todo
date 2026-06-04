@@ -25,6 +25,8 @@ private struct BackendAuthResponse: Decodable {
     let ok: Bool?
     let session_token: String?
     let user_id: String?
+    let mfa_required: Bool?
+    let mfa_challenge: String?
     let error: String?
 }
 
@@ -111,6 +113,49 @@ public final class AuthStore: @unchecked Sendable, TokenProviding {
         try await postSession(path: "api/auth/reset", body: ["email": email, "code": code, "password": password, "client": client])
     }
 
+    /// Native passkey registration, step 1: fetch WebAuthn creation options for the signed-in user.
+    public func beginPasskeyRegistration() async throws -> PasskeyRegistrationOptions {
+        guard let token = currentToken() else { throw CaptureError.auth("not signed in") }
+        return try await postJSON(
+            path: "api/auth/passkeys/register/options",
+            body: [:],
+            bearer: token,
+            decode: PasskeyRegistrationOptions.self
+        )
+    }
+
+    /// Native passkey registration, step 2: verify the platform credential with the backend.
+    public func finishPasskeyRegistration(_ result: PasskeyRegistrationResult) async throws {
+        guard let token = currentToken() else { throw CaptureError.auth("not signed in") }
+        _ = try await postJSON(
+            path: "api/auth/passkeys/register/verify",
+            body: result.requestBody(),
+            bearer: token,
+            decode: BackendAuthResponse.self
+        )
+    }
+
+    /// Native passkey sign-in, step 1: fetch WebAuthn assertion options. Email is optional so
+    /// account-discoverable passkeys can still work when the backend/browser combination supports it.
+    public func beginPasskeySignIn(email: String? = nil) async throws -> PasskeyAuthenticationOptions {
+        let body: [String: Any] = ["email": email?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""]
+        return try await postJSON(
+            path: "api/auth/passkeys/login/options",
+            body: body,
+            bearer: nil,
+            decode: PasskeyAuthenticationOptions.self
+        )
+    }
+
+    /// Native passkey sign-in, step 2: verify the assertion and store the returned session.
+    @discardableResult
+    public func finishPasskeySignIn(_ result: PasskeyAuthenticationResult, client: String) async throws -> AuthSession {
+        try await postSession(
+            path: "api/auth/passkeys/login/verify",
+            body: result.requestBody(client: client)
+        )
+    }
+
     /// POST a body to an always-200 issuance endpoint; throws only on transport/5xx failure.
     private func postIssue(path: String, body: [String: Any]) async throws {
         var req = URLRequest(url: backendURL.appendingPathComponent(path))
@@ -126,6 +171,27 @@ public final class AuthStore: @unchecked Sendable, TokenProviding {
         }
     }
 
+    private func postJSON<T: Decodable>(
+        path: String,
+        body: [String: Any],
+        bearer: String?,
+        decode type: T.Type
+    ) async throws -> T {
+        var req = URLRequest(url: backendURL.appendingPathComponent(path))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.applyBearer(bearer)
+        req.timeoutInterval = 20
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw CaptureError.auth("no response") }
+        let decodedError = try? JSONDecoder().decode(BackendAuthResponse.self, from: data)
+        guard http.statusCode == 200, decodedError?.ok != false else {
+            throw CaptureError.auth(decodedError?.error ?? "request failed (\(http.statusCode))")
+        }
+        return try JSONDecoder().decode(type, from: data)
+    }
+
     /// POST a body to an endpoint that returns a session, storing it and signing the user in.
     @discardableResult
     private func postSession(path: String, body: [String: Any]) async throws -> AuthSession {
@@ -137,6 +203,9 @@ public final class AuthStore: @unchecked Sendable, TokenProviding {
         let (data, response) = try await session.data(for: req)
         guard let http = response as? HTTPURLResponse else { throw CaptureError.auth("no response") }
         let decoded = try? JSONDecoder().decode(BackendAuthResponse.self, from: data)
+        if http.statusCode == 200, decoded?.ok == true, decoded?.mfa_required == true {
+            throw CaptureError.auth("This account requires a second factor. Use email/password on web to complete MFA.")
+        }
         guard http.statusCode == 200, decoded?.ok == true,
               let token = decoded?.session_token, let userId = decoded?.user_id else {
             throw CaptureError.auth(decoded?.error ?? "sign-in failed (\(http.statusCode))")
@@ -159,6 +228,9 @@ public final class AuthStore: @unchecked Sendable, TokenProviding {
             throw CaptureError.auth("no response")
         }
         let decoded = try? JSONDecoder().decode(BackendAuthResponse.self, from: data)
+        if http.statusCode == 200, decoded?.ok == true, decoded?.mfa_required == true {
+            throw CaptureError.auth("This account requires a second factor. Use email/password on web to complete MFA.")
+        }
         guard http.statusCode == 200, decoded?.ok == true,
               let token = decoded?.session_token, let userId = decoded?.user_id else {
             throw CaptureError.auth(decoded?.error ?? "sign-in failed (\(http.statusCode))")

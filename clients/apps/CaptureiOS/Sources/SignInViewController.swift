@@ -1,4 +1,5 @@
 import UIKit
+import AuthenticationServices
 import CaptureCore
 
 /// Email + password gate for iOS, shown before the capture UI. Mirrors the macOS gate: a segmented
@@ -18,8 +19,10 @@ final class SignInViewController: UIViewController {
     private let submit = UIButton(type: .system)
     private let forgotButton = UIButton(type: .system)
     private let codeButton = UIButton(type: .system)
+    private let passkeyButton = UIButton(type: .system)
     private let status = UILabel()
     private let spinner = UIActivityIndicatorView(style: .medium)
+    private let passkeys = NativePasskeyAuthorizer()
 
     init(auth: AuthStore, onSignedIn: @escaping () -> Void) {
         self.auth = auth
@@ -79,6 +82,11 @@ final class SignInViewController: UIViewController {
         codeButton.setTitleColor(Theme.signal, for: .normal)
         codeButton.addTarget(self, action: #selector(codeTapped), for: .touchUpInside)
 
+        passkeyButton.setTitle("Sign in with a passkey", for: .normal)
+        passkeyButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
+        passkeyButton.setTitleColor(Theme.mint, for: .normal)
+        passkeyButton.addTarget(self, action: #selector(passkeyTapped), for: .touchUpInside)
+
         status.font = Theme.mono(13)
         status.textColor = Theme.danger
         status.textAlignment = .center
@@ -87,7 +95,7 @@ final class SignInViewController: UIViewController {
 
         spinner.hidesWhenStopped = true
 
-        let stack = UIStackView(arrangedSubviews: [title, subtitle, segmented, emailField, passwordField, submit, forgotButton, codeButton, spinner, status])
+        let stack = UIStackView(arrangedSubviews: [title, subtitle, segmented, emailField, passwordField, submit, forgotButton, passkeyButton, codeButton, spinner, status])
         stack.axis = .vertical
         stack.alignment = .fill
         stack.spacing = 16
@@ -124,6 +132,28 @@ final class SignInViewController: UIViewController {
 
     @objc private func codeTapped() {
         present(purpose: .login)
+    }
+
+    @objc private func passkeyTapped() {
+        guard let anchor = view.window else {
+            show(error: "Passkeys are not available yet.")
+            return
+        }
+        setBusy(true)
+        status.isHidden = true
+        let email = (emailField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        Task {
+            do {
+                let options = try await auth.beginPasskeySignIn(email: email.isEmpty ? nil : email)
+                let assertion = try await passkeys.signIn(options: options, anchor: anchor)
+                try await auth.finishPasskeySignIn(assertion, client: "ios")
+                setBusy(false)
+                onSignedIn()
+            } catch {
+                let message = (error as? CaptureError)?.message ?? error.localizedDescription
+                show(error: message)
+            }
+        }
     }
 
     private func present(purpose: CodeAuthViewController.Purpose) {
@@ -172,6 +202,7 @@ final class SignInViewController: UIViewController {
         passwordField.isEnabled = !busy
         forgotButton.isEnabled = !busy
         codeButton.isEnabled = !busy
+        passkeyButton.isEnabled = !busy
         submit.alpha = busy ? 0.6 : 1
     }
 
@@ -180,6 +211,83 @@ final class SignInViewController: UIViewController {
         status.text = error
         status.isHidden = false
     }
+}
+
+@available(iOS 16.0, *)
+final class NativePasskeyAuthorizer: NSObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
+        private var anchor: ASPresentationAnchor?
+        private var registrationContinuation: CheckedContinuation<PasskeyRegistrationResult, Error>?
+        private var assertionContinuation: CheckedContinuation<PasskeyAuthenticationResult, Error>?
+
+        func register(options: PasskeyRegistrationOptions, anchor: ASPresentationAnchor) async throws -> PasskeyRegistrationResult {
+            try await withCheckedThrowingContinuation { continuation in
+                self.anchor = anchor
+                self.registrationContinuation = continuation
+                let provider = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: options.relyingPartyId)
+                let request = provider.createCredentialRegistrationRequest(
+                    challenge: options.challenge,
+                    name: options.userName,
+                    userID: options.userId
+                )
+                request.userVerificationPreference = .required
+                let controller = ASAuthorizationController(authorizationRequests: [request])
+                controller.delegate = self
+                controller.presentationContextProvider = self
+                controller.performRequests()
+            }
+        }
+
+        func signIn(options: PasskeyAuthenticationOptions, anchor: ASPresentationAnchor) async throws -> PasskeyAuthenticationResult {
+            try await withCheckedThrowingContinuation { continuation in
+                self.anchor = anchor
+                self.assertionContinuation = continuation
+                let provider = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: options.relyingPartyId)
+                let request = provider.createCredentialAssertionRequest(challenge: options.challenge)
+                request.userVerificationPreference = .required
+                let controller = ASAuthorizationController(authorizationRequests: [request])
+                controller.delegate = self
+                controller.presentationContextProvider = self
+                controller.performRequests()
+            }
+        }
+
+        func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+            anchor ?? ASPresentationAnchor()
+        }
+
+        func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
+            if let credential = authorization.credential as? ASAuthorizationPlatformPublicKeyCredentialRegistration {
+                guard let attestationObject = credential.rawAttestationObject else {
+                    registrationContinuation?.resume(throwing: CaptureError.auth("Passkey attestation was incomplete."))
+                    registrationContinuation = nil
+                    return
+                }
+                registrationContinuation?.resume(returning: PasskeyRegistrationResult(
+                    credentialId: credential.credentialID,
+                    clientDataJSON: credential.rawClientDataJSON,
+                    attestationObject: attestationObject
+                ))
+                registrationContinuation = nil
+                return
+            }
+            if let credential = authorization.credential as? ASAuthorizationPlatformPublicKeyCredentialAssertion {
+                assertionContinuation?.resume(returning: PasskeyAuthenticationResult(
+                    credentialId: credential.credentialID,
+                    clientDataJSON: credential.rawClientDataJSON,
+                    authenticatorData: credential.rawAuthenticatorData,
+                    signature: credential.signature,
+                    userHandle: credential.userID
+                ))
+                assertionContinuation = nil
+            }
+        }
+
+        func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
+            registrationContinuation?.resume(throwing: error)
+            assertionContinuation?.resume(throwing: error)
+            registrationContinuation = nil
+            assertionContinuation = nil
+        }
 }
 
 extension SignInViewController: UITextFieldDelegate {

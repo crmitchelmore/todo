@@ -18,6 +18,7 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
     private let filterBar = UIScrollView()
     private let filterStack = UIStackView()
+    private let passkeys = NativePasskeyAuthorizer()
 
     init(viewModel: CaptureViewModel) {
         self.viewModel = viewModel
@@ -33,8 +34,10 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         setupCaptureBar()
         setupFilterBar()
         setupTable()
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
-            title: "Sign Out", style: .plain, target: self, action: #selector(signOut))
+        navigationItem.rightBarButtonItems = [
+            UIBarButtonItem(title: "Sign Out", style: .plain, target: self, action: #selector(signOut)),
+            UIBarButtonItem(title: "Add Passkey", style: .plain, target: self, action: #selector(addPasskey))
+        ]
 
         viewModel.onChange = { [weak self] in
             self?.rebuildFilterBar()
@@ -48,6 +51,28 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
             await viewModel.auth.signOut()
             await viewModel.store.clearActiveUser()
         }
+    }
+
+    @objc private func addPasskey() {
+        guard let anchor = view.window else { return }
+        Task {
+            do {
+                let options = try await viewModel.auth.beginPasskeyRegistration()
+                let registration = try await passkeys.register(options: options, anchor: anchor)
+                try await viewModel.auth.finishPasskeyRegistration(registration)
+                showBanner("Passkey added.", isError: false)
+            } catch {
+                showBanner((error as? CaptureError)?.message ?? error.localizedDescription, isError: true)
+            }
+        }
+    }
+
+    private func showBanner(_ message: String, isError: Bool) {
+        let alert = UIAlertController(title: isError ? "Passkey unavailable" : "Account security",
+                                      message: message,
+                                      preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
     }
 
     private func setupCaptureBar() {

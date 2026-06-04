@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var quickAppMenuItem: NSMenuItem?
     private let updater = UpdaterController.shared   // starts Sparkle scheduled checks
     private var started = false
+    private let passkeys = NativePasskeyAuthorizer()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -118,6 +119,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let quickItem = appMenu.addItem(withTitle: quickCaptureTitle(for: hotKeyStore.hotKey), action: #selector(quickCapture), keyEquivalent: "")
         quickAppMenuItem = quickItem
         appMenu.addItem(withTitle: "Open Capture", action: #selector(newCapture), keyEquivalent: "n")
+        let passkeyItem = appMenu.addItem(withTitle: "Add Passkey…", action: #selector(addPasskey), keyEquivalent: "")
+        passkeyItem.target = self
         appMenu.addItem(.separator())
         let settingsItem = appMenu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
@@ -162,6 +165,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             await model.store.clearActiveUser()
             refreshAuthUI()
         }
+    }
+
+    @objc private func addPasskey() {
+        guard auth.isAuthenticated else { return }
+        showMainWindow()
+        Task {
+            do {
+                let options = try await auth.beginPasskeyRegistration()
+                let registration = try await passkeys.register(options: options, anchor: window)
+                try await auth.finishPasskeyRegistration(registration)
+                showPasskeyAlert(title: "Passkey added", message: "This Mac can now sign in to Capture with a passkey.")
+            } catch {
+                showPasskeyAlert(title: "Passkey unavailable",
+                                 message: (error as? CaptureError)?.message ?? error.localizedDescription)
+            }
+        }
+    }
+
+    private func showPasskeyAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        alert.beginSheetModal(for: window)
     }
 
     @objc private func openSettings() {
