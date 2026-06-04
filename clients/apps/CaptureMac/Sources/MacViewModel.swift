@@ -139,7 +139,8 @@ final class MacViewModel {
     }
 
     /// If `text` is a markdown / checkbox list, ingest each line as its own item (nested lines
-    /// become project tags; `[x]` items import as done). Returns true if it was a list.
+    /// become parent-linked subtasks with compatibility tags; `[x]` items import as done).
+    /// Returns true if it was a list.
     @discardableResult
     func ingestIfList(_ text: String) -> Bool {
         guard let items = store.detectList(text) else { return false }

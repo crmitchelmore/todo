@@ -38,7 +38,7 @@ final class MarkdownListParserTests: XCTestCase {
         XCTAssertEqual(items?.first?.title, "shipped the release")
     }
 
-    func testNestingBecomesProjectTags() {
+    func testNestingBecomesProjectParentLinksAndCompatibilityTags() {
         let text = """
         - Acme launch
           - draft the brief
@@ -53,6 +53,8 @@ final class MarkdownListParserTests: XCTestCase {
         XCTAssertEqual(items?[2].tags, ["Acme launch"])
         XCTAssertEqual(items?[3].tags, [])
         XCTAssertEqual(items?[4].tags, ["Personal"])
+        XCTAssertEqual(items?.map(\.parentIndex), [nil, 0, 0, nil, 3])
+        XCTAssertEqual(items?.map(\.depth), [0, 1, 1, 0, 1])
     }
 
     func testDeepNestingInheritsAllAncestors() {
@@ -64,6 +66,7 @@ final class MarkdownListParserTests: XCTestCase {
         let items = MarkdownListParser.parse(text)
         XCTAssertEqual(items?.last?.title, "sub task")
         XCTAssertEqual(items?.last?.tags, ["Work", "Project X"])
+        XCTAssertEqual(items?.map(\.parentIndex), [nil, 0, 1])
     }
 
     func testTabIndentation() {

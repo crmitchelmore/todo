@@ -141,7 +141,7 @@ async function requireAuth(req: AuthedRequest, res: Response, next: NextFunction
 // --- Write-path safety: only these tables/columns may be mutated by clients. ------------------
 const ALLOWED_COLUMNS: Record<string, Set<string>> = {
   tasks: new Set([
-    'id', 'owner_id', 'title', 'notes', 'status', 'category', 'tags', 'due_at', 'priority',
+    'id', 'owner_id', 'parent_task_id', 'title', 'notes', 'status', 'category', 'tags', 'due_at', 'priority',
     'suggested_due_at', 'suggested_category', 'suggestion_confidence', 'suggestion_source',
     'source', 'created_at', 'updated_at', 'confirmed_at', 'completed_at'
   ]),
@@ -915,6 +915,8 @@ app.post('/api/capture', requireAuth, async (req: AuthedRequest, res: Response) 
   const rawText: string = (body.raw_text ?? body.title ?? '').toString().trim();
   const url: string | null = typeof body.url === 'string' && body.url ? body.url : null;
   const source: string = CAPTURE_SOURCES.has(body.source) ? body.source : 'capture';
+  const parentTaskId: string | null =
+    typeof body.parent_task_id === 'string' && body.parent_task_id ? body.parent_task_id : null;
 
   const title = rawText || url || '';
   if (!title) return res.status(400).json({ ok: false, error: 'empty capture' });
@@ -925,11 +927,11 @@ app.post('/api/capture', requireAuth, async (req: AuthedRequest, res: Response) 
   try {
     await client.query('BEGIN');
     const result = await client.query(
-      `INSERT INTO public.tasks (id, owner_id, title, notes, status, source)
-       VALUES ($1, $2, $3, $4, 'proposed', $5)
+      `INSERT INTO public.tasks (id, owner_id, parent_task_id, title, notes, status, source)
+       VALUES ($1, $2, $3, $4, $5, 'proposed', $6)
        ON CONFLICT (id) DO NOTHING
        RETURNING id`,
-      [id, req.ownerId, title, notes, source]
+      [id, req.ownerId, parentTaskId, title, notes, source]
     );
     if ((result.rowCount ?? 0) > 0) {
       await recordTaskEvent(client, {
@@ -939,7 +941,7 @@ app.post('/api/capture', requireAuth, async (req: AuthedRequest, res: Response) 
         eventType: 'captured',
         title: 'Captured',
         body: title,
-        metadata: { source, has_url: Boolean(url) },
+        metadata: { source, has_url: Boolean(url), parent_task_id: parentTaskId },
         idempotencyKey: `capture:${id}`,
       });
     }

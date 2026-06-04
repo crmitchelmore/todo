@@ -5,6 +5,7 @@ import { column, Schema, Table } from '@powersync/web';
 const tasks = new Table(
   {
     owner_id: column.text,
+    parent_task_id: column.text,
     title: column.text,
     notes: column.text,
     status: column.text,
@@ -22,7 +23,7 @@ const tasks = new Table(
     confirmed_at: column.text,
     completed_at: column.text
   },
-  { indexes: { by_status: ['status', 'created_at'] } }
+  { indexes: { by_status: ['status', 'created_at'], by_parent: ['parent_task_id', 'status', 'created_at'] } }
 );
 
 const tags = new Table(

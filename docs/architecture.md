@@ -60,6 +60,42 @@ Only **confirmed** items are real, visible todos. Proposals from any source (cap
 Gmail extraction, agent result, completion detection) land as `proposed` and must pass the
 confirm card.
 
+## Projects and recursive subtasks
+
+Projects are ordinary rows in `public.tasks`, not a separate table and not just tags. A task can
+point to a parent task owned by the same user, producing a recursive task tree:
+
+```mermaid
+erDiagram
+  TASKS ||--o{ TASKS : "parent_task_id"
+  TASKS ||--o{ TASK_EVENTS : "history"
+  TASKS {
+    uuid id PK
+    uuid owner_id
+    uuid parent_task_id FK
+    text title
+    text status
+    timestamptz updated_at
+  }
+  TASK_EVENTS {
+    uuid id PK
+    uuid owner_id
+    uuid task_id FK
+    text event_type
+    text title
+    timestamptz created_at
+  }
+```
+
+The database enforces same-owner parent/child references, rejects direct self-parenting, and uses
+a trigger to reject cycles. Nested markdown ingestion preserves hierarchy by creating parent rows
+before child rows and setting each child's `parent_task_id`; ancestor titles remain as compatibility
+tags for current tag-filter UI until dedicated project views land.
+
+Parent/project views should roll child state and history upward: active/done/blocked counts, recent
+child `task_events`, and agent progress should be visible on the parent without mutating the child's
+own audit trail.
+
 ## Confirm-before-save
 
 Every proposal renders as a **confirm card** on all clients with one-keystroke / one-swipe

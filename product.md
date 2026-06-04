@@ -15,13 +15,16 @@ researching or even *doing* the task — while **you** stay in control of what g
 2. **Auto-organisation.** Every item gets a suggested due date and category on entry —
    on-device for instant offline guesses, upgraded by a background worker (and, later, the
    Mac Mini agent) for richer enrichment.
-3. **Personal-context awareness.** Enrich items from the user's own data: Obsidian vault,
+3. **Projects as recursive tasks.** A project is a task with subtasks, and subtasks can have
+   their own subtasks. Parent tasks should present child progress, recent child history, and
+   agent activity as a coherent project view.
+4. **Personal-context awareness.** Enrich items from the user's own data: Obsidian vault,
    Gmail, Apple Calendar, the web, and current location.
-4. **Agentic discovery & execution.** An always-on agent on the user's OpenClaw Mac Mini
+5. **Agentic discovery & execution.** An always-on agent on the user's OpenClaw Mac Mini
    researches items and, for low-risk reversible work, can act — surfacing results as proposals.
-5. **Email-driven completion suggestions.** Detect likely-done work from incoming mail and
+6. **Email-driven completion suggestions.** Detect likely-done work from incoming mail and
    propose marking items complete.
-6. **Sync everywhere, own your data.** One account, one set of todos, synced across all
+7. **Sync everywhere, own your data.** One account, one set of todos, synced across all
    surfaces on a self-hosted Postgres + PowerSync core.
 
 ## Values (non-negotiable principles)
@@ -47,6 +50,14 @@ researching or even *doing* the task — while **you** stay in control of what g
 
 Capture instantly → on-device suggests date + category → background worker / Mini agent enrich →
 **you confirm** → it saves and syncs to every device.
+
+## Projects and subtasks
+
+Projects are not a separate entity or just a tag. The canonical shape is recursive:
+`task -> subtasks -> subtasks`, with each child still being a normal task that can be captured,
+confirmed, completed, enriched, and audited. Pasting a nested markdown list should preserve that
+shape: parent bullets become project tasks, nested bullets become subtasks, and each child keeps a
+link to its nearest parent. Tags remain lightweight labels, not the project model.
 
 ## Auth
 

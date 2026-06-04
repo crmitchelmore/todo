@@ -5,8 +5,8 @@ import { parseMarkdownList } from './markdownList';
 
 /**
  * Mirrors CaptureCore's MarkdownListParserTests. Pins the paste-to-items behaviour users feel:
- * bullets/numbers/checkboxes split into individual todos, nesting becomes project tags, inline
- * #tags are extracted, and prose is left alone (returns null -> single capture).
+ * bullets/numbers/checkboxes split into individual todos, nesting becomes parent links plus
+ * compatibility tags, inline #tags are extracted, and prose is left alone (returns null -> single capture).
  */
 
 test('plain prose is not a list', () => {
@@ -42,7 +42,7 @@ test('a single ticked checkbox counts as a list', () => {
   assert.equal(items?.[0].title, 'shipped the release');
 });
 
-test('nesting becomes project tags', () => {
+test('nesting becomes project parent links and compatibility tags', () => {
   const text = ['- Acme launch', '  - draft the brief', '  - book the venue', '- Personal', '  - call mum'].join('\n');
   const items = parseMarkdownList(text);
   assert.deepEqual(items?.map((i) => i.title), ['Acme launch', 'draft the brief', 'book the venue', 'Personal', 'call mum']);
@@ -51,6 +51,8 @@ test('nesting becomes project tags', () => {
   assert.deepEqual(items?.[2].tags, ['Acme launch']);
   assert.deepEqual(items?.[3].tags, []);
   assert.deepEqual(items?.[4].tags, ['Personal']);
+  assert.deepEqual(items?.map((i) => i.parentIndex), [null, 0, 0, null, 3]);
+  assert.deepEqual(items?.map((i) => i.depth), [0, 1, 1, 0, 1]);
 });
 
 test('deep nesting inherits all ancestors', () => {
@@ -58,6 +60,7 @@ test('deep nesting inherits all ancestors', () => {
   const items = parseMarkdownList(text);
   assert.equal(items?.[items.length - 1].title, 'sub task');
   assert.deepEqual(items?.[items.length - 1].tags, ['Work', 'Project X']);
+  assert.deepEqual(items?.map((i) => i.parentIndex), [null, 0, 1]);
 });
 
 test('tab indentation', () => {

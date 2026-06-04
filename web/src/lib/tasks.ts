@@ -55,25 +55,30 @@ export async function captureList(raw: string): Promise<string[] | null> {
 
 export async function captureBatch(items: ParsedCaptureItem[]): Promise<string[]> {
   const prepared = items
-    .filter((i) => i.title.trim().length > 0)
-    .map((item) => ({ id: crypto.randomUUID(), item }));
+    .map((item, itemIndex) => ({ id: crypto.randomUUID(), item, itemIndex }))
+    .filter((p) => p.item.title.trim().length > 0);
+  const idByItemIndex = new Map(prepared.map((p) => [p.itemIndex, p.id]));
   if (prepared.length === 0) return [];
   await ensureTags(prepared.flatMap((p) => p.item.tags));
   for (const { id, item } of prepared) {
     const now = new Date().toISOString();
     const tagsJSON = encodeTags(item.tags);
+    const parentId =
+      typeof item.parentIndex === 'number'
+        ? idByItemIndex.get(item.parentIndex) ?? null
+        : null;
     if (item.isDone) {
       await db.execute(
         `INSERT INTO tasks
-           (id, owner_id, title, status, category, tags, source, created_at, updated_at, confirmed_at, completed_at)
-         VALUES (?, ?, ?, 'done', NULL, ?, 'paste', ?, ?, ?, ?)`,
-        [id, ownerId(), item.title, tagsJSON, now, now, now, now]
+           (id, owner_id, parent_task_id, title, status, category, tags, source, created_at, updated_at, confirmed_at, completed_at)
+         VALUES (?, ?, ?, ?, 'done', NULL, ?, 'paste', ?, ?, ?, ?)`,
+        [id, ownerId(), parentId, item.title, tagsJSON, now, now, now, now]
       );
     } else {
       await db.execute(
-        `INSERT INTO tasks (id, owner_id, title, status, tags, source, created_at, updated_at)
-         VALUES (?, ?, ?, 'proposed', ?, 'paste', ?, ?)`,
-        [id, ownerId(), item.title, tagsJSON, now, now]
+        `INSERT INTO tasks (id, owner_id, parent_task_id, title, status, tags, source, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'proposed', ?, 'paste', ?, ?)`,
+        [id, ownerId(), parentId, item.title, tagsJSON, now, now]
       );
       void enrich(id, item.title);
     }

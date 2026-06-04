@@ -8,20 +8,27 @@ public struct ParsedCaptureItem: Sendable, Equatable {
     public var isDone: Bool
     /// Tags to attach: ancestor "project" lines (from nesting) plus inline `#tags`.
     public var tags: [String]
+    /// Normalised nesting depth from the markdown list.
+    public var depth: Int
+    /// Index of the nearest parent item in the parsed array, if any.
+    public var parentIndex: Int?
 
-    public init(title: String, isDone: Bool = false, tags: [String] = []) {
+    public init(title: String, isDone: Bool = false, tags: [String] = [], depth: Int = 0, parentIndex: Int? = nil) {
         self.title = title
         self.isDone = isDone
         self.tags = tags
+        self.depth = depth
+        self.parentIndex = parentIndex
     }
 }
 
 /// Parses a pasted block of text into individual capture items.
 ///
 /// Recognises markdown bullet (`-`, `*`, `+`), numbered (`1.`, `2)`) and GitHub-style
-/// checkbox (`- [ ]`, `- [x]`) lists. Indentation expresses nesting: each ancestor line's
-/// text becomes a "project" tag on its descendants (so `Projects = tags`). Inline `#tags`
-/// are extracted and stripped from the title. A ticked checkbox marks the item done.
+/// checkbox (`- [ ]`, `- [x]`) lists. Indentation expresses nesting through `parentIndex`
+/// so capture can create project/subtask relationships. Ancestor text is also retained as
+/// compatibility tags. Inline `#tags` are extracted and stripped from the title. A ticked
+/// checkbox marks the item done.
 ///
 /// Pure and deterministic so it can be unit-tested directly and shared by every client.
 public enum MarkdownListParser {
@@ -55,19 +62,28 @@ public enum MarkdownListParser {
               listLines.count * 2 >= nonEmptyCount
         else { return nil }
 
-        // Build the ancestor stack as we walk so each item inherits its parents' titles as tags.
+        // Build the ancestor stack as we walk so each item gets a real parent link and still
+        // inherits parent titles as compatibility tags.
         var items: [ParsedCaptureItem] = []
-        var ancestors: [(depth: Int, title: String)] = []
+        var ancestors: [(depth: Int, title: String, itemIndex: Int)] = []
 
         for entry in parsed where entry.line.isList {
             let line = entry.line
             while let last = ancestors.last, last.depth >= entry.depth {
                 ancestors.removeLast()
             }
+            let parentIndex = ancestors.last?.itemIndex
             let projectTags = ancestors.map(\.title)
             let combinedTags = Self.dedupe(projectTags + line.inlineTags)
-            items.append(ParsedCaptureItem(title: line.title, isDone: line.isDone, tags: combinedTags))
-            ancestors.append((depth: entry.depth, title: line.title))
+            let itemIndex = items.count
+            items.append(ParsedCaptureItem(
+                title: line.title,
+                isDone: line.isDone,
+                tags: combinedTags,
+                depth: entry.depth,
+                parentIndex: parentIndex
+            ))
+            ancestors.append((depth: entry.depth, title: line.title, itemIndex: itemIndex))
         }
 
         return items

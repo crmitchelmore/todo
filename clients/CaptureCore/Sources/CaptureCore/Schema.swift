@@ -12,11 +12,12 @@ public let AppSchema = Schema(
         name: TASKS_TABLE,
         columns: [
             .text("owner_id"),
+            .text("parent_task_id"),
             .text("title"),
             .text("notes"),
             .text("status"),
             .text("category"),
-            .text("tags"),               // JSON array of tag names ("projects" are tags too)
+            .text("tags"),               // JSON array of tag names
             .text("due_at"),
             .integer("priority"),
             .text("suggested_due_at"),
@@ -30,7 +31,11 @@ public let AppSchema = Schema(
             .text("completed_at")
         ],
         indexes: [
-            Index(name: "by_status", columns: [IndexedColumn.ascending("status")])
+            Index(name: "by_status", columns: [IndexedColumn.ascending("status")]),
+            Index(name: "by_parent", columns: [
+                IndexedColumn.ascending("parent_task_id"),
+                IndexedColumn.ascending("status")
+            ])
         ]
     ),
     Table(

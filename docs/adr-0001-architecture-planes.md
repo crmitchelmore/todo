@@ -21,6 +21,9 @@ Use four planes:
 
 - Fast capture stays a single local write; background enrichment patches suggestions and appends history.
 - The database is the trust boundary: ownership, allowed upload tables, and append-only `task_events` prevent clients or agents from forging history or crossing users.
+- Projects use recursive `tasks.parent_task_id` links rather than a separate project table. The
+  database enforces same-owner parent/child relationships and rejects cycles; child task history
+  can be rolled up for parent/project presentation without duplicating events.
 - iCloud is not a dependency for cross-device sync or the Mac Mini bridge.
 - Personal integrations (Gmail, Obsidian, calendar, location, web) can be added behind the enrichment/agent plane without slowing capture.
 - Future low-risk automation must write observable events and respect approval gates before changing consequential state.

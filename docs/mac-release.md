@@ -66,3 +66,17 @@ a Developer ID Application cert, create one in the Apple Developer portal → Ce
 release. Keep the **Mac release the only GitHub Release type** that publishes (iOS ships
 via TestFlight, not GitHub Releases), so `/latest/` always carries a current `appcast.xml`.
 If you later add other GitHub Releases, host the appcast at a fixed URL instead.
+
+## Refreshing the local app on this Mac
+
+For local dogfooding, always refresh from the latest repo state rather than running an old bundle:
+
+```bash
+scripts/refresh-mac-app.sh
+```
+
+The script pulls with rebase, regenerates the Xcode project, builds `CaptureMac`, moves any existing
+`CaptureMac.app` / `Capture.app` installs from `/Applications` and `~/Applications` into
+`/tmp/todo/capture-mac-old-installs/<timestamp>/`, installs the new app to `/Applications`, and
+launches it. It deliberately moves old bundles aside instead of deleting them so refreshes are safe
+and reversible.

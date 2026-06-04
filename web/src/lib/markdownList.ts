@@ -3,8 +3,8 @@
  *
  * Port of CaptureCore's `MarkdownListParser` (Swift) — keep the two in sync. Recognises
  * bullet (`-`, `*`, `+`), numbered (`1.`, `2)`) and GitHub checkbox (`- [ ]`, `- [x]`) lists.
- * Indentation expresses nesting: each ancestor line's text becomes a "project" tag on its
- * descendants (projects = tags). Inline `#tags` are extracted and stripped from the title.
+ * Indentation expresses nesting: each item records its parent index so the capture path can create
+ * real project/subtask relationships. Ancestor text is still retained as compatibility tags.
  * A ticked checkbox marks the item done. Pure + deterministic so it can be unit-tested.
  */
 
@@ -12,6 +12,8 @@ export interface ParsedCaptureItem {
   title: string;
   isDone: boolean;
   tags: string[];
+  depth: number;
+  parentIndex: number | null;
 }
 
 interface ListLine {
@@ -109,17 +111,19 @@ export function parseMarkdownList(text: string): ParsedCaptureItem[] | null {
   if (listLines.length * 2 < nonEmptyCount) return null;
 
   const items: ParsedCaptureItem[] = [];
-  const ancestors: { depth: number; title: string }[] = [];
+  const ancestors: { depth: number; title: string; itemIndex: number }[] = [];
 
   for (const entry of parsed) {
     if (!entry.line.isList) continue;
     while (ancestors.length && ancestors[ancestors.length - 1].depth >= entry.depth) {
       ancestors.pop();
     }
+    const parentIndex = ancestors.length ? ancestors[ancestors.length - 1].itemIndex : null;
     const projectTags = ancestors.map((a) => a.title);
     const tags = dedupe([...projectTags, ...entry.line.inlineTags]);
-    items.push({ title: entry.line.title, isDone: entry.line.isDone, tags });
-    ancestors.push({ depth: entry.depth, title: entry.line.title });
+    const itemIndex = items.length;
+    items.push({ title: entry.line.title, isDone: entry.line.isDone, tags, depth: entry.depth, parentIndex });
+    ancestors.push({ depth: entry.depth, title: entry.line.title, itemIndex });
   }
 
   return items;

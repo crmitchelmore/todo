@@ -118,35 +118,39 @@ public final class TaskStore: @unchecked Sendable {
     /// show up in the manager. Returns the new ids in order.
     @discardableResult
     public func captureBatch(_ items: [ParsedCaptureItem]) -> [String] {
-        let prepared: [(id: String, item: ParsedCaptureItem)] = items
-            .map { (UUID().uuidString.lowercased(), $0) }
-            .filter { !$0.1.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let prepared: [(sourceIndex: Int, id: String, item: ParsedCaptureItem)] = items.enumerated()
+            .map { (sourceIndex: $0.offset, id: UUID().uuidString.lowercased(), item: $0.element) }
+            .filter { !$0.item.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         guard !prepared.isEmpty else { return [] }
         let allTags = TagsCodec.normalize(prepared.flatMap { $0.item.tags })
         let ownerId = self.ownerId
+        let idBySourceIndex = Dictionary(uniqueKeysWithValues: prepared.map { ($0.sourceIndex, $0.id) })
         Task.detached { [db] in
             await Self.ensureTags(db: db, ownerId: ownerId, names: allTags)
-            for (id, item) in prepared {
+            for entry in prepared {
+                let id = entry.id
+                let item = entry.item
                 let now = ISO8601.string(Date())
                 let tagsJSON = TagsCodec.encode(item.tags)
+                let parentId = item.parentIndex.flatMap { idBySourceIndex[$0] }
                 if item.isDone {
                     _ = try? await db.execute(
                         sql: """
                         INSERT INTO \(TASKS_TABLE)
-                            (id, owner_id, title, status, category, tags, source,
+                            (id, owner_id, parent_task_id, title, status, category, tags, source,
                              created_at, updated_at, confirmed_at, completed_at)
-                        VALUES (?, ?, ?, 'done', NULL, ?, 'paste', ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, 'done', NULL, ?, 'paste', ?, ?, ?, ?)
                         """,
-                        parameters: [id, ownerId, item.title, tagsJSON, now, now, now, now]
+                        parameters: [id, ownerId, parentId, item.title, tagsJSON, now, now, now, now]
                     )
                 } else {
                     _ = try? await db.execute(
                         sql: """
                         INSERT INTO \(TASKS_TABLE)
-                            (id, owner_id, title, status, tags, source, created_at, updated_at)
-                        VALUES (?, ?, ?, 'proposed', ?, 'paste', ?, ?)
+                            (id, owner_id, parent_task_id, title, status, tags, source, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, 'proposed', ?, 'paste', ?, ?)
                         """,
-                        parameters: [id, ownerId, item.title, tagsJSON, now, now]
+                        parameters: [id, ownerId, parentId, item.title, tagsJSON, now, now]
                     )
                     await Self.enrich(db: db, id: id, title: item.title)
                 }
@@ -493,6 +497,7 @@ public final class TaskStore: @unchecked Sendable {
         TaskItem(
             id: try cursor.getString(name: "id"),
             ownerId: (try cursor.getStringOptional(name: "owner_id")) ?? "",
+            parentTaskId: try cursor.getStringOptional(name: "parent_task_id"),
             title: try cursor.getString(name: "title"),
             notes: try cursor.getStringOptional(name: "notes"),
             status: TaskStatus(rawValue: try cursor.getString(name: "status")) ?? .proposed,

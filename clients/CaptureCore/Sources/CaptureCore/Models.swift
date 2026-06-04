@@ -14,6 +14,7 @@ public enum TaskStatus: String, Sendable, CaseIterable {
 public struct TaskItem: Identifiable, Sendable, Equatable {
     public let id: String
     public var ownerId: String
+    public var parentTaskId: String?
     public var title: String
     public var notes: String?
     public var status: TaskStatus
@@ -34,6 +35,7 @@ public struct TaskItem: Identifiable, Sendable, Equatable {
     public init(
         id: String,
         ownerId: String,
+        parentTaskId: String? = nil,
         title: String,
         notes: String? = nil,
         status: TaskStatus,
@@ -53,6 +55,7 @@ public struct TaskItem: Identifiable, Sendable, Equatable {
     ) {
         self.id = id
         self.ownerId = ownerId
+        self.parentTaskId = parentTaskId
         self.title = title
         self.notes = notes
         self.status = status
@@ -112,7 +115,8 @@ public struct TaskEvent: Identifiable, Sendable, Equatable {
     }
 }
 
-/// A user-managed label (also used for "projects" — a project is just a tag).
+/// A user-managed label. Projects are represented by task/subtask hierarchy, while tags remain
+/// lightweight labels.
 /// Mirrors `public.tags` in Postgres and the client SQLite schema.
 public struct Tag: Identifiable, Sendable, Equatable {
     public let id: String
