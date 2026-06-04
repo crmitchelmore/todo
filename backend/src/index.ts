@@ -40,6 +40,11 @@ import {
   userHasTotpEnabled,
   verifyTotpCode,
 } from './auth.js';
+import {
+  applyAgentProposalDecision,
+  parseAgentProposalDecision,
+  serializeResumePayload,
+} from './agentDecision.js';
 import { sendEmailBestEffort, loginCodeEmail, resetCodeEmail } from './mailer.js';
 
 /**
@@ -936,6 +941,7 @@ async function markLinkedAgentProposals(
   status: 'accepted' | 'rejected',
   applied: boolean
 ): Promise<void> {
+  const checkpointStatus = status === 'accepted' ? 'approved' : 'rejected';
   await client.query(
     `UPDATE public.agent_proposals
         SET status = $3,
@@ -947,6 +953,36 @@ async function markLinkedAgentProposals(
         AND status = 'pending'`,
     [ownerId, taskId, status, applied]
   );
+  await updateLinkedAgentCheckpointsBestEffort(client, ownerId, taskId, checkpointStatus);
+}
+
+async function updateLinkedAgentCheckpointsBestEffort(
+  client: pg.PoolClient,
+  ownerId: string,
+  taskId: string,
+  status: 'approved' | 'rejected'
+): Promise<void> {
+  await client.query('SAVEPOINT agent_checkpoint_decision');
+  try {
+    const exists = await client.query(`SELECT to_regclass('public.agent_checkpoints') AS table_name`);
+    if (exists.rows[0]?.table_name) {
+      await client.query(
+        `UPDATE public.agent_checkpoints
+            SET status = $3,
+                decided_at = COALESCE(decided_at, now()),
+                updated_at = now()
+          WHERE owner_id = $1
+            AND task_id = $2
+            AND status = 'waiting'`,
+        [ownerId, taskId, status]
+      );
+    }
+    await client.query('RELEASE SAVEPOINT agent_checkpoint_decision');
+  } catch (err) {
+    await client.query('ROLLBACK TO SAVEPOINT agent_checkpoint_decision').catch(() => {});
+    await client.query('RELEASE SAVEPOINT agent_checkpoint_decision').catch(() => {});
+    console.warn('checkpoint decision update skipped:', String(err));
+  }
 }
 
 async function markTaskProposalDecision(
@@ -1015,6 +1051,39 @@ app.post('/api/capture', requireAuth, async (req: AuthedRequest, res: Response) 
     await client.query('ROLLBACK').catch(() => {});
     console.error('capture failed:', err);
     res.status(500).json({ ok: false, error: String(err) });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/api/agent/proposals/:id/decision', requireAuth, async (req: AuthedRequest, res: Response) => {
+  const proposalId = req.params.id;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(proposalId)) {
+    return res.status(400).json({ ok: false, error: 'valid proposal id is required' });
+  }
+
+  const decision = parseAgentProposalDecision(req.body?.decision);
+  if (!decision) return res.status(400).json({ ok: false, error: 'decision must be accepted or rejected' });
+
+  let resumePayload: string | null;
+  try {
+    resumePayload = serializeResumePayload(req.body?.resume_payload);
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: String(err instanceof Error ? err.message : err) });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const outcome = await applyAgentProposalDecision(client, req.ownerId!, proposalId, decision, resumePayload);
+    await client.query('COMMIT');
+    if (outcome === 'not_found') return res.status(404).json({ ok: false, error: 'proposal not found' });
+    if (outcome === 'not_pending') return res.status(409).json({ ok: false, error: 'proposal already decided' });
+    res.json({ ok: true, decided: true, decision });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('proposal decision failed:', err);
+    res.status(500).json({ ok: false, error: 'proposal decision failed' });
   } finally {
     client.release();
   }
