@@ -49,9 +49,13 @@ function deterministicUuid(input: string): string {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
-function metadataJSON(value: Record<string, unknown>): string {
+function boundedJSON(value: Record<string, unknown>, maxBytes: number): string {
   const encoded = JSON.stringify(value);
-  return Buffer.byteLength(encoded, 'utf8') <= 4096 ? encoded : JSON.stringify({ truncated: true });
+  return Buffer.byteLength(encoded, 'utf8') <= maxBytes ? encoded : JSON.stringify({ truncated: true });
+}
+
+function metadataJSON(value: Record<string, unknown>): string {
+  return boundedJSON(value, 4096);
 }
 
 async function recordEnrichmentEvent(
@@ -73,14 +77,76 @@ async function recordEnrichmentEvent(
       ownerId,
       taskId,
       e.source === 'llm' ? 'AI organised this task' : 'Auto-organisation updated',
-      `Suggested ${e.suggestedCategory ?? 'no category'}${e.suggestedDueAt ? ` · due ${e.suggestedDueAt}` : ''}.`,
+      enrichmentBody(e),
       metadataJSON({
         source: e.source,
         suggested_due_at: e.suggestedDueAt,
         suggested_category: e.suggestedCategory,
+        suggested_priority: e.suggestedPriority,
+        suggested_tags: e.suggestedTags,
+        recurrence: e.recurrence,
         confidence: e.confidence,
         title_sample: title.slice(0, 160),
       }),
+    ]
+  );
+}
+
+function enrichmentBody(e: Awaited<ReturnType<typeof enrich>>): string {
+  const parts = [
+    e.suggestedCategory ? `category ${e.suggestedCategory}` : null,
+    e.suggestedDueAt ? `due ${e.suggestedDueAt}` : null,
+    e.suggestedPriority !== null ? `priority ${e.suggestedPriority}` : null,
+    e.suggestedTags.length > 0 ? `tags ${e.suggestedTags.join(', ')}` : null,
+    e.recurrence ? `recurs ${e.recurrence}` : null,
+  ].filter(Boolean);
+  return `Suggested ${parts.length > 0 ? parts.join(' · ') : 'no structure changes'}.`;
+}
+
+async function recordAgentProposal(
+  taskId: string,
+  ownerId: string,
+  title: string,
+  e: Awaited<ReturnType<typeof enrich>>
+): Promise<void> {
+  const proposalId = deterministicUuid(`${ownerId}:${taskId}:agent-proposal:enrichment`);
+  const payload = {
+    task_id: taskId,
+    title,
+    suggested_due_at: e.suggestedDueAt,
+    suggested_category: e.suggestedCategory,
+    suggested_priority: e.suggestedPriority,
+    suggested_tags: e.suggestedTags,
+    recurrence: e.recurrence,
+  };
+  const provenance = {
+    source: e.source,
+    worker: 'capture-enrichment',
+    title_sample: title.slice(0, 160),
+  };
+  await pool.query(
+    `INSERT INTO public.agent_proposals
+       (id, owner_id, task_id, proposal_type, status, title, body, payload, provenance, confidence, source)
+     VALUES ($1, $2, $3, 'task_update', 'pending', $4, $5, $6, $7, $8, $9)
+     ON CONFLICT (id) DO UPDATE
+       SET title = EXCLUDED.title,
+           body = EXCLUDED.body,
+           payload = EXCLUDED.payload,
+           provenance = EXCLUDED.provenance,
+           confidence = EXCLUDED.confidence,
+           source = EXCLUDED.source,
+           updated_at = now()
+     WHERE public.agent_proposals.status = 'pending'`,
+    [
+      proposalId,
+      ownerId,
+      taskId,
+      e.source === 'llm' ? 'AI enrichment proposal' : 'Auto-organisation proposal',
+      enrichmentBody(e),
+      boundedJSON(payload, 8192),
+      boundedJSON(provenance, 4096),
+      e.confidence,
+      e.source,
     ]
   );
 }
@@ -128,6 +194,7 @@ async function tick(): Promise<number> {
       ]);
       if (res.rowCount && res.rowCount > 0) {
         await recordEnrichmentEvent(row.id, row.owner_id, row.title, e);
+        await recordAgentProposal(row.id, row.owner_id, row.title, e);
         enriched += 1;
         console.log(
           `[worker] enriched ${row.id} -> category=${e.suggestedCategory ?? '∅'} ` +

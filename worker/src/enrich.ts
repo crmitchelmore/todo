@@ -10,6 +10,9 @@ import type { CategoryHints } from './historyLearning.js';
 export interface Enrichment {
   suggestedDueAt: string | null; // ISO-8601
   suggestedCategory: string | null;
+  suggestedPriority: number | null; // 0 highest .. 4 lowest, still only a proposal.
+  suggestedTags: string[];
+  recurrence: string | null;
   confidence: number; // 0..1
   source: 'server' | 'llm';
 }
@@ -47,6 +50,12 @@ const CATEGORY_KEYWORDS: Record<string, string[]> = {
 
 // Phrases that hint urgency; used only to bump confidence (priority stays a human decision).
 const URGENCY_HINTS = ['urgent', 'asap', 'today', 'now', 'immediately', 'deadline', 'eod', 'cob'];
+const RECURRENCE_HINTS: ReadonlyArray<[string, string[]]> = [
+  ['daily', ['every day', 'daily', 'each day']],
+  ['weekly', ['every week', 'weekly', 'each week']],
+  ['monthly', ['every month', 'monthly', 'each month']],
+  ['yearly', ['every year', 'yearly', 'annually', 'annual']]
+];
 
 /**
  * Match a keyword/phrase on token boundaries so `pr` doesn't fire on "prep" and `run` doesn't
@@ -65,7 +74,30 @@ const CATEGORY_MATCHERS: ReadonlyArray<{ category: string; patterns: readonly Re
   }));
 
 const URGENCY_MATCHERS = URGENCY_HINTS.map(boundedMatcher);
+const RECURRENCE_MATCHERS = RECURRENCE_HINTS.map(([label, hints]) => ({
+  label,
+  patterns: hints.map(boundedMatcher),
+}));
 let llmDisabledReason: string | null = null;
+
+function normalizeTags(tags: unknown): string[] {
+  if (!Array.isArray(tags)) return [];
+  const out: string[] = [];
+  for (const tag of tags) {
+    if (typeof tag !== 'string') continue;
+    const normalized = tag.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+    if (normalized.length >= 2 && normalized.length <= 32 && !out.includes(normalized)) out.push(normalized);
+    if (out.length >= 6) break;
+  }
+  return out;
+}
+
+function recurrenceFor(title: string): string | null {
+  for (const { label, patterns } of RECURRENCE_MATCHERS) {
+    if (patterns.some((re) => re.test(title))) return label;
+  }
+  return null;
+}
 
 export function enrichDeterministic(title: string, now = new Date(), historyHints: CategoryHints = {}): Enrichment {
   let suggestedDueAt: string | null = null;
@@ -87,12 +119,26 @@ export function enrichDeterministic(title: string, now = new Date(), historyHint
   }
 
   const urgent = URGENCY_MATCHERS.some((re) => re.test(title));
+  const recurrence = recurrenceFor(title);
+  const suggestedPriority = urgent ? 1 : null;
+  const suggestedTags = normalizeTags([
+    urgent ? 'urgent' : null,
+    recurrence,
+  ].filter(Boolean));
   const confidence = Math.min(
     1,
-    (suggestedDueAt ? 0.55 : 0) + best * 0.2 + (urgent ? 0.15 : 0)
+    (suggestedDueAt ? 0.55 : 0) + best * 0.2 + (urgent ? 0.15 : 0) + (recurrence ? 0.1 : 0)
   );
 
-  return { suggestedDueAt, suggestedCategory, confidence, source: 'server' };
+  return {
+    suggestedDueAt,
+    suggestedCategory,
+    suggestedPriority,
+    suggestedTags,
+    recurrence,
+    confidence,
+    source: 'server',
+  };
 }
 
 /**
@@ -114,7 +160,9 @@ export async function enrich(title: string, now = new Date(), historyHints: Cate
     const sys =
       `You organise todo items. Given a raw capture, return strict JSON: ` +
       `{"category": one of ${JSON.stringify(categories)} or null, ` +
-      `"due_at": an ISO-8601 datetime or null, "confidence": 0..1}. ` +
+      `"due_at": an ISO-8601 datetime or null, "priority": 0..4 or null, ` +
+      `"tags": an array of up to 6 short lowercase labels, "recurrence": a short rule like ` +
+      `"daily", "weekly", "monthly" or null, "confidence": 0..1}. ` +
       `Current time is ${now.toISOString()}. Resolve relative dates against it. ` +
       (hintSummary ? `The user's confirmed-history category hints are: ${hintSummary}. ` : '') +
       `Only JSON.`;
@@ -150,7 +198,21 @@ export async function enrich(title: string, now = new Date(), historyHints: Cate
       if (!Number.isNaN(d.getTime())) due = d.toISOString();
     }
     const conf = typeof out.confidence === 'number' ? Math.max(0, Math.min(1, out.confidence)) : 0.5;
-    return { suggestedDueAt: due, suggestedCategory: cat, confidence: conf, source: 'llm' };
+    const priority = Number.isInteger(out.priority) && out.priority >= 0 && out.priority <= 4
+      ? out.priority
+      : null;
+    const recurrence = typeof out.recurrence === 'string' && out.recurrence.trim().length > 0
+      ? out.recurrence.trim().slice(0, 80)
+      : null;
+    return {
+      suggestedDueAt: due,
+      suggestedCategory: cat,
+      suggestedPriority: priority,
+      suggestedTags: normalizeTags(out.tags),
+      recurrence,
+      confidence: conf,
+      source: 'llm',
+    };
   } catch (err) {
     console.warn('[worker] LLM enrichment failed, falling back to deterministic:', String(err));
     return enrichDeterministic(title, now, historyHints);

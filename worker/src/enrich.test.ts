@@ -52,8 +52,14 @@ test('is more confident when it has more signal', () => {
 test('never decides final structure — it only proposes (status is a human decision)', () => {
   const e = enrichDeterministic('ship the release today', NOW);
   assert.equal(e.source, 'server');
-  // Enrichment carries no status/priority field at all; it cannot promote a task.
-  assert.deepEqual(Object.keys(e).sort(), ['confidence', 'source', 'suggestedCategory', 'suggestedDueAt']);
+  assert.equal('status' in e, false);
+  assert.equal(e.suggestedPriority, 1);
+});
+
+test('detects lightweight recurrence and proposal tags', () => {
+  const e = enrichDeterministic('Pay the rent every month', NOW);
+  assert.equal(e.recurrence, 'monthly');
+  assert.deepEqual(e.suggestedTags, ['monthly']);
 });
 
 test('learns category hints from confirmed history without overriding stronger built-ins', () => {
