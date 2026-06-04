@@ -46,6 +46,19 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    func applyTheme() {
+        layer?.backgroundColor = Theme.surface.cgColor
+        stateLabel.textColor = Theme.signal
+        titleField.textColor = Theme.textPrimary
+        titleField.backgroundColor = Theme.surfaceHi
+        notesView.textColor = Theme.textPrimary
+        notesView.backgroundColor = Theme.surfaceHi
+        dueEnabled.contentTintColor = Theme.signal
+        rejectButton.contentTintColor = Theme.danger
+        rollupSummary.textColor = Theme.textPrimary
+        if let currentTask { updateActions(currentTask) }
+    }
+
     func render(
         task: TaskItem?,
         events: [TaskEvent],

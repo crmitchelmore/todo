@@ -37,6 +37,19 @@ final class MacCaptureViewController: NSViewController {
         view.window?.makeFirstResponder(captureField)
     }
 
+    func applyTheme() {
+        Theme.paintInk(view)
+        Theme.paintInk(listPane)
+        view.window?.backgroundColor = Theme.ink
+        captureField.textColor = Theme.textPrimary
+        proposedHeader.textColor = Theme.signal
+        activeHeader.textColor = Theme.textTertiary
+        detailView.applyTheme()
+        proposedTable.reloadData()
+        activeTable.reloadData()
+        rebuildFilterBar()
+    }
+
     /// Custom field editor that turns a pasted markdown / checkbox list into individual items.
     private lazy var pasteFieldEditor: CapturePasteTextView = {
         let tv = CapturePasteTextView()

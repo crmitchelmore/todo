@@ -3,9 +3,12 @@ import ReactDOM from 'react-dom/client';
 import { PowerSyncContext } from '@powersync/react';
 import { db, prepareForActiveUser } from './powersync/db';
 import { isAuthenticated, onAuthChange } from './lib/auth';
+import { applyAppearance, getAppearance } from './lib/preferences';
 import { SignIn } from './components/SignIn';
 import App from './App';
 import './styles.css';
+
+applyAppearance(getAppearance());
 
 function Root() {
   const [authed, setAuthed] = useState(isAuthenticated());

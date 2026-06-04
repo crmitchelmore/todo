@@ -57,6 +57,54 @@
   text-rendering: optimizeLegibility;
 }
 
+:root[data-appearance='light'] {
+  --bg: #f3efe5;
+  --bg-grad-1: #fff9eb;
+  --bg-grad-2: #e8dfcf;
+  --panel: rgba(29, 24, 18, 0.035);
+  --panel-2: rgba(29, 24, 18, 0.065);
+  --panel-solid: #fff8ee;
+  --panel-raised: #fffdf7;
+  --line: rgba(54, 40, 24, 0.12);
+  --line-strong: rgba(54, 40, 24, 0.20);
+  --text: #1c1915;
+  --text-dim: #655d52;
+  --muted: #655d52;
+  --text-faint: #8e8374;
+  --signal-soft: rgba(255, 122, 24, 0.14);
+  --signal-line: rgba(255, 122, 24, 0.42);
+  --mint-soft: rgba(37, 145, 93, 0.12);
+  --danger-soft: rgba(203, 54, 54, 0.12);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 14px 34px -22px rgba(54, 40, 24, 0.45);
+  --shadow-pop: 0 24px 60px -28px rgba(54, 40, 24, 0.45), 0 0 0 1px var(--line);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-appearance='system'] {
+    --bg: #f3efe5;
+    --bg-grad-1: #fff9eb;
+    --bg-grad-2: #e8dfcf;
+    --panel: rgba(29, 24, 18, 0.035);
+    --panel-2: rgba(29, 24, 18, 0.065);
+    --panel-solid: #fff8ee;
+    --panel-raised: #fffdf7;
+    --line: rgba(54, 40, 24, 0.12);
+    --line-strong: rgba(54, 40, 24, 0.20);
+    --text: #1c1915;
+    --text-dim: #655d52;
+    --muted: #655d52;
+    --text-faint: #8e8374;
+    --signal-soft: rgba(255, 122, 24, 0.14);
+    --signal-line: rgba(255, 122, 24, 0.42);
+    --mint-soft: rgba(37, 145, 93, 0.12);
+    --danger-soft: rgba(203, 54, 54, 0.12);
+    --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 14px 34px -22px rgba(54, 40, 24, 0.45);
+    --shadow-pop: 0 24px 60px -28px rgba(54, 40, 24, 0.45), 0 0 0 1px var(--line);
+    color-scheme: light;
+  }
+}
+
 * { box-sizing: border-box; }
 
 html, body { height: 100%; }
@@ -186,6 +234,80 @@ header h1::after {
   transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 .tags-toggle:hover { color: var(--text); border-color: var(--line-strong); background: var(--panel); }
+
+/* ============================ Settings ============================ */
+.settings-panel {
+  margin: 0 0 30px;
+  padding: 18px;
+  border-radius: var(--r-xl);
+  border: 1px solid var(--line-strong);
+  background:
+    radial-gradient(80% 120% at 100% 0%, var(--signal-soft), transparent 46%),
+    linear-gradient(180deg, var(--panel-raised), var(--panel-solid));
+  box-shadow: var(--shadow-card);
+}
+.settings-head {
+  margin-bottom: 16px;
+}
+.settings-head h2,
+.settings-card h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+.settings-head p,
+.settings-card p {
+  margin: 5px 0 0;
+  color: var(--text-dim);
+}
+.settings-card {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--panel);
+}
+.appearance-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+.appearance-choice {
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel-solid);
+  color: var(--text-dim);
+  padding: 12px;
+  cursor: pointer;
+}
+.appearance-choice strong,
+.appearance-choice span {
+  display: block;
+}
+.appearance-choice strong {
+  color: var(--text);
+  margin-bottom: 3px;
+}
+.appearance-choice span {
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.appearance-choice.selected {
+  border-color: var(--signal-line);
+  background: var(--signal-soft);
+}
+.settings-account {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.danger-action {
+  color: var(--danger) !important;
+  border-color: rgba(255, 99, 99, 0.28) !important;
+}
 
 /* ============================ Capture bar (hero) ============================ */
 .capture-bar {

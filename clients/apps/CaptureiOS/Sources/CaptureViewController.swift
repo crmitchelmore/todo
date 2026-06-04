@@ -35,20 +35,43 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Capture"
-        view.backgroundColor = Theme.ink
+        applyTheme()
         setupCaptureBar()
         setupFilterBar()
         setupTable()
-        navigationItem.rightBarButtonItems = [
-            UIBarButtonItem(title: "Sign Out", style: .plain, target: self, action: #selector(signOut)),
-            UIBarButtonItem(title: "Add Passkey", style: .plain, target: self, action: #selector(addPasskey))
-        ]
+        setupNavigation()
 
         viewModel.onChange = { [weak self] in
             self?.rebuildFilterBar()
             self?.tableView.reloadData()
         }
         viewModel.start()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applyTheme),
+            name: .captureAppearanceChanged,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        applyTheme()
+    }
+
+    private func setupNavigation() {
+        navigationItem.rightBarButtonItems = [
+            UIBarButtonItem(title: "Settings", style: .plain, target: self, action: #selector(openSettings)),
+            UIBarButtonItem(title: "Add Passkey", style: .plain, target: self, action: #selector(addPasskey))
+        ]
+    }
+
+    @objc private func openSettings() {
+        navigationController?.pushViewController(SettingsViewController(viewModel: viewModel), animated: true)
     }
 
     @objc private func signOut() {
@@ -78,6 +101,16 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
                                       preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)
+    }
+
+    @objc private func applyTheme() {
+        view.backgroundColor = Theme.ink
+        view.window?.tintColor = Theme.signal
+        captureField.textColor = Theme.textPrimary
+        captureField.backgroundColor = Theme.surfaceHi
+        tableView.backgroundColor = Theme.ink
+        tableView.reloadData()
+        rebuildFilterBar()
     }
 
     private func setupCaptureBar() {

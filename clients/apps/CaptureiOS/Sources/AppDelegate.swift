@@ -29,7 +29,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     ) {
         guard let windowScene = scene as? UIWindowScene else { return }
         let window = UIWindow(windowScene: windowScene)
-        window.overrideUserInterfaceStyle = .dark   // ink-canvas design language, app-wide
+        window.overrideUserInterfaceStyle = CapturePreferences.load().appearance.userInterfaceStyle
         window.tintColor = Theme.signal
         self.window = window
 
@@ -100,5 +100,15 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 private extension URL {
     var isQuickCaptureURL: Bool {
         scheme == "capture" && (host == "quick-capture" || path == "/quick-capture")
+    }
+}
+
+private extension CaptureAppearanceMode {
+    var userInterfaceStyle: UIUserInterfaceStyle {
+        switch self {
+        case .system: return .unspecified
+        case .dark: return .dark
+        case .light: return .light
+        }
     }
 }

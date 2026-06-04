@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var window: NSWindow!
     private var hotKey: GlobalHotKey?
     private let hotKeyStore = HotKeyStore()
+    private let preferencesStore = MacPreferencesStore()
     private var settingsWindow: SettingsWindowController?
     private var quickAppMenuItem: NSMenuItem?
     private let updater = UpdaterController.shared   // starts Sparkle scheduled checks
@@ -20,7 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
-        NSApp.appearance = NSAppearance(named: .darkAqua)  // ink-canvas design language, app-wide
+        applyAppearance(preferencesStore.preferences.appearance)
         buildMenu()
         buildWindow()
 
@@ -193,11 +194,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc private func openSettings() {
         if settingsWindow == nil {
-            settingsWindow = SettingsWindowController(store: hotKeyStore) { [weak self] newHotKey in
-                self?.applyHotKey(newHotKey)
-            }
+            settingsWindow = SettingsWindowController(
+                store: hotKeyStore,
+                preferences: preferencesStore,
+                onChange: { [weak self] newHotKey in self?.applyHotKey(newHotKey) },
+                onAppearanceChange: { [weak self] mode in self?.applyAppearance(mode) },
+                onSignOut: { [weak self] in self?.signOut() }
+            )
         }
         settingsWindow?.show()
+    }
+
+    private func applyAppearance(_ mode: CaptureAppearanceMode) {
+        let appearance: NSAppearance?
+        switch mode {
+        case .system: appearance = nil
+        case .dark: appearance = NSAppearance(named: .darkAqua)
+        case .light: appearance = NSAppearance(named: .aqua)
+        }
+        NSApp.appearance = appearance
+        window?.appearance = appearance
+        settingsWindow?.window?.appearance = appearance
+        window?.backgroundColor = Theme.ink
+        if window != nil { captureVC.applyTheme() }
+        NotificationCenter.default.post(name: .captureAppearanceChanged, object: nil)
     }
 
     /// Re-register the global hotkey live; only persist + show the new shortcut if the
