@@ -166,6 +166,21 @@ async function createMfaChallenge(userId: string): Promise<string> {
   return token;
 }
 
+async function issueSessionOrMfa(
+  res: Response,
+  userId: string,
+  client: string | null,
+  options: { mfaSatisfied?: boolean; extra?: Record<string, unknown> } = {}
+): Promise<void> {
+  if (!options.mfaSatisfied && await userHasTotpEnabled(pool, userId)) {
+    const challengeToken = await createMfaChallenge(userId);
+    res.json({ ok: true, mfa_required: true, mfa_challenge: challengeToken });
+    return;
+  }
+  const sessionToken = await createSession(pool, userId, client);
+  res.json({ ok: true, session_token: sessionToken, user_id: userId, ...(options.extra ?? {}) });
+}
+
 async function issueRecoveryCodes(userId: string): Promise<string[]> {
   const codes = newRecoveryCodes();
   const client = await pool.connect();
@@ -289,13 +304,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       return res.status(401).json({ ok: false, error: 'invalid email or password' });
     }
     clearFailures(key);
-    if (await userHasTotpEnabled(pool, userId)) {
-      const challengeToken = await createMfaChallenge(userId);
-      res.json({ ok: true, mfa_required: true, mfa_challenge: challengeToken });
-      return;
-    }
-    const sessionToken = await createSession(pool, userId, client);
-    res.json({ ok: true, session_token: sessionToken, user_id: userId });
+    await issueSessionOrMfa(res, userId, client);
   } catch (err) {
     console.error('login failed:', err);
     res.status(500).json({ ok: false, error: 'login failed' });
@@ -405,8 +414,7 @@ app.post('/api/auth/email-code/verify', async (req: Request, res: Response) => {
       return res.status(status).json({ ok: false, error: 'that code is invalid or has expired' });
     }
     const userId = result.userId ?? (await findOrCreateUserByEmail(pool, email));
-    const sessionToken = await createSession(pool, userId, client);
-    res.json({ ok: true, session_token: sessionToken, user_id: userId });
+    await issueSessionOrMfa(res, userId, client);
   } catch (err) {
     console.error('email-code verify failed:', err);
     res.status(500).json({ ok: false, error: 'sign-in failed' });
@@ -462,8 +470,7 @@ app.post('/api/auth/reset', async (req: Request, res: Response) => {
       return res.status(status).json({ ok: false, error: 'that code is invalid or has expired' });
     }
     await resetPassword(pool, result.userId, password);
-    const sessionToken = await createSession(pool, result.userId, client);
-    res.json({ ok: true, session_token: sessionToken, user_id: result.userId });
+    await issueSessionOrMfa(res, result.userId, client);
   } catch (err) {
     console.error('password reset failed:', err);
     res.status(500).json({ ok: false, error: 'reset failed' });
@@ -584,7 +591,7 @@ app.post('/api/auth/passkeys/register/options', requireAuth, async (req: AuthedR
       userDisplayName: email,
       userID: Buffer.from(req.ownerId!.replace(/-/g, ''), 'hex'),
       attestationType: 'none',
-      authenticatorSelection: { residentKey: 'preferred', userVerification: 'preferred' },
+      authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' },
       excludeCredentials: credentials.rows.map((row) => ({
         id: row.credential_id as string,
         transports: row.transports as AuthenticatorTransportFuture[],
@@ -610,7 +617,7 @@ app.post('/api/auth/passkeys/register/verify', requireAuth, async (req: AuthedRe
       response,
       expectedOrigin: PUBLIC_WEB_ORIGIN,
       expectedRPID: WEBAUTHN_RP_ID,
-      requireUserVerification: false,
+      requireUserVerification: true,
       expectedChallenge: (challenge) => consumeWebAuthnChallenge(challenge, 'registration', req.ownerId!),
     });
     if (!verification.verified) {
@@ -663,7 +670,7 @@ app.post('/api/auth/passkeys/login/options', async (req: Request, res: Response)
     const options = await generateAuthenticationOptions({
       rpID: WEBAUTHN_RP_ID,
       allowCredentials,
-      userVerification: 'preferred',
+      userVerification: 'required',
     });
     await pool.query(
       `INSERT INTO public.auth_webauthn_challenges (user_id, purpose, challenge_hash, expires_at)
@@ -700,7 +707,7 @@ app.post('/api/auth/passkeys/login/verify', async (req: Request, res: Response) 
       response,
       expectedOrigin: PUBLIC_WEB_ORIGIN,
       expectedRPID: WEBAUTHN_RP_ID,
-      requireUserVerification: false,
+      requireUserVerification: true,
       expectedChallenge: (challenge) => consumeWebAuthnChallenge(challenge, 'authentication', row.user_id),
       credential: {
         id: row.credential_id,
@@ -718,8 +725,7 @@ app.post('/api/auth/passkeys/login/verify', async (req: Request, res: Response) 
         WHERE id = $2`,
       [verification.authenticationInfo.newCounter, row.id]
     );
-    const sessionToken = await createSession(pool, row.user_id, clientName);
-    res.json({ ok: true, session_token: sessionToken, user_id: row.user_id });
+    await issueSessionOrMfa(res, row.user_id, clientName, { mfaSatisfied: true });
   } catch (err) {
     console.error('passkey login verify failed:', err);
     res.status(500).json({ ok: false, error: 'passkey sign-in failed' });

@@ -31,7 +31,9 @@ insert; a partial unique index on `lower(email)` is the uniqueness + login-looku
 
 Passkeys/TOTP are additive auth material: WebAuthn credentials and challenges are owner-scoped;
 TOTP secrets can be disabled without deleting rows; recovery codes are stored only as hashes and
-returned exactly once on creation/rotation.
+returned exactly once on creation/rotation. Every first-factor session issuance path must go
+through MFA-aware session issuance. Passkey login is treated as MFA-equivalent only because
+registration and login both require WebAuthn user verification.
 
 ## Endpoints
 

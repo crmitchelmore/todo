@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { generateKeyPair, SignJWT, jwtVerify, importJWK, type JWK } from 'jose';
 import {
   hashToken,
@@ -152,4 +153,30 @@ test('recovery codes are one-time-display safe strings and hash without echoing 
   const hash = hashRecoveryCode(codes[0]);
   assert.match(hash, /^[0-9a-f]{64}$/);
   assert.ok(!hash.includes(codes[0].replaceAll('-', '')));
+});
+
+test('session-issuing first-factor routes go through MFA-aware issuance', () => {
+  const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+  const routes = [
+    "app.post('/api/auth/login'",
+    "app.post('/api/auth/email-code/verify'",
+    "app.post('/api/auth/reset'",
+  ];
+  for (const route of routes) {
+    const start = source.indexOf(route);
+    assert.notEqual(start, -1, `missing route ${route}`);
+    const end = source.indexOf("\n});", start);
+    const body = source.slice(start, end);
+    assert.match(body, /issueSessionOrMfa\(res,/, `${route} must use MFA-aware session issuance`);
+  }
+});
+
+test('passkey WebAuthn registration and login require user verification', () => {
+  const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /requireUserVerification:\s*false/);
+  assert.doesNotMatch(source, /userVerification:\s*'preferred'/);
+  assert.match(source, /authenticatorSelection:\s*\{[^}]*userVerification:\s*'required'/s);
+  assert.match(source, /generateAuthenticationOptions\(\{[^}]*userVerification:\s*'required'/s);
+  const requireUvMatches = source.match(/requireUserVerification:\s*true/g) ?? [];
+  assert.ok(requireUvMatches.length >= 2, 'registration and login verification must require UV');
 });

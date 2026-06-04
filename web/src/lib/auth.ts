@@ -134,6 +134,9 @@ async function postSession(path: string, payload: Record<string, unknown>): Prom
     body: JSON.stringify({ ...payload, client: 'web' })
   });
   const body: AuthResponse = await res.json().catch(() => ({}));
+  if (res.ok && body.ok && body.mfa_required && body.mfa_challenge) {
+    throw new MfaRequiredError(body.mfa_challenge);
+  }
   if (!res.ok || !body.ok || !body.session_token || !body.user_id) {
     throw new Error(body.error ?? `request failed (${res.status})`);
   }
