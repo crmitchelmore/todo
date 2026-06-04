@@ -83,7 +83,7 @@ Prerequisites: Docker/Podman (`docker compose`), Node 20+, Xcode 26 (for native 
 
 ```bash
 # 1. Bring up the sync stack locally (Postgres source + Postgres bucket storage + PowerSync + backend + enrichment worker)
-cp .env.example .env            # dev defaults; optionally set OPENAI_API_KEY to upgrade enrichment
+cp .env.example .env            # dev defaults; put real secrets in ignored .env.local/keychain
 docker compose up -d --build
 curl -s localhost:8080/probes/liveness   # PowerSync healthy
 
@@ -112,6 +112,10 @@ The `worker/` service then polls Postgres, computes a **richer** suggestion (mor
 urgency, better date parsing — LLM-upgradable via `OPENAI_API_KEY`) and patches the
 `suggested_*` fields. It **never** changes status: the human still confirms structure before save.
 The patch syncs straight back to every client.
+
+Secrets for local agents, Railway deploys, Obsidian, Gmail, and LLM enrichment should be loaded via
+`scripts/with-secrets.sh <command>` from ignored `.env.local` files or macOS Keychain service
+`capture`. Do not add real credentials to tracked `.env.example` files.
 
 ## Review steps
 

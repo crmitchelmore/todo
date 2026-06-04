@@ -69,15 +69,18 @@ Source builds use the Railway CLI authenticated with a Railway token. In this re
 `RAILWAY_API_TOKEN` for non-interactive agent/shell deploys:
 
 ```bash
-export RAILWAY_API_TOKEN=<token>
 cd /path/to/todo
+scripts/with-secrets.sh railway up --ci --service backend
+scripts/with-secrets.sh railway up --ci --service powersync
+scripts/with-secrets.sh railway up ./worker --path-as-root --ci --service worker
+```
 
-# backend and powersync have Railway root-directory config, so upload from repo root.
-railway up --ci --service backend
-railway up --ci --service powersync
+For local/dev commands that need credentials, keep secrets in ignored `.env.local` files or in the
+macOS Keychain service `capture` using the env var as the account name:
 
-# worker currently has no Railway root-directory config; make worker/ the archive root.
-railway up ./worker --path-as-root --ci --service worker
+```bash
+security add-generic-password -U -s capture -a RAILWAY_API_TOKEN -w "$RAILWAY_API_TOKEN"
+scripts/with-secrets.sh railway status
 ```
 
 > **Upload-root gotcha.** Do not use `--path-as-root` for services that already have a Railway
