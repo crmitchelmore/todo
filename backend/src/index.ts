@@ -725,7 +725,7 @@ app.post('/api/auth/passkeys/login/verify', async (req: Request, res: Response) 
         WHERE id = $2`,
       [verification.authenticationInfo.newCounter, row.id]
     );
-    await issueSessionOrMfa(res, row.user_id, clientName, { mfaSatisfied: true });
+    await issueSessionOrMfa(res, row.user_id, clientName);
   } catch (err) {
     console.error('passkey login verify failed:', err);
     res.status(500).json({ ok: false, error: 'passkey sign-in failed' });

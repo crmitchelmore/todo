@@ -161,6 +161,7 @@ test('session-issuing first-factor routes go through MFA-aware issuance', () => 
     "app.post('/api/auth/login'",
     "app.post('/api/auth/email-code/verify'",
     "app.post('/api/auth/reset'",
+    "app.post('/api/auth/passkeys/login/verify'",
   ];
   for (const route of routes) {
     const start = source.indexOf(route);
@@ -168,6 +169,7 @@ test('session-issuing first-factor routes go through MFA-aware issuance', () => 
     const end = source.indexOf("\n});", start);
     const body = source.slice(start, end);
     assert.match(body, /issueSessionOrMfa\(res,/, `${route} must use MFA-aware session issuance`);
+    assert.doesNotMatch(body, /mfaSatisfied:\s*true/, `${route} must not bypass MFA`);
   }
 });
 
