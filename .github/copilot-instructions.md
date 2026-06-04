@@ -11,3 +11,9 @@
 
 - Before validating or dogfooding the Mac app on this machine, run `scripts/refresh-mac-app.sh`.
 - The script pulls/rebases, builds, moves old `/Applications` and `~/Applications` Capture bundles to `/tmp/todo/...`, installs `/Applications/CaptureMac.app`, and launches it.
+
+## PowerSync/Railway rollouts
+
+- Schema changes that sync to clients must be rolled out across every layer together: Postgres migration/publication, PowerSync sync rules, backend upload allow-list, and web/Swift local schemas.
+- Deploy Railway services from the repository root; only use service-specific paths where existing scripts document them.
+- Do not ship App Store/TestFlight clients with a schema-writing change until the live Railway backend and PowerSync service have been migrated and redeployed.
