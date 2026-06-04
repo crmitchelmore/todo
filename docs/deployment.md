@@ -156,6 +156,13 @@ The backend deploy (above) covers the servers. The three clients ship on their o
 - **Ad-hoc / development** — install directly to a registered device over USB/Wi-Fi from Xcode for
   personal use without TestFlight.
 
+Release automation should prefer official, auditable tools first: `release-ios.yml`, `xcodebuild`,
+`xcrun altool` / App Store Connect API credentials, and `gh workflow run release-ios.yml --ref main`.
+Use browser automation only for the Apple Developer portal gaps that the API key cannot mutate, such
+as assigning App Groups to App IDs. For that class of workflow, use Webwright/Playwright against a
+user-signed-in browser session, keep screenshots/logs as artefacts, and never store Apple passwords
+or 2FA codes in the repo.
+
 ### macOS app
 - **Developer ID + notarization (recommended for personal use off the App Store)** — archive
   `CaptureMac`, export with a Developer ID Application cert, `notarytool submit … --wait`, then

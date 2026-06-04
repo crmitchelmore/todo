@@ -23,7 +23,8 @@ Use these MCP servers when an agent needs interactive inspection instead of just
 | --- | --- | --- |
 | Web | `microsoft/playwright-mcp` via `npx @playwright/mcp@latest` | Accessibility-tree browser control, console inspection, screenshots. |
 | iOS | `getsentry/XcodeBuildMCP` plus `joshuayoes/ios-simulator-mcp` | Build/install/launch through Xcode, then inspect/tap/type/screenshot the simulator. |
-| macOS | `getsentry/XcodeBuildMCP` plus `desktop-pilot-mcp` | Build the app, then inspect native AppKit accessibility trees and capture screenshots. |
+| macOS | `getsentry/XcodeBuildMCP` plus `peekaboo` | Build the app, then inspect native AppKit accessibility trees, drive permissions/UI, and capture screenshots. |
+| Web portals | `webwright` skill or Playwright scripts | Repeatable code-as-action browser automation for long portal flows that are not covered by official APIs. |
 
 Example MCP config:
 
@@ -45,9 +46,9 @@ Example MCP config:
         "IOS_SIMULATOR_MCP_DEFAULT_OUTPUT_DIR": ".ui-artifacts/ios-mcp"
       }
     },
-    "desktop-pilot": {
+    "peekaboo": {
       "command": "npx",
-      "args": ["-y", "desktop-pilot-mcp"]
+      "args": ["-y", "@steipete/peekaboo"]
     }
   }
 }
@@ -57,12 +58,13 @@ Prerequisites:
 
 1. `xcodebuildmcp`: Node 18+ and Xcode 16+; optional global install with `brew tap getsentry/xcodebuildmcp && brew install xcodebuildmcp`.
 2. `ios-simulator-mcp`: Node, Xcode simulators, and IDB (`brew tap facebook/fb && brew install idb-companion` plus the Python `idb` client if needed).
-3. `desktop-pilot-mcp`: grant Accessibility permission to the terminal/agent app. Grant Screen Recording only when screenshots are required.
+3. `peekaboo`: install with `brew install steipete/tap/peekaboo` or run the MCP server with `npx -y @steipete/peekaboo`. Grant Screen Recording and Accessibility to the terminal/agent app; run `peekaboo permissions status` to verify. Event Synthesizing is optional for background input.
+4. `webwright`: use for repeatable browser workflows such as App Store Connect / Apple Developer portal checks when an official API or CLI cannot do the job. Keep generated scripts and screenshots as artefacts; do not store Apple passwords or 2FA material.
 
 ## Agent workflow
 
 1. Run `scripts/ui-validate.sh web ios mac` after UI changes.
-2. Inspect `.ui-artifacts/` screenshots/logs. If using MCP, prefer semantic snapshots (`playwright` accessibility tree, `ios-simulator` `ui_describe_all`, `desktop-pilot` `pilot_snapshot`) before pixel screenshots.
+2. Inspect `.ui-artifacts/` screenshots/logs. If using MCP, prefer semantic snapshots (`playwright` accessibility tree, `ios-simulator` `ui_describe_all`, `peekaboo see --json`) before pixel screenshots.
 3. Fix the smallest UI issue found.
 4. Rerun only the affected surface, then rerun `all` before shipping.
 
