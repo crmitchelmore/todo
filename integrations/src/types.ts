@@ -74,13 +74,13 @@ export interface ExtractedTodo {
   readonly source: "gmail";
   readonly sourceMessageId: string;
   readonly threadId?: string;
+  readonly labels?: readonly string[];
   readonly title: string;
   readonly sourceQuote: string;
   readonly confidence: number;
   readonly sender?: EmailAddress;
   readonly receivedAt?: string;
   readonly dueHint?: string;
-  readonly labels: readonly string[];
 }
 
 export interface TaskForCompletionDetection {

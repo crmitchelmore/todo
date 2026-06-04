@@ -21,7 +21,7 @@ test("unconfigured Gmail connector reports missing config", async () => {
   assert.equal(connector.isConfigured(), false);
   const health = await connector.healthCheck();
   assert.equal(health.status, "not_configured");
-  assert.deepEqual(health.missingEnvVars, ["GMAIL_IMAP_USER", "GMAIL_IMAP_APP_PASSWORD"]);
+  assert.deepEqual(health.missingEnvVars, ["GMAIL_IMAP_USER", "GMAIL_IMAP_APP_PASSWORD or GMAIL_OAUTH_ACCESS_TOKEN"]);
 });
 
 test("unconfigured Gmail connector throws before IMAP calls", async () => {
@@ -32,7 +32,7 @@ test("unconfigured Gmail connector throws before IMAP calls", async () => {
     (error: unknown) =>
       error instanceof IntegrationNotConfiguredError &&
       error.connector === "gmail" &&
-      error.missingEnvVars.includes("GMAIL_IMAP_APP_PASSWORD"),
+      error.missingEnvVars.includes("GMAIL_IMAP_APP_PASSWORD or GMAIL_OAUTH_ACCESS_TOKEN"),
   );
 
   await assert.rejects(
@@ -47,6 +47,14 @@ test("configured connector defaults to Gmail IMAP host/port and reports ok", asy
   const health = await connector.healthCheck();
   assert.equal(health.status, "ok");
   assert.match(health.message ?? "", new RegExp(`${GMAIL_DEFAULT_HOST}:${GMAIL_DEFAULT_PORT}`));
+});
+
+test("configured connector can use an OAuth2 access token instead of an app password", async () => {
+  const connector = new GmailConnector({ user: "me@gmail.com", accessToken: "oauth-access-token" });
+  assert.equal(connector.isConfigured(), true);
+  const health = await connector.healthCheck();
+  assert.equal(health.status, "ok");
+  assert.match(health.message ?? "", /OAuth2/);
 });
 
 test("parseGmailSince understands relative and ISO specs", () => {
@@ -87,7 +95,14 @@ test("Gmail type shapes round-trip through the transport boundary", async () => 
     async extractTodos(config, since) {
       assert.equal(config.host, GMAIL_DEFAULT_HOST);
       assert.equal(config.user, "me@gmail.com");
+      assert.equal(config.rawSearch, "is:unread");
       assert.equal(since.spec, "7d");
+      return [todo];
+    },
+    async fetchThread(config, threadId, since) {
+      assert.equal(config.user, "me@gmail.com");
+      assert.equal(threadId, "thread-123");
+      assert.equal(since.spec, "14d");
       return [todo];
     },
     async detectCompletions(config, tasks) {
@@ -100,11 +115,13 @@ test("Gmail type shapes round-trip through the transport boundary", async () => 
   const connector = new GmailConnector({
     user: "me@gmail.com",
     appPassword: "app-password-placeholder",
+    rawSearch: "is:unread",
     transport,
   });
 
   assert.equal(connector.isConfigured(), true);
   assert.deepEqual(await connector.extractTodos("7d"), [todo]);
+  assert.deepEqual(await connector.fetchThread("thread-123", "14d"), [todo]);
   assert.deepEqual(await connector.detectCompletions([task]), [completion]);
   assert.deepEqual(JSON.parse(JSON.stringify(todo)), todo);
   assert.deepEqual(JSON.parse(JSON.stringify(completion)), completion);
