@@ -17,6 +17,15 @@ export interface AgentActionGate {
   confidence?: number | null;
   source?: string;
   riskLevel?: HitlRiskLevel;
+  reversible?: boolean;
+  mutatesExternalState?: boolean;
+}
+
+export interface AutonomyDecision {
+  riskLevel: HitlRiskLevel;
+  requiresApproval: boolean;
+  execution: 'auto' | 'approval';
+  reason: string;
 }
 
 export interface HumanGateResult {
@@ -49,6 +58,35 @@ const HIGH_RISK_ACTION_HINTS = [
   'external_write',
 ];
 
+export function decideAutonomy(
+  actionType: string,
+  options: { riskLevel?: HitlRiskLevel; reversible?: boolean; mutatesExternalState?: boolean } = {}
+): AutonomyDecision {
+  const riskLevel = options.riskLevel ?? classifyActionRisk(actionType);
+  if (riskLevel === 'low' && options.mutatesExternalState !== true) {
+    return {
+      riskLevel,
+      requiresApproval: false,
+      execution: 'auto',
+      reason: 'low-risk read/context action',
+    };
+  }
+  if (options.reversible === false || options.mutatesExternalState === true || riskLevel === 'high') {
+    return {
+      riskLevel: riskLevel === 'low' ? 'medium' : riskLevel,
+      requiresApproval: true,
+      execution: 'approval',
+      reason: options.reversible === false ? 'irreversible or hard-to-undo action' : 'external state mutation',
+    };
+  }
+  return {
+    riskLevel,
+    requiresApproval: true,
+    execution: 'approval',
+    reason: 'medium-risk action requires review',
+  };
+}
+
 export function deterministicUuid(input: string): string {
   const chars = createHash('sha256').update(input).digest('hex').slice(0, 32).split('');
   chars[12] = '5';
@@ -74,21 +112,26 @@ function boundedJSON(value: Record<string, unknown>, maxBytes: number): string {
 }
 
 function checkpointKeyFor(action: AgentActionGate): string {
-  return (action.checkpointKey ?? `${action.interruptBefore}:${action.actionType}`)
+  const key = (action.checkpointKey ?? `${action.interruptBefore}:${action.actionType}`)
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9:_-]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 160);
+  return key || 'agent-action';
 }
 
 export async function interruptForHumanDecision(
   client: pg.PoolClient,
   action: AgentActionGate
 ): Promise<HumanGateResult> {
-  const riskLevel = action.riskLevel ?? classifyActionRisk(action.actionType);
-  if (riskLevel === 'low') {
-    return { interrupted: false, riskLevel, checkpointId: null, proposalId: null, status: 'skipped' };
+  const decision = decideAutonomy(action.actionType, {
+    riskLevel: action.riskLevel,
+    reversible: action.reversible,
+    mutatesExternalState: action.mutatesExternalState,
+  });
+  if (!decision.requiresApproval) {
+    return { interrupted: false, riskLevel: decision.riskLevel, checkpointId: null, proposalId: null, status: 'skipped' };
   }
 
   const checkpointKey = checkpointKeyFor(action);
@@ -101,7 +144,8 @@ export async function interruptForHumanDecision(
       interrupt_before: action.interruptBefore,
       thread_id: action.threadId,
       checkpoint_key: checkpointKey,
-      risk_level: riskLevel,
+      risk_level: decision.riskLevel,
+      autonomy_reason: decision.reason,
       ...(action.provenance ?? {}),
     },
     4096
@@ -113,7 +157,8 @@ export async function interruptForHumanDecision(
       thread_id: action.threadId,
       checkpoint_key: checkpointKey,
       interrupt_before: action.interruptBefore,
-      risk_level: riskLevel,
+      risk_level: decision.riskLevel,
+      autonomy_reason: decision.reason,
     },
     8192
   );
@@ -163,10 +208,10 @@ export async function interruptForHumanDecision(
       checkpointKey,
       action.interruptBefore.slice(0, 160),
       action.actionType.slice(0, 80),
-      riskLevel,
+      decision.riskLevel,
       payload,
     ]
   );
 
-  return { interrupted: true, riskLevel, checkpointId, proposalId, status: 'waiting' };
+  return { interrupted: true, riskLevel: decision.riskLevel, checkpointId, proposalId, status: 'waiting' };
 }

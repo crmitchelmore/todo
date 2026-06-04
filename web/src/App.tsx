@@ -8,6 +8,7 @@ import { TaskDetailPane } from './components/TaskDetailPane';
 import { TagManager } from './components/TagManager';
 import { TagFilter } from './components/TagFilter';
 import { SettingsPanel } from './components/SettingsPanel';
+import { ApprovalQueue } from './components/ApprovalQueue';
 import { dateBucket, type DateBucketKey } from './lib/dates';
 import { decodeTags, tagKey } from './lib/tags';
 import { signOut } from './lib/auth';
@@ -44,7 +45,12 @@ export default function App() {
   );
   const { data: pendingProposals } = useQuery<AgentProposalRecord>(
     `SELECT * FROM agent_proposals
-      WHERE status = 'pending' AND task_id IS NOT NULL
+      WHERE status = 'pending' AND task_id IS NOT NULL AND proposal_type <> 'action'
+      ORDER BY created_at DESC`
+  );
+  const { data: actionProposals } = useQuery<AgentProposalRecord>(
+    `SELECT * FROM agent_proposals
+      WHERE status = 'pending' AND proposal_type = 'action'
       ORDER BY created_at DESC`
   );
 
@@ -65,6 +71,10 @@ export default function App() {
     }
     return map;
   }, [pendingProposals]);
+  const tasksById = useMemo(
+    () => new Map(allVisibleTasks.map((task) => [task.id, task])),
+    [allVisibleTasks]
+  );
 
   useEffect(() => {
     if (selectedId && !selectedTask) setSelectedId(null);
@@ -111,6 +121,8 @@ export default function App() {
 
       <div className="workbench-grid">
         <main className="task-stream">
+          <ApprovalQueue proposals={actionProposals} tasksById={tasksById} />
+
           {proposed.length > 0 && (
             <section>
               <h2>Needs confirming · {proposed.length}</h2>

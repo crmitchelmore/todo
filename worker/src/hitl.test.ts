@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type pg from 'pg';
 
-import { classifyActionRisk, deterministicUuid, interruptForHumanDecision } from './hitl.js';
+import { classifyActionRisk, decideAutonomy, deterministicUuid, interruptForHumanDecision } from './hitl.js';
 
 class FakeClient {
   readonly calls: Array<{ sql: string; params: unknown[] }> = [];
@@ -18,6 +18,22 @@ test('classifies read-only context work as low risk', () => {
   assert.equal(classifyActionRisk('calendar_read'), 'low');
   assert.equal(classifyActionRisk('send_email'), 'high');
   assert.equal(classifyActionRisk('draft_email'), 'medium');
+});
+
+test('autonomy policy routes low-risk work to auto and mutations to approval', () => {
+  assert.deepEqual(decideAutonomy('obsidian_search'), {
+    riskLevel: 'low',
+    requiresApproval: false,
+    execution: 'auto',
+    reason: 'low-risk read/context action',
+  });
+  assert.deepEqual(decideAutonomy('cache_result', { reversible: false }), {
+    riskLevel: 'medium',
+    requiresApproval: true,
+    execution: 'approval',
+    reason: 'irreversible or hard-to-undo action',
+  });
+  assert.equal(decideAutonomy('calendar_update', { mutatesExternalState: true }).execution, 'approval');
 });
 
 test('low-risk actions do not create a human checkpoint', async () => {
