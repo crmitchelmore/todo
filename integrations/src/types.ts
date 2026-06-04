@@ -52,6 +52,19 @@ export interface VaultSearchHit {
   readonly matches: readonly VaultSearchMatch[];
 }
 
+export interface VaultSemanticChunk {
+  readonly path: string;
+  readonly heading?: string;
+  readonly text: string;
+  readonly startLine: number;
+  readonly endLine: number;
+  readonly tokenCount: number;
+}
+
+export interface VaultSemanticHit extends VaultSemanticChunk {
+  readonly score: number;
+}
+
 export interface EmailAddress {
   readonly name?: string;
   readonly address: string;

@@ -19,6 +19,7 @@ OBSIDIAN_API_KEY=<local-rest-api-key>
 
 - `searchVault(query)` calls `POST /search/simple/?query=...` with `Authorization: Bearer ...` and returns typed `VaultSearchHit` values.
 - `getNote(path)` calls `GET /vault/{path}` with `Authorization: Bearer ...` and returns a typed `VaultNote`.
+- `buildObsidianSemanticIndex(connector, seedQueries)` uses Local REST search to find candidate notes, fetches each note once, chunks markdown by heading/size, and builds a local deterministic embedding index for task-context retrieval.
 - `healthCheck()` calls the Local REST API root endpoint and reports `ok` only when the configured service is reachable.
 - Connector calls use an 8 second timeout by default so an agent cannot hang indefinitely on vault operations.
 

@@ -4,6 +4,7 @@ import { Connector, ConnectorHealth } from "./types.js";
 
 export * from "./types.js";
 export * from "./obsidian.js";
+export * from "./obsidian-semantic.js";
 export * from "./gmail.js";
 export * from "./gmail-imap.js";
 
