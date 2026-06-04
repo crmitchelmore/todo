@@ -44,6 +44,8 @@ targets:
       path: CaptureiOS/Info.plist
       properties:
         CFBundleDisplayName: Capture
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CAPTURE_API_SECRET: $(CAPTURE_API_SECRET)
         UILaunchScreen: {}
         UIApplicationSceneManifest:
@@ -54,6 +56,11 @@ targets:
                 UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).SceneDelegate
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        "UISupportedInterfaceOrientations~ipad":
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
 
