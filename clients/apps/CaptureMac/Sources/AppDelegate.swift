@@ -119,6 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidBecomeActive(_ notification: Notification) {
         if NSApp.windows.allSatisfy({ !$0.isVisible }) { showMainWindow() }
+        model.restartSyncIfNeeded(reason: "app became active")
     }
 
     private func buildMenu() {

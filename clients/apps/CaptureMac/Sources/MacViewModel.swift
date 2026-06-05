@@ -25,6 +25,7 @@ final class MacViewModel {
     private var started = false
     private var tasks: [Task<Void, Never>] = []
     private var detailTasks: [Task<Void, Never>] = []
+    private var lastSyncRestart: Date?
 
     init(auth: AuthStore, config: CaptureConfig = .fromEnvironment()) {
         self.auth = auth
@@ -42,10 +43,32 @@ final class MacViewModel {
     func start() {
         guard !started else { return } // single shared store: only connect/watch once
         started = true
-        Task { try? await store.connect() }
+        Task {
+            do {
+                try await store.connect()
+                NSLog("[Capture] PowerSync connected")
+            } catch {
+                NSLog("[Capture] PowerSync connect failed: \(error)")
+            }
+        }
         watch({ try self.store.watchProposed() }, assign: { self.proposed = $0 })
         watch({ try self.store.watchActive() }, assign: { self.active = $0 })
         watchTags()
+    }
+
+    func restartSyncIfNeeded(reason: String) {
+        guard started, auth.isAuthenticated else { return }
+        let now = Date()
+        if let lastSyncRestart, now.timeIntervalSince(lastSyncRestart) < 15 { return }
+        lastSyncRestart = now
+        Task {
+            do {
+                try await store.reconnect()
+                NSLog("[Capture] PowerSync reconnected: \(reason)")
+            } catch {
+                NSLog("[Capture] PowerSync reconnect failed (\(reason)): \(error)")
+            }
+        }
     }
 
     private func watchTags() {

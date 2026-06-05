@@ -31,6 +31,14 @@ public final class TaskStore: @unchecked Sendable {
         try await db.connect(connector: connector)
     }
 
+    /// Restart the streaming sync connection while preserving local data and pending uploads.
+    /// The PowerSync coordinator safely replaces an existing connection when `connect` is called,
+    /// but explicitly disconnecting first clears a stale streaming task after network resets.
+    public func reconnect() async throws {
+        try await db.disconnect()
+        try await db.connect(connector: connector)
+    }
+
     public func disconnect() async throws {
         try await db.disconnect()
     }
