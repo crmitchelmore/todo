@@ -121,6 +121,8 @@ create table if not exists public.tasks (
   tags                  text,                          -- JSON array of tag names
   due_at                timestamptz,
   priority              integer,                       -- 0 = highest .. 4 = lowest
+  github_repo           text,                          -- Optional owner/repo association for engineering work
+  github_url            text,
 
   -- Background suggestions (filled asynchronously after instant capture; never block the write).
   suggested_due_at      timestamptz,
@@ -166,6 +168,34 @@ begin
       add constraint tasks_parent_not_self_chk
       check (parent_task_id is null or parent_task_id <> id);
   end if;
+end $$;
+
+do $$
+begin
+      if not exists (
+      select 1
+        from pg_constraint
+       where conname = 'tasks_github_repo_len_chk'
+         and conrelid = 'public.tasks'::regclass
+      ) then
+      alter table public.tasks
+        add constraint tasks_github_repo_len_chk
+        check (github_repo is null or char_length(github_repo) between 1 and 160);
+      end if;
+end $$;
+
+do $$
+begin
+      if not exists (
+      select 1
+        from pg_constraint
+       where conname = 'tasks_github_url_len_chk'
+         and conrelid = 'public.tasks'::regclass
+      ) then
+      alter table public.tasks
+        add constraint tasks_github_url_len_chk
+        check (github_url is null or char_length(github_url) between 1 and 500);
+      end if;
 end $$;
 
 do $$
@@ -265,7 +295,8 @@ create table if not exists public.task_events (
       'enriched',
       'agent_requested',
       'agent_completed',
-      'agent_failed'
+      'agent_failed',
+      'commented'
     )),
   constraint task_events_title_len_chk check (char_length(title) between 1 and 160),
   constraint task_events_body_len_chk check (body is null or char_length(body) <= 2000),

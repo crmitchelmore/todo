@@ -6,7 +6,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let config = CaptureConfig.fromEnvironment()
     private lazy var auth = AuthStore(config: config)
     private lazy var model = MacViewModel(auth: auth, config: config)  // single shared store / PowerSync instance
-    private lazy var captureVC = MacCaptureViewController(viewModel: model)
+    private lazy var captureVC: MacCaptureViewController = {
+        let vc = MacCaptureViewController(viewModel: model)
+        vc.onOpenSettings = { [weak self] in self?.openSettings() }
+        return vc
+    }()
     private lazy var quick = QuickCaptureController(viewModel: model)
     private var statusItemController: StatusItemController?
     private var window: NSWindow!
@@ -73,17 +77,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func buildWindow() {
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 620),
+            contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Capture"
         window.backgroundColor = Theme.ink
+        window.contentMinSize = NSSize(width: 980, height: 620)
         window.contentViewController = captureVC
         window.delegate = self
         window.center()
         window.setFrameAutosaveName("CaptureMainWindow")
+        if window.frame.width < 980 || window.frame.height < 620 {
+            window.setContentSize(NSSize(width: 1180, height: 760))
+            window.center()
+        }
     }
 
     // Hand the capture field our paste-aware editor so pasting a markdown list ingests items.

@@ -696,6 +696,8 @@ public final class TaskStore: @unchecked Sendable {
             tags: TagsCodec.decode(try cursor.getStringOptional(name: "tags")),
             dueAt: ISO8601.date(try cursor.getStringOptional(name: "due_at")),
             priority: try cursor.getIntOptional(name: "priority"),
+            githubRepo: try cursor.getStringOptional(name: "github_repo"),
+            githubURL: try cursor.getStringOptional(name: "github_url"),
             suggestedDueAt: ISO8601.date(try cursor.getStringOptional(name: "suggested_due_at")),
             suggestedCategory: try cursor.getStringOptional(name: "suggested_category"),
             suggestionConfidence: try cursor.getDoubleOptional(name: "suggestion_confidence"),

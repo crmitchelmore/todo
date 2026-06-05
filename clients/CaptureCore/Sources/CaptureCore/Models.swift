@@ -22,6 +22,8 @@ public struct TaskItem: Identifiable, Sendable, Equatable {
     public var tags: [String]
     public var dueAt: Date?
     public var priority: Int?
+    public var githubRepo: String?
+    public var githubURL: String?
     public var suggestedDueAt: Date?
     public var suggestedCategory: String?
     public var suggestionConfidence: Double?
@@ -43,6 +45,8 @@ public struct TaskItem: Identifiable, Sendable, Equatable {
         tags: [String] = [],
         dueAt: Date? = nil,
         priority: Int? = nil,
+        githubRepo: String? = nil,
+        githubURL: String? = nil,
         suggestedDueAt: Date? = nil,
         suggestedCategory: String? = nil,
         suggestionConfidence: Double? = nil,
@@ -63,6 +67,8 @@ public struct TaskItem: Identifiable, Sendable, Equatable {
         self.tags = tags
         self.dueAt = dueAt
         self.priority = priority
+        self.githubRepo = githubRepo
+        self.githubURL = githubURL
         self.suggestedDueAt = suggestedDueAt
         self.suggestedCategory = suggestedCategory
         self.suggestionConfidence = suggestionConfidence

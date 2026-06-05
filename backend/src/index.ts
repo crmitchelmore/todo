@@ -69,6 +69,7 @@ import {
  *  - GET  /api/auth/token    Mint a short-lived per-user RS256 JWT + the PowerSync endpoint URL.
  *  - PUT  /api/data          Apply a batch of client CRUD ops to Postgres (owner-scoped write path).
  *  - POST /api/capture       Lightweight ingest for out-of-process surfaces (extensions/intents).
+ *  - POST /api/tasks/:id/comments       Append a user-visible task comment.
  *  - POST /api/tasks/:id/agent-handoff  Queue a server-owned AI research/attempt request.
  */
 
@@ -163,6 +164,7 @@ async function requireAuth(req: AuthedRequest, res: Response, next: NextFunction
 const ALLOWED_COLUMNS: Record<string, Set<string>> = {
   tasks: new Set([
     'id', 'owner_id', 'parent_task_id', 'title', 'notes', 'status', 'category', 'tags', 'due_at', 'priority',
+    'github_repo', 'github_url',
     'suggested_due_at', 'suggested_category', 'suggestion_confidence', 'suggestion_source',
     'source', 'created_at', 'updated_at', 'confirmed_at', 'completed_at'
   ]),
@@ -986,7 +988,8 @@ type TaskEventType =
   | 'enriched'
   | 'agent_requested'
   | 'agent_completed'
-  | 'agent_failed';
+  | 'agent_failed'
+  | 'commented';
 
 interface TaskEventInput {
   ownerId: string;
@@ -1037,6 +1040,34 @@ function eventMetadata(metadata: Record<string, unknown> | undefined): string | 
   return stableJSON({ truncated: true });
 }
 
+interface TaskEventState {
+  id: string;
+  title: string | null;
+  notes: string | null;
+  status: string | null;
+  category: string | null;
+  tags: string | null;
+  due_at: unknown;
+  priority: unknown;
+  github_repo: string | null;
+  github_url: string | null;
+}
+
+async function readTaskEventState(
+  client: pg.PoolClient,
+  ownerId: string,
+  taskId: string
+): Promise<TaskEventState | null> {
+  const result = await client.query<TaskEventState>(
+    `SELECT id, title, notes, status, category, tags, due_at, priority, github_repo, github_url
+       FROM public.tasks
+      WHERE id = $1 AND owner_id = $2
+      LIMIT 1`,
+    [taskId, ownerId]
+  );
+  return result.rows[0] ?? null;
+}
+
 async function recordTaskEvent(client: pg.PoolClient, input: TaskEventInput): Promise<void> {
   const id = deterministicUuid(`${input.ownerId}:${input.taskId}:${input.eventType}:${input.idempotencyKey}`);
   await client.query(
@@ -1057,29 +1088,191 @@ async function recordTaskEvent(client: pg.PoolClient, input: TaskEventInput): Pr
   );
 }
 
-function taskEventForOp(op: CrudOp, applied: boolean): Omit<TaskEventInput, 'ownerId' | 'actor' | 'taskId' | 'idempotencyKey'> | null {
+interface SemanticTaskChange {
+  field: string;
+  title: string;
+  body: string;
+  before: unknown;
+  after: unknown;
+}
+
+const HUMAN_TASK_FIELDS = [
+  'title',
+  'notes',
+  'due_at',
+  'category',
+  'tags',
+  'priority',
+  'github_repo',
+  'github_url',
+] as const;
+
+function normalizeTaskValue(value: unknown): unknown {
+  if (value === undefined) return null;
+  if (value instanceof Date) return value.toISOString();
+  return value;
+}
+
+function taskValue(row: TaskEventState | null, field: string): unknown {
+  if (!row) return null;
+  return normalizeTaskValue((row as unknown as Record<string, unknown>)[field]);
+}
+
+function describeDue(value: unknown): string {
+  if (typeof value !== 'string' || value.length === 0) return 'none';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function describePriority(value: unknown): string {
+  return value === null || value === undefined || value === '' ? 'none' : `P${value}`;
+}
+
+function metadataScalar(value: unknown): unknown {
+  const normalized = normalizeTaskValue(value);
+  if (typeof normalized !== 'string') return normalized ?? null;
+  if (normalized.length <= 300) return normalized;
+  return { truncated: true, length: normalized.length, preview: normalized.slice(0, 180) };
+}
+
+function boundedMetadataValue(value: unknown): unknown {
+  return metadataScalar(value);
+}
+
+function semanticTaskChanges(before: TaskEventState | null, data: Record<string, unknown>): SemanticTaskChange[] {
+  const out: SemanticTaskChange[] = [];
+  for (const field of HUMAN_TASK_FIELDS) {
+    if (!(field in data)) continue;
+    const previous = taskValue(before, field);
+    const next = normalizeTaskValue(data[field]);
+    if (stableJSON(previous) === stableJSON(next)) continue;
+
+    if (field === 'title') {
+      out.push({
+        field,
+        title: 'Renamed task',
+        body: typeof next === 'string' ? `Now “${next.slice(0, 160)}”.` : 'Task title changed.',
+        before: previous,
+        after: next,
+      });
+      continue;
+    }
+    if (field === 'notes') {
+      out.push({
+        field,
+        title: 'Description updated',
+        body: next ? 'Expanded description changed.' : 'Expanded description cleared.',
+        before: previous,
+        after: next,
+      });
+      continue;
+    }
+    if (field === 'due_at') {
+      out.push({
+        field,
+        title: previous ? (next ? 'Due date moved' : 'Due date cleared') : 'Due date set',
+        body: next ? `Due ${describeDue(next)}.` : 'No due date.',
+        before: previous,
+        after: next,
+      });
+      continue;
+    }
+    if (field === 'category') {
+      out.push({
+        field,
+        title: next ? `Moved to ${next}` : 'Category cleared',
+        body: previous && next ? `Category changed from ${previous} to ${next}.` : `Category ${next ?? 'cleared'}.`,
+        before: previous,
+        after: next,
+      });
+      continue;
+    }
+    if (field === 'tags') {
+      out.push({
+        field,
+        title: 'Tags updated',
+        body: typeof next === 'string' && next !== '[]' ? `Tags ${next}.` : 'Tags cleared.',
+        before: previous,
+        after: next,
+      });
+      continue;
+    }
+    if (field === 'priority') {
+      out.push({
+        field,
+        title: next === null || next === undefined ? 'Priority cleared' : `Priority set to ${describePriority(next)}`,
+        body: `Priority ${describePriority(previous)} → ${describePriority(next)}.`,
+        before: previous,
+        after: next,
+      });
+      continue;
+    }
+    if (field === 'github_repo' || field === 'github_url') {
+      out.push({
+        field,
+        title: next ? 'Linked GitHub project' : 'GitHub project cleared',
+        body: typeof next === 'string' ? next : 'No GitHub project associated.',
+        before: previous,
+        after: next,
+      });
+    }
+  }
+  return out;
+}
+
+function taskEventForOp(
+  op: CrudOp,
+  applied: boolean,
+  before: TaskEventState | null
+): Omit<TaskEventInput, 'ownerId' | 'actor' | 'taskId' | 'idempotencyKey'> | null {
   if (!applied || op.type !== 'tasks' || op.op === 'DELETE') return null;
   const data = op.data ?? {};
   const status = typeof data.status === 'string' ? data.status : null;
+  if (!before && status === 'proposed') {
+    const title = typeof data.title === 'string' ? data.title : 'Captured';
+    return {
+      eventType: 'captured',
+      title: 'Captured',
+      body: title,
+      metadata: { source: data.source ?? 'capture' },
+    };
+  }
   if (status === 'done') {
     return { eventType: 'completed', title: 'Completed', body: 'Marked done.' };
   }
-  if ((status === 'active' || status === 'confirmed') && 'completed_at' in data && data.completed_at === null) {
+  if ((status === 'active' || status === 'confirmed') && before?.status === 'done') {
     return { eventType: 'reopened', title: 'Reopened', body: 'Moved back to active work.' };
   }
-  if (status === 'active' || status === 'confirmed') {
+  if ((status === 'active' || status === 'confirmed') && before?.status === 'proposed') {
     return { eventType: 'confirmed', title: 'Confirmed', body: 'Promoted from capture inbox to active work.' };
   }
   if (status === 'proposed') {
     return { eventType: 'reopened', title: 'Reopened', body: 'Moved back to the capture inbox.' };
   }
-  const changed = Object.keys(data).filter((k) => ALLOWED_COLUMNS.tasks.has(k) && k !== 'id' && k !== 'owner_id');
+  const changes = semanticTaskChanges(before, data);
+  const changed = changes.map((change) => change.field);
   if (changed.length === 0) return null;
+  const first = changes[0]!;
+  const rawChanges = Object.fromEntries(changes.map((change) => [
+    change.field,
+    {
+      before: boundedMetadataValue(change.before),
+      after: boundedMetadataValue(change.after),
+    },
+  ]));
   return {
     eventType: 'updated',
-    title: 'Updated',
-    body: `Changed ${changed.slice(0, 6).join(', ')}.`,
-    metadata: { changed },
+    title: changes.length === 1 ? first.title : 'Updated task structure',
+    body: changes.length === 1
+      ? first.body
+      : changes.slice(0, 5).map((change) => change.title).join(' · '),
+    metadata: { changed_columns: changed, raw_changes: rawChanges },
   };
 }
 
@@ -1314,6 +1507,50 @@ app.post('/api/capture', requireAuth, async (req: AuthedRequest, res: Response) 
   }
 });
 
+app.post('/api/tasks/:id/comments', requireAuth, async (req: AuthedRequest, res: Response) => {
+  const taskId = req.params.id;
+  if (!UUID_RE.test(taskId)) {
+    return res.status(400).json({ ok: false, error: 'valid task id is required' });
+  }
+  const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+  if (!body) return res.status(400).json({ ok: false, error: 'comment body is required' });
+  if (body.length > 2000) return res.status(400).json({ ok: false, error: 'comment body is too long' });
+  const requestId = typeof req.body?.request_id === 'string' && UUID_RE.test(req.body.request_id)
+    ? req.body.request_id
+    : randomUUID();
+  const ownerId = req.ownerId!;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const task = await client.query(
+      `SELECT id FROM public.tasks WHERE id = $1 AND owner_id = $2 LIMIT 1`,
+      [taskId, ownerId]
+    );
+    if ((task.rowCount ?? 0) === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: 'task not found' });
+    }
+    await recordTaskEvent(client, {
+      ownerId,
+      taskId,
+      actor: 'user',
+      eventType: 'commented',
+      title: 'Commented',
+      body,
+      metadata: { request_id: requestId, source: 'web' },
+      idempotencyKey: requestId,
+    });
+    await client.query('COMMIT');
+    return res.status(201).json({ ok: true, request_id: requestId });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('comment failed:', err);
+    return res.status(500).json({ ok: false, error: 'comment failed' });
+  } finally {
+    client.release();
+  }
+});
+
 app.post('/api/tasks/:id/agent-handoff', requireAuth, async (req: AuthedRequest, res: Response) => {
   const taskId = req.params.id;
   if (!UUID_RE.test(taskId)) {
@@ -1412,8 +1649,11 @@ app.put('/api/data', requireAuth, async (req: AuthedRequest, res: Response) => {
   try {
     await client.query('BEGIN');
     for (const op of ops) {
+      const before = op.type === 'tasks'
+        ? await readTaskEventState(client, ownerId, op.id)
+        : null;
       const applied = await applyOp(client, op, ownerId);
-      const event = taskEventForOp(op, applied);
+      const event = taskEventForOp(op, applied, before);
       if (event) {
         await recordTaskEvent(client, {
           ...event,

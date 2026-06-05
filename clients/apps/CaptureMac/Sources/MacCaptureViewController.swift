@@ -4,6 +4,7 @@ import CaptureCore
 final class MacCaptureViewController: NSViewController {
     private let viewModel: MacViewModel
     private let captureField = AttachmentCaptureTextField()
+    private let settingsButton = NSButton(title: "Settings", target: nil, action: nil)
     private let proposedTable = FastConfirmTableView()
     private let activeTable = NSTableView()
     private let proposedHeader = NSTextField(labelWithString: "")
@@ -12,6 +13,7 @@ final class MacCaptureViewController: NSViewController {
     private let listPane = NSView()
     private let detailScroll = NSScrollView()
     private let detailView = MacTaskDetailView()
+    var onOpenSettings: (() -> Void)?
 
     init(viewModel: MacViewModel) {
         self.viewModel = viewModel
@@ -22,7 +24,7 @@ final class MacCaptureViewController: NSViewController {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override func loadView() {
-        view = NSView(frame: NSRect(x: 0, y: 0, width: 980, height: 660))
+        view = NSView(frame: NSRect(x: 0, y: 0, width: 1180, height: 760))
         Theme.paintInk(view)
     }
 
@@ -42,6 +44,7 @@ final class MacCaptureViewController: NSViewController {
         Theme.paintInk(listPane)
         view.window?.backgroundColor = Theme.ink
         captureField.textColor = Theme.textPrimary
+        settingsButton.contentTintColor = Theme.textSecondary
         proposedHeader.textColor = Theme.signal
         activeHeader.textColor = Theme.textTertiary
         detailView.applyTheme()
@@ -76,7 +79,7 @@ final class MacCaptureViewController: NSViewController {
         Theme.paintInk(listPane)
         view.addSubview(listPane)
 
-        detailView.frame = NSRect(x: 0, y: 0, width: 380, height: 820)
+        detailView.frame = NSRect(x: 0, y: 0, width: 410, height: 820)
         detailView.autoresizingMask = [.width]
         detailScroll.documentView = detailView
         detailScroll.hasVerticalScroller = true
@@ -93,6 +96,12 @@ final class MacCaptureViewController: NSViewController {
         captureField.focusRingType = .none
         captureField.translatesAutoresizingMaskIntoConstraints = false
         captureField.onDroppedImages = { [weak self] images in self?.capture(images: images) }
+
+        settingsButton.target = self
+        settingsButton.action = #selector(settingsTapped)
+        settingsButton.bezelStyle = .rounded
+        settingsButton.font = Theme.display(12, .semibold)
+        settingsButton.translatesAutoresizingMaskIntoConstraints = false
 
         proposedHeader.font = Theme.mono(11, .semibold)
         proposedHeader.textColor = Theme.signal
@@ -114,7 +123,7 @@ final class MacCaptureViewController: NSViewController {
         let proposedScroll = scroll(proposedTable)
         let activeScroll = scroll(activeTable)
 
-        [captureField, proposedHeader, proposedScroll, activeHeader, filterBar, activeScroll].forEach {
+        [captureField, settingsButton, proposedHeader, proposedScroll, activeHeader, filterBar, activeScroll].forEach {
             listPane.addSubview($0)
         }
 
@@ -122,17 +131,21 @@ final class MacCaptureViewController: NSViewController {
             listPane.topAnchor.constraint(equalTo: view.topAnchor),
             listPane.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             listPane.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            listPane.widthAnchor.constraint(greaterThanOrEqualToConstant: 500),
+            listPane.widthAnchor.constraint(greaterThanOrEqualToConstant: 540),
 
             detailScroll.topAnchor.constraint(equalTo: view.topAnchor, constant: 16),
             detailScroll.leadingAnchor.constraint(equalTo: listPane.trailingAnchor, constant: 10),
             detailScroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             detailScroll.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -16),
-            detailScroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 360),
+            detailScroll.widthAnchor.constraint(equalToConstant: 410),
 
             captureField.topAnchor.constraint(equalTo: listPane.topAnchor, constant: 16),
             captureField.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 16),
-            captureField.trailingAnchor.constraint(equalTo: listPane.trailingAnchor, constant: -16),
+            captureField.trailingAnchor.constraint(equalTo: settingsButton.leadingAnchor, constant: -10),
+
+            settingsButton.centerYAnchor.constraint(equalTo: captureField.centerYAnchor),
+            settingsButton.trailingAnchor.constraint(equalTo: listPane.trailingAnchor, constant: -16),
+            settingsButton.widthAnchor.constraint(equalToConstant: 92),
 
             proposedHeader.topAnchor.constraint(equalTo: captureField.bottomAnchor, constant: 16),
             proposedHeader.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 18),
@@ -241,6 +254,8 @@ final class MacCaptureViewController: NSViewController {
     }
 
     @objc private func clearFilterTapped() { viewModel.clearFilter() }
+
+    @objc private func settingsTapped() { onOpenSettings?() }
 
     @objc private func captureSubmit() {
         let text = captureField.stringValue

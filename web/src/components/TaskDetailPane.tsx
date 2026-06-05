@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@powersync/react';
 import type { AgentProposalRecord, TaskAttachmentRecord, TaskEventRecord, TaskRecord } from '../powersync/schema';
 import { requestAgentHandoff, type AgentHandoffMode } from '../lib/agentHandoff';
 import { decideAgentProposal, proposalMeta } from '../lib/proposals';
-import { confirm, reject, setDone, updateTask } from '../lib/tasks';
+import { addTaskComment, confirm, reject, setDone, updateTask } from '../lib/tasks';
 import { decodeTags } from '../lib/tags';
 import { formatDue } from '../lib/format';
 import { DueEditor } from './DueEditor';
@@ -28,6 +28,7 @@ type ScopedTaskAttachmentRecord = TaskAttachmentRecord & {
 };
 
 function eventIcon(event: TaskEventRecord): string {
+  if (event.event_type === 'commented') return '“';
   if (event.event_type === 'agent_requested') return '↗';
   if (event.event_type === 'agent_failed') return '!';
   if (event.actor === 'worker' || event.actor === 'agent') return '◇';
@@ -56,6 +57,101 @@ function confidence(event: TaskEventRecord): string | null {
   }
 }
 
+type EditableSnapshot = {
+  title: string;
+  notes: string;
+  due: string | null;
+  category: string | null;
+  priority: number | null;
+  tagsKey: string;
+};
+
+type TimelineDisplay = {
+  title: string;
+  body: string | null;
+  details: Record<string, unknown> | null;
+};
+
+function snapshotFromFields(fields: {
+  title: string;
+  notes: string;
+  due: string | null;
+  category: string | null;
+  priority: number | null;
+  tags: string[];
+}): EditableSnapshot {
+  return {
+    title: fields.title,
+    notes: fields.notes,
+    due: fields.due,
+    category: fields.category,
+    priority: fields.priority,
+    tagsKey: JSON.stringify(fields.tags),
+  };
+}
+
+function sameSnapshot(a: EditableSnapshot, b: EditableSnapshot): boolean {
+  return a.title === b.title &&
+    a.notes === b.notes &&
+    a.due === b.due &&
+    a.category === b.category &&
+    a.priority === b.priority &&
+    a.tagsKey === b.tagsKey;
+}
+
+function parseMetadata(value: string | null): Record<string, unknown> | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function semanticColumnLabel(column: string): string {
+  const labels: Record<string, string> = {
+    title: 'title',
+    notes: 'description',
+    due_at: 'due date',
+    category: 'category',
+    tags: 'tags',
+    priority: 'priority',
+    github_repo: 'GitHub repo',
+    github_url: 'GitHub URL',
+  };
+  return labels[column] ?? column.replaceAll('_', ' ');
+}
+
+function timelineDisplay(event: TaskEventRecord): TimelineDisplay {
+  const metadata = parseMetadata(event.metadata);
+  const rawColumns = metadata?.changed_columns;
+  const columns = Array.isArray(rawColumns)
+    ? rawColumns.filter((value): value is string => typeof value === 'string')
+    : [];
+  const details = metadata && (columns.length > 0 || metadata.raw_changes)
+    ? {
+      changed_columns: columns,
+      raw_changes: metadata.raw_changes ?? null,
+    }
+    : null;
+
+  if (event.event_type === 'commented') {
+    return { title: 'Comment', body: event.body ?? null, details };
+  }
+  if (event.event_type === 'updated' && event.title === 'Updated' && columns.length > 0) {
+    const labels = columns.map(semanticColumnLabel);
+    return {
+      title: labels.length === 1 ? `${labels[0]} changed` : 'Task structure changed',
+      body: labels.length === 1 ? null : labels.join(' · '),
+      details,
+    };
+  }
+  return { title: event.title ?? 'Activity', body: event.body ?? null, details };
+}
+
 export function TaskDetailPane({
   task,
   onClose,
@@ -69,11 +165,18 @@ export function TaskDetailPane({
   const [category, setCategory] = useState<string | null>(null);
   const [priority, setPriority] = useState<number | null>(null);
   const [tags, setTags] = useState<string[]>([]);
-  const [dirty, setDirty] = useState(false);
+  const [, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveState, setSaveState] = useState<'saved' | 'saving' | 'dirty' | 'error'>('saved');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [comment, setComment] = useState('');
+  const [commentBusy, setCommentBusy] = useState(false);
+  const [commentMessage, setCommentMessage] = useState<string | null>(null);
   const [handoffInstructions, setHandoffInstructions] = useState('');
   const [handoffBusy, setHandoffBusy] = useState<AgentHandoffMode | null>(null);
   const [handoffMessage, setHandoffMessage] = useState<string | null>(null);
+  const savedSnapshot = useRef<EditableSnapshot | null>(null);
+  const autosaveTimer = useRef<ReturnType<typeof window.setTimeout> | null>(null);
 
   const taskId = task?.id ?? '';
   const { data: events } = useQuery<ScopedTaskEventRecord>(
@@ -215,14 +318,27 @@ export function TaskDetailPane({
 
   useEffect(() => {
     if (!task) return;
-    setTitle(task.title ?? '');
-    setNotes(task.notes ?? '');
-    setDue(task.due_at ?? null);
-    setCategory(task.category ?? task.suggested_category ?? null);
-    setPriority(task.priority ?? null);
-    setTags(decodeTags(task.tags));
+    const nextFields = {
+      title: task.title ?? '',
+      notes: task.notes ?? '',
+      due: task.due_at ?? null,
+      category: task.category ?? task.suggested_category ?? null,
+      priority: task.priority ?? null,
+      tags: decodeTags(task.tags),
+    };
+    setTitle(nextFields.title);
+    setNotes(nextFields.notes);
+    setDue(nextFields.due);
+    setCategory(nextFields.category);
+    setPriority(nextFields.priority);
+    setTags(nextFields.tags);
+    savedSnapshot.current = snapshotFromFields(nextFields);
     setDirty(false);
-  }, [taskId, task]);
+    setSaveState('saved');
+    setSaveError(null);
+    setComment('');
+    setCommentMessage(null);
+  }, [taskId]);
 
   const isDone = task?.status === 'done';
   const isProposed = task?.status === 'proposed';
@@ -235,6 +351,34 @@ export function TaskDetailPane({
   const rollup = rollups?.[0] ?? { total: 0, done: 0, open: 0 };
   const hasSubtasks = rollup.total > 0;
   const completion = hasSubtasks ? Math.round((rollup.done / rollup.total) * 100) : 0;
+  const tagsKey = useMemo(() => JSON.stringify(tags), [tags]);
+  const currentSnapshot = useMemo(() => snapshotFromFields({
+    title,
+    notes,
+    due,
+    category,
+    priority,
+    tags,
+  }), [title, notes, due, category, priority, tagsKey]);
+
+  useEffect(() => {
+    if (!task || task.status === 'proposed') return;
+    const last = savedSnapshot.current;
+    if (!last || sameSnapshot(last, currentSnapshot)) {
+      setDirty(false);
+      if (saveState !== 'saving') setSaveState('saved');
+      return;
+    }
+    setDirty(true);
+    setSaveState('dirty');
+    if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = window.setTimeout(() => {
+      void persistCurrent();
+    }, 650);
+    return () => {
+      if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current);
+    };
+  }, [taskId, task?.status, currentSnapshot]);
 
   if (!task) {
     return (
@@ -246,9 +390,16 @@ export function TaskDetailPane({
     );
   }
 
-  async function save() {
+  async function persistCurrent() {
     if (!task) return;
+    const snapshot = currentSnapshot;
+    if (savedSnapshot.current && sameSnapshot(savedSnapshot.current, snapshot)) {
+      setDirty(false);
+      setSaveState('saved');
+      return;
+    }
     setSaving(true);
+    setSaveState('saving');
     try {
       await updateTask(task.id, {
         title,
@@ -258,7 +409,13 @@ export function TaskDetailPane({
         tags,
         priority,
       });
+      savedSnapshot.current = snapshot;
       setDirty(false);
+      setSaveState('saved');
+      setSaveError(null);
+    } catch (err) {
+      setSaveState('error');
+      setSaveError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
     }
@@ -276,9 +433,29 @@ export function TaskDetailPane({
         tags,
         priority,
       });
+      savedSnapshot.current = currentSnapshot;
       setDirty(false);
+      setSaveState('saved');
+      setSaveError(null);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function submitComment() {
+    if (!task) return;
+    const body = comment.trim();
+    if (!body) return;
+    setCommentBusy(true);
+    setCommentMessage(null);
+    try {
+      await addTaskComment(task.id, body);
+      setComment('');
+      setCommentMessage('Comment added.');
+    } catch (err) {
+      setCommentMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCommentBusy(false);
     }
   }
 
@@ -312,7 +489,7 @@ export function TaskDetailPane({
     <aside
       className="detail-pane"
       onKeyDown={(e) => {
-        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') void (isProposed ? confirmFromPane() : save());
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') void (isProposed ? confirmFromPane() : persistCurrent());
       }}
     >
       <div className="detail-topline">
@@ -339,12 +516,13 @@ export function TaskDetailPane({
           </>
         ) : (
           <>
-            <button className="primary detail-primary" onClick={() => void save()} disabled={!dirty || saving}>
-              {saving ? 'Saving…' : dirty ? 'Save changes' : 'Saved'}
-            </button>
+            <span className={`autosave-state autosave-${saveState}`}>
+              {saveState === 'saving' ? 'Autosaving…' : saveState === 'dirty' ? 'Autosave pending' : saveState === 'error' ? 'Autosave failed' : 'Autosaved'}
+            </span>
             <button className="ghost" onClick={() => void setDone(task.id, !isDone)}>
               {isDone ? 'Reopen' : 'Mark done'}
             </button>
+            {saveError && <span className="autosave-error">{saveError}</span>}
           </>
         )}
       </div>
@@ -447,6 +625,18 @@ export function TaskDetailPane({
             <option value="4">P4 · reference</option>
           </select>
         </label>
+        {task.github_repo && (
+          <div className="detail-field">
+            <span>GitHub</span>
+            {task.github_url ? (
+              <a className="github-link" href={task.github_url} target="_blank" rel="noreferrer">
+                {task.github_repo}
+              </a>
+            ) : (
+              <strong className="github-link">{task.github_repo}</strong>
+            )}
+          </div>
+        )}
         <label className="detail-field">
           <span>Tags</span>
           <TagEditor tags={tags} onChange={(next) => { setTags(next); setDirty(true); }} />
@@ -454,13 +644,40 @@ export function TaskDetailPane({
       </section>
 
       <section className="detail-section">
-        <h3>Expansion</h3>
+        <div className="detail-section-head">
+          <div>
+            <h3>Expansion</h3>
+            {!isProposed && <p>Description autosaves. Comments are added to history.</p>}
+          </div>
+          {!isProposed && (
+            <button
+              className="ghost comment-button"
+              type="button"
+              disabled={commentBusy || !comment.trim()}
+              onClick={() => void submitComment()}
+            >
+              {commentBusy ? 'Adding…' : 'Add comment'}
+            </button>
+          )}
+        </div>
         <textarea
           className="detail-notes"
           placeholder="Add context, acceptance notes, links, or the next concrete action…"
           value={notes}
           onChange={(e) => { setNotes(e.target.value); setDirty(true); }}
         />
+        {!isProposed && (
+          <div className="comment-composer">
+            <textarea
+              className="comment-input"
+              placeholder="Comment on what changed, decisions made, or evidence found…"
+              value={comment}
+              maxLength={2000}
+              onChange={(e) => setComment(e.target.value)}
+            />
+            {commentMessage && <p className="comment-message">{commentMessage}</p>}
+          </div>
+        )}
       </section>
 
       <section className="detail-section detail-history">
@@ -487,22 +704,31 @@ export function TaskDetailPane({
                 </div>
               </article>
             ))}
-            {sortedEvents.map((event) => (
-              <article className={`timeline-event actor-${event.actor}`} key={event.id}>
-                <span className="timeline-icon">{eventIcon(event)}</span>
-                <div>
-                  <div className="timeline-head">
-                    <strong>{event.title}</strong>
-                    {(event.depth ?? 0) > 0 && event.task_title && (
-                      <span className="timeline-task">{event.task_title}</span>
+            {sortedEvents.map((event) => {
+              const display = timelineDisplay(event);
+              return (
+                <article className={`timeline-event actor-${event.actor} event-${event.event_type}`} key={event.id}>
+                  <span className="timeline-icon">{eventIcon(event)}</span>
+                  <div>
+                    <div className="timeline-head">
+                      <strong>{display.title}</strong>
+                      {(event.depth ?? 0) > 0 && event.task_title && (
+                        <span className="timeline-task">{event.task_title}</span>
+                      )}
+                      <span>{confidence(event) ?? event.actor}</span>
+                      <time>{eventTime(event.created_at)}</time>
+                    </div>
+                    {display.body && <p>{display.body}</p>}
+                    {display.details && (
+                      <details className="timeline-raw">
+                        <summary>Raw database change</summary>
+                        <pre>{JSON.stringify(display.details, null, 2)}</pre>
+                      </details>
                     )}
-                    <span>{confidence(event) ?? event.actor}</span>
-                    <time>{eventTime(event.created_at)}</time>
                   </div>
-                  {event.body && <p>{event.body}</p>}
-                </div>
-              </article>
-            ))}
+                </article>
+              );
+            })}
           </div>
         )}
       </section>

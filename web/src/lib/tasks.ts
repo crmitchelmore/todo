@@ -1,4 +1,6 @@
 import { db, ownerId } from '../powersync/db';
+import { config } from '../config';
+import { getToken } from './auth';
 import { suggest } from './suggest';
 import { parseMarkdownList, type ParsedCaptureItem } from './markdownList';
 import { encodeTags, ensureTags, normalizeTags } from './tags';
@@ -204,4 +206,17 @@ export async function setDone(id: string, done: boolean): Promise<void> {
     `UPDATE tasks SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?`,
     [done ? 'done' : 'active', done ? now : null, now, id]
   );
+}
+
+export async function addTaskComment(taskId: string, body: string): Promise<void> {
+  const token = getToken();
+  if (!token) throw new Error('Not signed in.');
+  const requestId = crypto.randomUUID();
+  const res = await fetch(`${config.backendUrl}/api/tasks/${taskId}/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ request_id: requestId, body }),
+  });
+  const payload = await res.json().catch(() => ({})) as { ok?: boolean; error?: string };
+  if (!res.ok || !payload.ok) throw new Error(payload.error ?? `comment failed (${res.status})`);
 }

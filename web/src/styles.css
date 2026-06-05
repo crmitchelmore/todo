@@ -146,7 +146,7 @@ body::before {
   padding: 40px 20px 120px;
   animation: rise 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
-.app-workbench { max-width: 1240px; }
+.app-workbench { max-width: 1480px; }
 
 @keyframes rise {
   from { opacity: 0; transform: translateY(10px); }
@@ -563,8 +563,8 @@ h2::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 
 .workbench-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(330px, 410px);
-  gap: 22px;
+  grid-template-columns: minmax(0, 1fr) clamp(360px, 28vw, 460px);
+  gap: 18px;
   align-items: start;
 }
 .task-stream { min-width: 0; }
@@ -1005,6 +1005,28 @@ h2::after { content: ''; flex: 1; height: 1px; background: var(--line); }
   margin-bottom: 18px;
 }
 .detail-primary { flex: 1; justify-content: center; }
+.autosave-state {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.autosave-state::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--mint);
+}
+.autosave-dirty::before,
+.autosave-saving::before { background: var(--signal); }
+.autosave-error { color: var(--danger); font-family: var(--font-mono); font-size: 10px; }
+.autosave-error::before { background: var(--danger); }
 .primary:disabled {
   opacity: 0.55;
   cursor: default;
@@ -1025,6 +1047,19 @@ h2::after { content: ''; flex: 1; height: 1px; background: var(--line); }
   letter-spacing: 0.16em;
   color: var(--text-faint);
   text-transform: uppercase;
+}
+.detail-section-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.detail-section-head h3 { margin-bottom: 3px; }
+.detail-section-head p {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 12px;
 }
 .detail-agent-loop {
   border-color: rgba(139, 123, 255, 0.26);
@@ -1165,7 +1200,8 @@ h2::after { content: ''; flex: 1; height: 1px; background: var(--line); }
   text-transform: uppercase;
 }
 .detail-field select,
-.detail-notes {
+.detail-notes,
+.comment-input {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
@@ -1177,10 +1213,21 @@ h2::after { content: ''; flex: 1; height: 1px; background: var(--line); }
   outline: none;
 }
 .detail-field select:focus,
-.detail-notes:focus {
+.detail-notes:focus,
+.comment-input:focus {
   border-color: var(--signal-line);
   box-shadow: var(--ring);
 }
+.github-link {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  color: var(--signal);
+  font-weight: 700;
+  text-decoration: none;
+}
+.github-link:hover { text-decoration: underline; }
 .detail-suggestion {
   margin: 0 0 8px;
   color: var(--signal);
@@ -1224,6 +1271,27 @@ h2::after { content: ''; flex: 1; height: 1px; background: var(--line); }
   min-height: 122px;
   resize: vertical;
   line-height: 1.45;
+}
+.comment-composer {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+}
+.comment-input {
+  min-height: 72px;
+  resize: vertical;
+  font-size: 13px;
+  background: rgba(10, 11, 13, 0.46);
+}
+.comment-button {
+  flex: none;
+  white-space: nowrap;
+}
+.comment-message {
+  margin: 0;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
 }
 .detail-history { padding-bottom: 8px; }
 .history-empty {
@@ -1295,6 +1363,32 @@ h2::after { content: ''; flex: 1; height: 1px; background: var(--line); }
   color: var(--text-dim);
   font-size: 13px;
   line-height: 1.4;
+  white-space: pre-wrap;
+}
+.timeline-raw {
+  margin-top: 7px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.timeline-raw summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.timeline-raw pre {
+  max-height: 220px;
+  overflow: auto;
+  margin: 7px 0 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: rgba(0, 0, 0, 0.18);
+  white-space: pre-wrap;
+}
+.event-commented .timeline-icon {
+  color: var(--mint);
+  border-color: rgba(74, 222, 158, 0.35);
+  background: var(--mint-soft);
 }
 .timeline-attachment img {
   display: block;

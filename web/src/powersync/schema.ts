@@ -13,6 +13,8 @@ const tasks = new Table(
     tags: column.text,
     due_at: column.text,
     priority: column.integer,
+    github_repo: column.text,
+    github_url: column.text,
     suggested_due_at: column.text,
     suggested_category: column.text,
     suggestion_confidence: column.real,

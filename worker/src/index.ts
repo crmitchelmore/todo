@@ -5,6 +5,7 @@ import { discoverTaskContext, type TaskDiscovery } from './discovery.js';
 import { parseAgentHandoffMetadata, type AgentHandoffRequest } from './handoff.js';
 import { interruptForHumanDecision } from './hitl.js';
 import { learnCategoryHints, type CategoryHints, type HistoricalTask } from './historyLearning.js';
+import { bestMatch, discoverConfiguredGitHubRepositories, shouldAssociateGitHubProject, type GitHubRepository } from './githubProject.js';
 
 /**
  * Capture enrichment worker.
@@ -71,12 +72,31 @@ const HANDOFF_REQUEST_SQL = `
   LIMIT $1
 `;
 
+const GITHUB_ASSOCIATION_SQL = `
+  SELECT id, owner_id, title, category, suggested_category, github_repo
+  FROM public.tasks
+  WHERE status IN ('proposed', 'active', 'confirmed')
+    AND github_repo IS NULL
+    AND COALESCE(category, suggested_category) = 'engineering'
+  ORDER BY updated_at DESC, created_at DESC
+  LIMIT $1
+`;
+
 interface HandoffRequestRow {
   request_event_id: string;
   owner_id: string;
   task_id: string;
   metadata: string | null;
   title: string;
+}
+
+interface GitHubAssociationRow {
+  id: string;
+  owner_id: string;
+  title: string;
+  category: string | null;
+  suggested_category: string | null;
+  github_repo: string | null;
 }
 
 function deterministicUuid(input: string): string {
@@ -262,6 +282,60 @@ async function recordDiscoveryProposal(
       discovery.confidence,
     ]
   );
+}
+
+async function recordGitHubAssociationEvent(
+  row: GitHubAssociationRow,
+  repo: GitHubRepository
+): Promise<void> {
+  const eventId = deterministicUuid(`${row.owner_id}:${row.id}:github-project:${repo.fullName}`);
+  await pool.query(
+    `INSERT INTO public.task_events
+       (id, owner_id, task_id, actor, event_type, title, body, metadata)
+     VALUES ($1, $2, $3, 'worker', 'enriched', 'Linked GitHub project', $4, $5)
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      eventId,
+      row.owner_id,
+      row.id,
+      `${repo.fullName} — ${repo.url}`,
+      metadataJSON({
+        source: 'local-work-root',
+        github_repo: repo.fullName,
+        github_url: repo.url,
+        repo_path: repo.path,
+        confidence: Math.min(0.95, 0.55 + repo.score / 20),
+      }),
+    ]
+  );
+}
+
+async function processGitHubAssociations(): Promise<number> {
+  const { rows } = await pool.query<GitHubAssociationRow>(GITHUB_ASSOCIATION_SQL, [BATCH]);
+  if (rows.length === 0) return 0;
+  const repos = await discoverConfiguredGitHubRepositories();
+  if (repos.length === 0) return 0;
+  let associated = 0;
+  for (const row of rows) {
+    if (!shouldAssociateGitHubProject(row)) continue;
+    const repo = bestMatch(row.title, repos);
+    if (!repo) continue;
+    const result = await pool.query(
+      `UPDATE public.tasks
+          SET github_repo = $3,
+              github_url = $4,
+              updated_at = now()
+        WHERE id = $1
+          AND owner_id = $2
+          AND github_repo IS NULL`,
+      [row.id, row.owner_id, repo.fullName, repo.url]
+    );
+    if ((result.rowCount ?? 0) === 0) continue;
+    await recordGitHubAssociationEvent(row, repo);
+    associated += 1;
+    console.log(`[worker] associated ${row.id} -> github=${repo.fullName}`);
+  }
+  return associated;
 }
 
 async function recordHandoffCompletionEvent(
@@ -474,8 +548,9 @@ const UPDATE_SQL = `
 
 async function tick(): Promise<number> {
   const handoffs = await processAgentHandoffRequests();
+  const githubAssociations = await processGitHubAssociations();
   const { rows } = await pool.query(SELECT_SQL, [BATCH]);
-  if (rows.length === 0) return handoffs;
+  if (rows.length === 0) return handoffs + githubAssociations;
   const ownerIds = [...new Set(rows.map((row) => row.owner_id as string))];
   const historyByOwner = new Map<string, CategoryHints>();
   if (ownerIds.length > 0) {
@@ -525,7 +600,7 @@ async function tick(): Promise<number> {
       console.error(`[worker] failed to enrich ${row.id}:`, String(err));
     }
   }
-  return enriched + handoffs;
+  return enriched + handoffs + githubAssociations;
 }
 
 async function main() {

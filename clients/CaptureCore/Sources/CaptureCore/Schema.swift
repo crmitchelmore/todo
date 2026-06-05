@@ -22,6 +22,8 @@ public let AppSchema = Schema(
             .text("tags"),               // JSON array of tag names
             .text("due_at"),
             .integer("priority"),
+            .text("github_repo"),
+            .text("github_url"),
             .text("suggested_due_at"),
             .text("suggested_category"),
             .real("suggestion_confidence"),
