@@ -40,6 +40,8 @@ load_keychain_defaults() {
     CAPTURE_API_SECRET
     PS_API_TOKEN
     OPENCLAW_AGENT_TOKEN
+    GITHUB_OAUTH_CLIENT_SECRET
+    OAUTH_STATE_SECRET
   )
 
   local name current value

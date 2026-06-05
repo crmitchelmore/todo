@@ -10,8 +10,8 @@ RUN npm run build
 
 FROM node:20-slim
 WORKDIR /app
-RUN npm install -g serve@14
 COPY --from=build /app/dist ./dist
-# Railway injects $PORT. `serve -s` rewrites unknown routes to index.html (SPA).
+COPY server.mjs ./server.mjs
+# Railway injects $PORT. The tiny server serves AASA as JSON, then falls back to index.html.
 ENV PORT=3000
-CMD ["sh", "-c", "serve -s dist -l ${PORT:-3000}"]
+CMD ["node", "server.mjs"]

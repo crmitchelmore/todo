@@ -57,6 +57,34 @@ function setSession(session: Session): void {
   emit();
 }
 
+export function consumeOAuthSessionFromUrl(): { signedIn: boolean; error: string | null } {
+  const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+  const params = new URLSearchParams(hash);
+  if (params.get('capture_oauth') !== '1') return { signedIn: false, error: null };
+  const token = params.get('session_token');
+  const userId = params.get('user_id');
+  const error = params.get('error');
+  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+  if (token && userId) {
+    setSession({ token, userId });
+    return { signedIn: true, error: null };
+  }
+  return { signedIn: false, error: oauthErrorMessage(error) };
+}
+
+function oauthErrorMessage(code: string | null): string {
+  if (code === 'github_email_needs_linking') {
+    return 'That GitHub email already has a Capture account. Sign in with email first; account linking is coming next.';
+  }
+  if (code === 'github_verified_email_required') {
+    return 'GitHub did not return a verified email address for this account.';
+  }
+  if (code === 'github_not_configured') {
+    return 'GitHub sign-in is not fully configured yet.';
+  }
+  return 'GitHub sign-in did not complete.';
+}
+
 /** Clear the local session (called on sign-out and when the backend rejects our token with 401). */
 export function clearSession(): void {
   localStorage.removeItem(STORAGE_KEY);
@@ -74,6 +102,11 @@ interface AuthResponse {
   otpauth_uri?: string;
   recovery_codes?: string[];
   error?: string;
+}
+
+interface OAuthProvidersResponse {
+  ok?: boolean;
+  github?: { configured?: boolean };
 }
 
 export class MfaRequiredError extends Error {
@@ -215,6 +248,16 @@ export async function signInWithPasskey(email?: string): Promise<void> {
   }
   const response = await startAuthentication({ optionsJSON: optionsBody.options as never });
   await postSession('/api/auth/passkeys/login/verify', { response });
+}
+
+export async function oauthProviders(): Promise<{ github: boolean }> {
+  const res = await fetch(`${config.backendUrl}/api/auth/oauth/providers`);
+  const body: OAuthProvidersResponse = await res.json().catch(() => ({}));
+  return { github: Boolean(res.ok && body.ok && body.github?.configured) };
+}
+
+export function signInWithGitHub(): void {
+  window.location.assign(`${config.backendUrl}/api/auth/oauth/github/start`);
 }
 
 /** Best-effort server revoke, then drop the local session regardless of the network result. */

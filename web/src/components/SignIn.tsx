@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   signIn,
   register,
@@ -8,6 +8,8 @@ import {
   resetPassword,
   MfaRequiredError,
   signInWithPasskey,
+  signInWithGitHub,
+  oauthProviders,
   verifyMfaLogin,
 } from '../lib/auth';
 
@@ -16,17 +18,26 @@ type View = 'password' | 'code' | 'forgot';
 type Mode = 'signIn' | 'register';
 
 /** Auth gate shown before the capture UI. Email + password, passwordless code, or password reset. */
-export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
+export function SignIn({ initialError, onSignedIn }: { initialError?: string | null; onSignedIn: () => void }) {
   const [view, setView] = useState<View>('password');
   const [mode, setMode] = useState<Mode>('signIn');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [sent, setSent] = useState(false); // second phase of code / forgot flows
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError ?? null);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [mfaChallenge, setMfaChallenge] = useState<string | null>(null);
+  const [githubAvailable, setGithubAvailable] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void oauthProviders()
+      .then((providers) => { if (active) setGithubAvailable(providers.github); })
+      .catch(() => { if (active) setGithubAvailable(false); });
+    return () => { active = false; };
+  }, []);
 
   function go(next: View) {
     setView(next);
@@ -197,6 +208,11 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
           {mode === 'signIn' && (
             <button type="button" className="signin-alt" onClick={handlePasskey} disabled={busy}>
               Sign in with a passkey
+            </button>
+          )}
+          {mode === 'signIn' && githubAvailable && (
+            <button type="button" className="signin-alt" onClick={signInWithGitHub} disabled={busy}>
+              Sign in with GitHub
             </button>
           )}
           <button type="button" className="signin-alt" onClick={() => go('code')}>

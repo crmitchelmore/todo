@@ -68,6 +68,13 @@ before enabling the web UI broadly. Native iOS/macOS passkeys additionally requi
 Domains (`webcredentials:<WEBAUTHN_RP_ID>`) and a real device/signed build to verify end-to-end;
 the current native code is build-verified but not live-device verified.
 
+GitHub OAuth is optional and config-gated. Set `GITHUB_OAUTH_CLIENT_ID` and
+`GITHUB_OAUTH_CLIENT_SECRET` on the backend; the web button stays hidden until both are present.
+The callback URL is `https://backend-production-de2f.up.railway.app/api/auth/oauth/github/callback`.
+New GitHub identities create accounts only when GitHub returns a verified email that is not already
+owned by an email/password account; existing accounts must explicitly link identities rather than
+being auto-linked by email.
+
 ## Go-live (DONE on 2026-06-03)
 
 1. **Migration** — `db/migrations/002-auth.sql` applied to live PG over the TCP proxy. Additive +

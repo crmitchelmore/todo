@@ -48,6 +48,15 @@ import {
 import { agentHandoffRequestId, parseAgentHandoffInput } from './agentHandoff.js';
 import { validateAttachmentData } from './attachments.js';
 import { sendEmailBestEffort, loginCodeEmail, resetCodeEmail } from './mailer.js';
+import {
+  githubAuthorizeUrl,
+  githubOAuthConfig,
+  oauthSessionFragment,
+  primaryVerifiedGitHubEmail,
+  randomOAuthNonce,
+  signOAuthState,
+  verifyOAuthState,
+} from './oauth.js';
 
 /**
  * Capture backend connector (multi-user, email + password auth).
@@ -55,6 +64,7 @@ import { sendEmailBestEffort, loginCodeEmail, resetCodeEmail } from './mailer.js
  *  - POST /api/auth/register Create an account (email + password) and return a session token.
  *  - POST /api/auth/login    Exchange email + password for an opaque session token.
  *  - POST /api/auth/logout   Revoke the caller's session.
+ *  - GET  /api/auth/oauth/github/start  Start GitHub OAuth sign-in.
  *  - GET  /api/auth/keys     JWKS so the PowerSync service can verify the per-user sync tokens.
  *  - GET  /api/auth/token    Mint a short-lived per-user RS256 JWT + the PowerSync endpoint URL.
  *  - PUT  /api/data          Apply a batch of client CRUD ops to Postgres (owner-scoped write path).
@@ -68,10 +78,12 @@ const JWT_ISSUER = process.env.JWT_ISSUER ?? 'capture';
 const JWT_AUDIENCE = process.env.JWT_AUDIENCE ?? 'powersync';
 const POWERSYNC_URL = process.env.POWERSYNC_PUBLIC_URL ?? 'http://localhost:8080';
 const PUBLIC_WEB_ORIGIN = process.env.PUBLIC_WEB_ORIGIN ?? 'http://localhost:3030';
+const PUBLIC_BACKEND_ORIGIN = process.env.PUBLIC_BACKEND_ORIGIN;
 const WEBAUTHN_RP_ID = process.env.WEBAUTHN_RP_ID ?? new URL(PUBLIC_WEB_ORIGIN).hostname;
 const WEBAUTHN_RP_NAME = process.env.WEBAUTHN_RP_NAME ?? 'Capture';
 const MFA_CHALLENGE_TTL_MS = 5 * 60_000;
 const MFA_MAX_ATTEMPTS = 5;
+const OAUTH_STATE_TTL_MS = 10 * 60_000;
 
 const pool = new pg.Pool({ connectionString: DATABASE_URI });
 const { privateKey, publicJwk, kid } = await loadSigningKey();
@@ -192,6 +204,134 @@ async function issueSessionOrMfa(
   }
   const sessionToken = await createSession(pool, userId, client);
   res.json({ ok: true, session_token: sessionToken, user_id: userId, ...(options.extra ?? {}) });
+}
+
+class ExistingEmailNeedsLinkError extends Error {
+  constructor() {
+    super('email account must explicitly link this GitHub identity');
+    this.name = 'ExistingEmailNeedsLinkError';
+  }
+}
+
+class GitHubOAuthError extends Error {
+  constructor(message: string, readonly code: string) {
+    super(message);
+    this.name = 'GitHubOAuthError';
+  }
+}
+
+function publicBackendOrigin(req: Request): string {
+  return PUBLIC_BACKEND_ORIGIN ?? `${req.protocol}://${req.get('host')}`;
+}
+
+function githubRedirectUri(req: Request): string {
+  return `${publicBackendOrigin(req)}/api/auth/oauth/github/callback`;
+}
+
+function oauthErrorRedirect(code: string): string {
+  const url = new URL(PUBLIC_WEB_ORIGIN);
+  url.hash = new URLSearchParams({ capture_oauth: '1', error: code }).toString();
+  return url.toString();
+}
+
+async function findOrCreateGitHubUser(subject: string, email: string): Promise<string> {
+  const normalizedEmail = normalizeEmail(email);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const linked = await client.query(
+      `SELECT user_id FROM public.user_identities
+        WHERE provider = 'github' AND provider_subject = $1
+        LIMIT 1`,
+      [subject]
+    );
+    if ((linked.rowCount ?? 0) > 0) {
+      await client.query('COMMIT');
+      return linked.rows[0].user_id as string;
+    }
+
+    const existingEmail = await client.query(
+      `SELECT id FROM public.users WHERE lower(email) = $1 LIMIT 1`,
+      [normalizedEmail]
+    );
+    if ((existingEmail.rowCount ?? 0) > 0) {
+      await client.query('ROLLBACK');
+      throw new ExistingEmailNeedsLinkError();
+    }
+
+    const user = await client.query(
+      `INSERT INTO public.users (email) VALUES ($1) RETURNING id`,
+      [normalizedEmail]
+    );
+    const userId = user.rows[0].id as string;
+    await client.query(
+      `INSERT INTO public.user_identities (user_id, provider, provider_subject, email)
+       VALUES ($1, 'github', $2, $3)`,
+      [userId, subject, normalizedEmail]
+    );
+    await client.query('COMMIT');
+    return userId;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    if ((err as { code?: string }).code === '23505') {
+      const linked = await pool.query(
+        `SELECT user_id FROM public.user_identities
+          WHERE provider = 'github' AND provider_subject = $1
+          LIMIT 1`,
+        [subject]
+      );
+      if ((linked.rowCount ?? 0) > 0) return linked.rows[0].user_id as string;
+      throw new ExistingEmailNeedsLinkError();
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function exchangeGitHubCode(code: string, redirectUri: string): Promise<string> {
+  const config = githubOAuthConfig();
+  if (!config) throw new GitHubOAuthError('GitHub OAuth is not configured', 'github_not_configured');
+  const response = await fetch('https://github.com/login/oauth/access_token', {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      code,
+      redirect_uri: redirectUri,
+    }),
+  });
+  const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+  const token = typeof body.access_token === 'string' ? body.access_token : null;
+  if (!response.ok || !token) {
+    throw new GitHubOAuthError('GitHub token exchange failed', 'github_exchange_failed');
+  }
+  return token;
+}
+
+async function fetchGitHubIdentity(accessToken: string): Promise<{ subject: string; email: string }> {
+  const headers = {
+    Accept: 'application/vnd.github+json',
+    Authorization: `Bearer ${accessToken}`,
+    'User-Agent': 'capture-auth',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+  const userResponse = await fetch('https://api.github.com/user', { headers });
+  const user = await userResponse.json().catch(() => ({})) as Record<string, unknown>;
+  const rawId = user.id;
+  const subject = typeof rawId === 'number' || typeof rawId === 'string' ? String(rawId) : null;
+  if (!userResponse.ok || !subject) {
+    throw new GitHubOAuthError('GitHub profile lookup failed', 'github_profile_failed');
+  }
+
+  const emailResponse = await fetch('https://api.github.com/user/emails', { headers });
+  const emails = await emailResponse.json().catch(() => []) as unknown;
+  const email = emailResponse.ok ? primaryVerifiedGitHubEmail(emails) : null;
+  if (!email || !isValidEmail(normalizeEmail(email))) {
+    throw new GitHubOAuthError('GitHub account has no verified email', 'github_verified_email_required');
+  }
+  return { subject, email };
 }
 
 async function storeRecoveryCodes(client: pg.PoolClient, userId: string, codes: string[]): Promise<void> {
@@ -373,6 +513,57 @@ app.post('/api/auth/logout', requireAuth, async (req: AuthedRequest, res: Respon
   } catch (err) {
     console.error('logout failed:', err);
     res.status(500).json({ ok: false, error: 'logout failed' });
+  }
+});
+
+app.get('/api/auth/oauth/providers', (_req: Request, res: Response) => {
+  res.json({
+    ok: true,
+    github: { configured: Boolean(githubOAuthConfig()) },
+  });
+});
+
+app.get('/api/auth/oauth/github/start', (req: Request, res: Response) => {
+  const config = githubOAuthConfig();
+  if (!config) {
+    return res.status(503).json({ ok: false, error: 'GitHub sign-in is not configured' });
+  }
+  const state = signOAuthState(
+    { nonce: randomOAuthNonce(), exp: Date.now() + OAUTH_STATE_TTL_MS },
+    config.stateSecret
+  );
+  return res.redirect(302, githubAuthorizeUrl({
+    clientId: config.clientId,
+    redirectUri: githubRedirectUri(req),
+    state,
+  }));
+});
+
+app.get('/api/auth/oauth/github/callback', async (req: Request, res: Response) => {
+  const config = githubOAuthConfig();
+  const code = typeof req.query.code === 'string' ? req.query.code : '';
+  const state = typeof req.query.state === 'string' ? req.query.state : '';
+  if (!config) return res.redirect(303, oauthErrorRedirect('github_not_configured'));
+  if (!code || !verifyOAuthState(state, config.stateSecret)) {
+    return res.redirect(303, oauthErrorRedirect('github_invalid_state'));
+  }
+
+  try {
+    const token = await exchangeGitHubCode(code, githubRedirectUri(req));
+    const identity = await fetchGitHubIdentity(token);
+    const userId = await findOrCreateGitHubUser(identity.subject, identity.email);
+    const sessionToken = await createSession(pool, userId, 'web-github');
+    return res.redirect(303, oauthSessionFragment({ origin: PUBLIC_WEB_ORIGIN, sessionToken, userId }));
+  } catch (err) {
+    if (err instanceof ExistingEmailNeedsLinkError) {
+      return res.redirect(303, oauthErrorRedirect('github_email_needs_linking'));
+    }
+    if (err instanceof GitHubOAuthError) {
+      console.warn('github oauth failed:', err.code);
+      return res.redirect(303, oauthErrorRedirect(err.code));
+    }
+    console.error('github oauth failed:', err);
+    return res.redirect(303, oauthErrorRedirect('github_failed'));
   }
 });
 
