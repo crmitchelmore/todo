@@ -336,10 +336,29 @@ public final class TaskStore: @unchecked Sendable {
         )
     }
 
+    public func listProposed() async throws -> [TaskItem] {
+        try await db.getAll(
+            sql: "SELECT * FROM \(TASKS_TABLE) WHERE status = 'proposed' ORDER BY created_at DESC",
+            parameters: [],
+            mapper: Self.map
+        )
+    }
+
     public func watchActive() throws -> AsyncThrowingStream<[TaskItem], Error> {
         try db.watch(
             sql: """
-            SELECT * FROM \(TASKS_TABLE) WHERE status = 'active'
+            SELECT * FROM \(TASKS_TABLE) WHERE status IN ('active', 'confirmed')
+            ORDER BY (due_at IS NULL), due_at ASC, created_at DESC
+            """,
+            parameters: [],
+            mapper: Self.map
+        )
+    }
+
+    public func listActive() async throws -> [TaskItem] {
+        try await db.getAll(
+            sql: """
+            SELECT * FROM \(TASKS_TABLE) WHERE status IN ('active', 'confirmed')
             ORDER BY (due_at IS NULL), due_at ASC, created_at DESC
             """,
             parameters: [],

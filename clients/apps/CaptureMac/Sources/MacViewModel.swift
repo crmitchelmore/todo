@@ -43,16 +43,18 @@ final class MacViewModel {
     func start() {
         guard !started else { return } // single shared store: only connect/watch once
         started = true
+        refreshTaskSnapshots(reason: "startup")
         Task {
             do {
                 try await store.connect()
                 NSLog("[Capture] PowerSync connected")
+                refreshTaskSnapshots(reason: "connect")
             } catch {
                 NSLog("[Capture] PowerSync connect failed: \(error)")
             }
         }
-        watch({ try self.store.watchProposed() }, assign: { self.proposed = $0 })
-        watch({ try self.store.watchActive() }, assign: { self.active = $0 })
+        watch("proposed", { try self.store.watchProposed() }, assign: { self.proposed = $0 })
+        watch("active", { try self.store.watchActive() }, assign: { self.active = $0 })
         watchTags()
     }
 
@@ -65,8 +67,28 @@ final class MacViewModel {
             do {
                 try await store.reconnect()
                 NSLog("[Capture] PowerSync reconnected: \(reason)")
+                refreshTaskSnapshots(reason: "reconnect")
             } catch {
                 NSLog("[Capture] PowerSync reconnect failed (\(reason)): \(error)")
+            }
+        }
+    }
+
+    private func refreshTaskSnapshots(reason: String) {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                async let proposedRows = self.store.listProposed()
+                async let activeRows = self.store.listActive()
+                let (nextProposed, nextActive) = try await (proposedRows, activeRows)
+                await MainActor.run {
+                    self.proposed = nextProposed
+                    self.active = nextActive
+                    NSLog("[Capture] Loaded task snapshot (\(reason)): proposed=\(nextProposed.count) active=\(nextActive.count)")
+                    self.notify()
+                }
+            } catch {
+                NSLog("[Capture] Task snapshot failed (\(reason)): \(error)")
             }
         }
     }
@@ -88,7 +110,9 @@ final class MacViewModel {
                         self.notify()
                     }
                 }
-            } catch {}
+            } catch {
+                NSLog("[Capture] Tag watch failed: \(error)")
+            }
         }
         tasks.append(t)
     }
@@ -141,6 +165,7 @@ final class MacViewModel {
     }
 
     private func watch(
+        _ label: String,
         _ make: @escaping () throws -> AsyncThrowingStream<[TaskItem], Error>,
         assign: @escaping ([TaskItem]) -> Void
     ) {
@@ -153,7 +178,10 @@ final class MacViewModel {
                         self.notify()
                     }
                 }
-            } catch {}
+            } catch {
+                NSLog("[Capture] \(label) watch failed: \(error)")
+                await MainActor.run { self.refreshTaskSnapshots(reason: "\(label) watch failed") }
+            }
         }
         tasks.append(t)
     }
