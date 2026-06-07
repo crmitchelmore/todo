@@ -6,6 +6,12 @@ import { parseAgentHandoffMetadata, type AgentHandoffRequest } from './handoff.j
 import { interruptForHumanDecision } from './hitl.js';
 import { learnCategoryHints, type CategoryHints, type HistoricalTask } from './historyLearning.js';
 import { bestMatch, discoverConfiguredGitHubRepositories, shouldAssociateGitHubProject, type GitHubRepository } from './githubProject.js';
+import {
+  openClawConfigFromEnv,
+  runOpenClawAttempt,
+  type OpenClawConfig,
+  type OpenClawRunResult,
+} from './openclawExecutor.js';
 
 /**
  * Capture enrichment worker.
@@ -22,6 +28,7 @@ const DATABASE_URI = process.env.WORKER_DATABASE_URI ?? process.env.BACKEND_DATA
 const POLL_MS = Number(process.env.ENRICH_POLL_MS ?? 2000);
 const BATCH = Number(process.env.ENRICH_BATCH ?? 20);
 const RUN_ONCE = process.env.ENRICH_RUN_ONCE === '1';
+const OPENCLAW_CONFIG = openClawConfigFromEnv();
 
 const pool = new pg.Pool({ connectionString: DATABASE_URI });
 
@@ -82,6 +89,27 @@ const GITHUB_ASSOCIATION_SQL = `
   LIMIT $1
 `;
 
+const APPROVED_ATTEMPT_SQL = `
+  SELECT
+    cp.id AS checkpoint_id,
+    cp.owner_id,
+    cp.task_id,
+    cp.proposal_id,
+    cp.thread_id,
+    cp.checkpoint_key,
+    cp.action_payload,
+    cp.resume_payload,
+    t.title
+  FROM public.agent_checkpoints cp
+  JOIN public.tasks t
+    ON t.owner_id = cp.owner_id
+   AND t.id = cp.task_id
+  WHERE cp.status = 'approved'
+    AND cp.action_type = 'attempt_task'
+  ORDER BY cp.decided_at ASC NULLS LAST, cp.updated_at ASC
+  LIMIT $1
+`;
+
 interface HandoffRequestRow {
   request_event_id: string;
   owner_id: string;
@@ -97,6 +125,18 @@ interface GitHubAssociationRow {
   category: string | null;
   suggested_category: string | null;
   github_repo: string | null;
+}
+
+interface ApprovedAttemptRow {
+  checkpoint_id: string;
+  owner_id: string;
+  task_id: string;
+  proposal_id: string | null;
+  thread_id: string;
+  checkpoint_key: string;
+  action_payload: string;
+  resume_payload: string | null;
+  title: string;
 }
 
 function deterministicUuid(input: string): string {
@@ -485,6 +525,133 @@ async function recordAttemptApprovalGate(
   }
 }
 
+function parseJsonRecord(value: string | null): Record<string, unknown> {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function handoffRequestFromActionPayload(payload: Record<string, unknown>): AgentHandoffRequest | null {
+  return parseAgentHandoffMetadata({
+    request_id: payload.request_id,
+    mode: payload.handoff_mode,
+    instructions: payload.instructions,
+  });
+}
+
+async function claimApprovedAttempt(row: ApprovedAttemptRow): Promise<boolean> {
+  const result = await pool.query(
+    `UPDATE public.agent_checkpoints
+        SET status = 'resumed',
+            resumed_at = COALESCE(resumed_at, now()),
+            updated_at = now()
+      WHERE id = $1
+        AND owner_id = $2
+        AND status = 'approved'
+        AND action_type = 'attempt_task'`,
+    [row.checkpoint_id, row.owner_id]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+async function recordOpenClawCompletionEvent(
+  row: ApprovedAttemptRow,
+  request: AgentHandoffRequest,
+  result: OpenClawRunResult
+): Promise<void> {
+  const eventId = deterministicUuid(`${row.owner_id}:${row.task_id}:openclaw-completed:${row.checkpoint_id}`);
+  await pool.query(
+    `INSERT INTO public.task_events
+       (id, owner_id, task_id, actor, event_type, title, body, metadata)
+     VALUES ($1, $2, $3, 'agent', 'agent_completed', 'OpenClaw attempt completed', $4, $5)
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      eventId,
+      row.owner_id,
+      row.task_id,
+      result.reply,
+      metadataJSON({
+        request_id: request.requestId,
+        mode: 'attempt',
+        source: 'openclaw',
+        checkpoint_id: row.checkpoint_id,
+        proposal_id: row.proposal_id,
+        thread_id: row.thread_id,
+        checkpoint_key: row.checkpoint_key,
+        openclaw_run_id: result.runId,
+        openclaw_status: result.status,
+        stdout_sample: result.stdout.slice(0, 1200),
+      }),
+    ]
+  );
+}
+
+async function recordOpenClawFailureEvent(
+  row: ApprovedAttemptRow,
+  request: AgentHandoffRequest | null,
+  error: unknown
+): Promise<void> {
+  const requestId = request?.requestId ?? row.checkpoint_id;
+  const eventId = deterministicUuid(`${row.owner_id}:${row.task_id}:openclaw-failed:${row.checkpoint_id}`);
+  await pool.query(
+    `INSERT INTO public.task_events
+       (id, owner_id, task_id, actor, event_type, title, body, metadata)
+     VALUES ($1, $2, $3, 'agent', 'agent_failed', 'OpenClaw attempt failed', $4, $5)
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      eventId,
+      row.owner_id,
+      row.task_id,
+      String(error).slice(0, 2000),
+      metadataJSON({
+        request_id: requestId,
+        mode: 'attempt',
+        source: 'openclaw',
+        checkpoint_id: row.checkpoint_id,
+        proposal_id: row.proposal_id,
+        thread_id: row.thread_id,
+        checkpoint_key: row.checkpoint_key,
+      }),
+    ]
+  );
+}
+
+async function processApprovedOpenClawAttempts(config: OpenClawConfig | null = OPENCLAW_CONFIG): Promise<number> {
+  if (!config) return 0;
+  const { rows } = await pool.query<ApprovedAttemptRow>(APPROVED_ATTEMPT_SQL, [BATCH]);
+  let processed = 0;
+  for (const row of rows) {
+    const claimed = await claimApprovedAttempt(row);
+    if (!claimed) continue;
+
+    const actionPayload = parseJsonRecord(row.action_payload);
+    const request = handoffRequestFromActionPayload(actionPayload);
+    try {
+      if (!request) throw new Error('approved OpenClaw checkpoint has invalid handoff metadata');
+      const result = await runOpenClawAttempt(config, {
+        taskId: row.task_id,
+        title: row.title,
+        request,
+        actionPayload,
+        resumePayload: row.resume_payload ? parseJsonRecord(row.resume_payload) : null,
+      });
+      await recordOpenClawCompletionEvent(row, request, result);
+      processed += 1;
+      console.log(`[worker] openclaw attempt ${request.requestId} -> task=${row.task_id} status=${result.status}`);
+    } catch (err) {
+      await recordOpenClawFailureEvent(row, request, err);
+      console.error(`[worker] failed openclaw attempt ${row.checkpoint_id}:`, String(err));
+    }
+  }
+  return processed;
+}
+
 function discoveryBody(discovery: TaskDiscovery): string {
   const results = discovery.web.results
     .slice(0, 3)
@@ -547,10 +714,11 @@ const UPDATE_SQL = `
 `;
 
 async function tick(): Promise<number> {
+  const openClawAttempts = await processApprovedOpenClawAttempts();
   const handoffs = await processAgentHandoffRequests();
   const githubAssociations = await processGitHubAssociations();
   const { rows } = await pool.query(SELECT_SQL, [BATCH]);
-  if (rows.length === 0) return handoffs + githubAssociations;
+  if (rows.length === 0) return openClawAttempts + handoffs + githubAssociations;
   const ownerIds = [...new Set(rows.map((row) => row.owner_id as string))];
   const historyByOwner = new Map<string, CategoryHints>();
   if (ownerIds.length > 0) {
@@ -600,13 +768,15 @@ async function tick(): Promise<number> {
       console.error(`[worker] failed to enrich ${row.id}:`, String(err));
     }
   }
-  return enriched + handoffs + githubAssociations;
+  return enriched + openClawAttempts + handoffs + githubAssociations;
 }
 
 async function main() {
   console.log(
     `[worker] capture enrichment worker up. poll=${POLL_MS}ms batch=${BATCH} ` +
-      `llm=${process.env.OPENAI_API_KEY ? 'on' : 'off'} once=${RUN_ONCE}`
+      `llm=${process.env.OPENAI_API_KEY ? 'on' : 'off'} ` +
+      `openclaw=${OPENCLAW_CONFIG ? `${OPENCLAW_CONFIG.user}@${OPENCLAW_CONFIG.host}` : 'off'} ` +
+      `once=${RUN_ONCE}`
   );
 
   if (RUN_ONCE) {

@@ -53,6 +53,9 @@ Key environment variables:
 | powersync | `PS_PORT` | `8080` |
 | worker | `WORKER_DATABASE_URI` | `postgres://postgres:<pw>@<pg-private>:5432/postgres` |
 | worker (local/Mac) | `CAPTURE_WORK_ROOT` | optional Git repo root to scan for engineering-task GitHub associations; macOS falls back to `~/work` |
+| worker (local/Mac) | `OPENCLAW_EXECUTOR_ENABLED` | set to `1` only on a host that can SSH to the Mac Mini |
+| worker (local/Mac) | `OPENCLAW_SSH_HOST` / `OPENCLAW_SSH_USER` / `OPENCLAW_SSH_KEY_PATH` | OpenClaw SSH target and private key path; do not store the private key in Git |
+| worker (local/Mac) | `OPENCLAW_WORKDIR` / `OPENCLAW_CLI` / `OPENCLAW_AGENT` | OpenClaw command settings, e.g. `/Users/bravostation/clawd`, `/opt/homebrew/bin/openclaw`, `imessage-agent` |
 
 > **Postgres without TLS on the private network.** `sslmode` is **not** read from the connection
 > URI by PowerSync — it must be set explicitly. `infra/powersync/service.yaml` sets
