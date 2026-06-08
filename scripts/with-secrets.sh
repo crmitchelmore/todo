@@ -53,6 +53,17 @@ load_keychain_defaults() {
   done
 }
 
+normalise_railway_auth_env() {
+  # Railway CLI 5.x honours RAILWAY_TOKEN before RAILWAY_API_TOKEN. A stale legacy
+  # RAILWAY_TOKEN therefore makes commands look "broken" even when the API token is valid.
+  if [[ -n "${RAILWAY_API_TOKEN:-}" ]]; then
+    unset RAILWAY_TOKEN
+  elif [[ -n "${RAILWAY_TOKEN:-}" ]]; then
+    export RAILWAY_API_TOKEN="$RAILWAY_TOKEN"
+    unset RAILWAY_TOKEN
+  fi
+}
+
 if [[ $# -eq 0 ]]; then
   usage
   exit 64
@@ -65,5 +76,6 @@ if [[ -n "${CAPTURE_SECRETS_ENV:-}" ]]; then
   load_env_file "$CAPTURE_SECRETS_ENV"
 fi
 load_keychain_defaults
+normalise_railway_auth_env
 
 exec "$@"

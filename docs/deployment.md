@@ -80,6 +80,11 @@ scripts/with-secrets.sh railway up --ci --service powersync
 scripts/with-secrets.sh railway up ./worker --path-as-root --ci --service worker
 ```
 
+Use `scripts/with-secrets.sh` rather than calling `railway` directly. Railway CLI 5.x gives
+`RAILWAY_TOKEN` precedence over `RAILWAY_API_TOKEN`; a stale legacy `RAILWAY_TOKEN` will make the
+CLI report "Unauthorized" even when `RAILWAY_API_TOKEN` is valid. The wrapper normalises this by
+unsetting `RAILWAY_TOKEN` whenever `RAILWAY_API_TOKEN` is available.
+
 For local/dev commands that need credentials, keep secrets in ignored `.env.local` files or in the
 macOS Keychain service `capture` using the env var as the account name:
 
