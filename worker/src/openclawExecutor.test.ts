@@ -20,6 +20,7 @@ const baseConfig: OpenClawConfig = {
   agent: 'imessage-agent',
   timeoutSeconds: 120,
   thinking: 'medium',
+  remotePath: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
   strictHostKeyChecking: 'accept-new',
   connectTimeoutSeconds: 10,
 };
@@ -57,6 +58,7 @@ test('OpenClaw config stays disabled until explicitly enabled and configured', (
 test('buildOpenClawRemoteCommand shell-quotes task prompts for the remote shell', () => {
   const command = buildOpenClawRemoteCommand(baseConfig, "say 'hello'");
   assert.match(command, /^cd '\/Users\/bravostation\/clawd' &&/);
+  assert.match(command, /PATH='\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin:\/usr\/sbin:\/sbin'/);
   assert.match(command, /'\/opt\/homebrew\/bin\/openclaw' 'agent'/);
   assert.match(command, /--message' 'say '\\''hello'\\'''/);
   assert.match(command, /'--thinking' 'medium'$/);
@@ -84,7 +86,11 @@ test('runOpenClawAttempt parses the blessed JSON response', async () => {
     assert.equal(args[0], '-i');
     assert.equal(options.timeout, 145000);
     return {
-      stdout: JSON.stringify({ runId: 'run-1', status: 'ok', reply: 'Drafted the reply.' }),
+      stdout: JSON.stringify({
+        runId: 'run-1',
+        status: 'ok',
+        result: { payloads: [{ text: 'Drafted the reply.' }] },
+      }),
       stderr: '',
     };
   });

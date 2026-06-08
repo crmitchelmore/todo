@@ -16,6 +16,7 @@ export interface OpenClawExecutorEnv {
   readonly OPENCLAW_AGENT?: string;
   readonly OPENCLAW_TIMEOUT_SECONDS?: string;
   readonly OPENCLAW_THINKING?: string;
+  readonly OPENCLAW_REMOTE_PATH?: string;
   readonly OPENCLAW_SSH_STRICT_HOST_KEY_CHECKING?: string;
   readonly OPENCLAW_SSH_CONNECT_TIMEOUT_SECONDS?: string;
 }
@@ -31,6 +32,7 @@ export interface OpenClawConfig {
   agent: string;
   timeoutSeconds: number;
   thinking: 'medium' | 'high' | 'max' | null;
+  remotePath: string;
   strictHostKeyChecking: 'yes' | 'accept-new' | 'no';
   connectTimeoutSeconds: number;
 }
@@ -78,6 +80,7 @@ export function openClawConfigFromEnv(env: OpenClawExecutorEnv = process.env): O
     agent: env.OPENCLAW_AGENT?.trim() || 'imessage-agent',
     timeoutSeconds: readPositiveInt(env.OPENCLAW_TIMEOUT_SECONDS, 120),
     thinking,
+    remotePath: env.OPENCLAW_REMOTE_PATH?.trim() || '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
     strictHostKeyChecking: readHostKeyChecking(env.OPENCLAW_SSH_STRICT_HOST_KEY_CHECKING),
     connectTimeoutSeconds: readPositiveInt(env.OPENCLAW_SSH_CONNECT_TIMEOUT_SECONDS, 10),
   };
@@ -128,7 +131,7 @@ export function buildOpenClawRemoteCommand(config: OpenClawConfig, message: stri
     String(config.timeoutSeconds),
   ];
   if (config.thinking) args.push('--thinking', config.thinking);
-  return `cd ${shellQuote(config.workdir)} && ${args.map(shellQuote).join(' ')}`;
+  return `cd ${shellQuote(config.workdir)} && PATH=${shellQuote(config.remotePath)} ${args.map(shellQuote).join(' ')}`;
 }
 
 export function buildOpenClawSshArgs(config: OpenClawConfig, remoteCommand: string): string[] {
@@ -167,7 +170,7 @@ export async function runOpenClawAttempt(
   const trimmed = stdout.trim();
   const raw = parseOpenClawJSON(trimmed);
   const status = typeof raw.status === 'string' ? raw.status : 'unknown';
-  const reply = typeof raw.reply === 'string' ? raw.reply : trimmed;
+  const reply = extractOpenClawReply(raw) ?? trimmed;
   const runId = typeof raw.runId === 'string' ? raw.runId : null;
   return { runId, status, reply: reply.slice(0, 4000), raw, stdout: trimmed.slice(0, 8000) };
 }
@@ -195,6 +198,19 @@ function parseOpenClawJSON(stdout: string): Record<string, unknown> {
   } catch {
     return { status: 'unknown', reply: stdout };
   }
+}
+
+function extractOpenClawReply(raw: Record<string, unknown>): string | null {
+  if (typeof raw.reply === 'string') return raw.reply;
+  const result = readRecord(raw.result);
+  const payloads = result.payloads;
+  if (Array.isArray(payloads)) {
+    const texts = payloads
+      .map((payload) => readRecord(payload).text)
+      .filter((text): text is string => typeof text === 'string' && text.trim().length > 0);
+    if (texts.length > 0) return texts.join('\n\n');
+  }
+  return null;
 }
 
 function shellQuote(value: string): string {

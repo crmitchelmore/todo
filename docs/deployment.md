@@ -56,6 +56,7 @@ Key environment variables:
 | worker (local/Mac) | `OPENCLAW_EXECUTOR_ENABLED` | set to `1` only on a host that can SSH to the Mac Mini |
 | worker (local/Mac) | `OPENCLAW_SSH_HOST` / `OPENCLAW_SSH_USER` / `OPENCLAW_SSH_KEY_PATH` | OpenClaw SSH target and private key path; do not store the private key in Git |
 | worker (local/Mac) | `OPENCLAW_WORKDIR` / `OPENCLAW_CLI` / `OPENCLAW_AGENT` | OpenClaw command settings, e.g. `/Users/bravostation/clawd`, `/opt/homebrew/bin/openclaw`, `imessage-agent` |
+| worker (local/Mac) | `OPENCLAW_REMOTE_PATH` | remote PATH for non-interactive SSH; include `/opt/homebrew/bin` so `/usr/bin/env node` can run OpenClaw |
 
 > **Postgres without TLS on the private network.** `sslmode` is **not** read from the connection
 > URI by PowerSync — it must be set explicitly. `infra/powersync/service.yaml` sets
