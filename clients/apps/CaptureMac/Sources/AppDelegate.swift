@@ -207,6 +207,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             settingsWindow = SettingsWindowController(
                 store: hotKeyStore,
                 preferences: preferencesStore,
+                auth: auth,
+                taskStore: model.store,
                 onChange: { [weak self] newHotKey in self?.applyHotKey(newHotKey) },
                 onAppearanceChange: { [weak self] mode in self?.applyAppearance(mode) },
                 onSignOut: { [weak self] in self?.signOut() }

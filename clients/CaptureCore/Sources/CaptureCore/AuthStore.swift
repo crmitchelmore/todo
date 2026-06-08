@@ -171,6 +171,21 @@ public final class AuthStore: @unchecked Sendable, TokenProviding {
         )
     }
 
+    public func fetchSyncDiagnostics() async throws -> ServerSyncDiagnostics {
+        guard let token = currentToken() else { throw CaptureError.auth("not signed in") }
+        var req = URLRequest(url: backendURL.appendingPathComponent("api/diagnostics/sync"))
+        req.httpMethod = "GET"
+        req.applyBearer(token)
+        req.timeoutInterval = 15
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw CaptureError.auth("no response") }
+        guard http.statusCode == 200 else {
+            let decoded = try? JSONDecoder().decode(BackendAuthResponse.self, from: data)
+            throw CaptureError.auth(decoded?.error ?? "diagnostics failed (\(http.statusCode))")
+        }
+        return try Self.diagnosticsDecoder.decode(ServerSyncDiagnostics.self, from: data)
+    }
+
     /// POST a body to an always-200 issuance endpoint; throws only on transport/5xx failure.
     private func postIssue(path: String, body: [String: Any]) async throws {
         var req = URLRequest(url: backendURL.appendingPathComponent(path))
@@ -290,6 +305,19 @@ public final class AuthStore: @unchecked Sendable, TokenProviding {
         guard let onChange else { return }
         DispatchQueue.main.async { onChange() }
     }
+
+    private static let diagnosticsDecoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let raw = try container.decode(String.self)
+            guard let date = ISO8601.date(raw) else {
+                throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid ISO8601 date")
+            }
+            return date
+        }
+        return decoder
+    }()
 }
 
 /// A no-op token provider for contexts with no signed-in user (the offline probe and unit tests).

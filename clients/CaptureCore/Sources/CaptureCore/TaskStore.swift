@@ -71,6 +71,57 @@ public final class TaskStore: @unchecked Sendable {
         UserDefaults.standard.removeObject(forKey: Self.lastOwnerKey)
     }
 
+    public func localSyncDiagnostics() async throws -> LocalSyncDiagnostics {
+        let rows: [(status: String, count: Int, lastUpdatedAt: String?)] = try await db.getAll(
+            sql: """
+            SELECT status,
+                   COUNT(*) AS count,
+                   MAX(updated_at) AS last_updated_at
+              FROM \(TASKS_TABLE)
+             GROUP BY status
+             ORDER BY status
+            """,
+            parameters: nil,
+            mapper: { cursor in (
+                try cursor.getString(name: "status"),
+                (try cursor.getIntOptional(name: "count")) ?? 0,
+                try cursor.getStringOptional(name: "last_updated_at")
+            ) }
+        )
+        let ownerIds: [String] = try await db.getAll(
+            sql: """
+            SELECT DISTINCT owner_id
+              FROM \(TASKS_TABLE)
+             WHERE owner_id IS NOT NULL
+             ORDER BY owner_id
+             LIMIT 20
+            """,
+            parameters: nil,
+            mapper: { try $0.getString(name: "owner_id") }
+        )
+        let byStatus = Dictionary(uniqueKeysWithValues: rows.map { ($0.status, $0.count) })
+        let lastUpdatedAt = rows
+            .compactMap { ISO8601.date($0.lastUpdatedAt) }
+            .max()
+        return LocalSyncDiagnostics(
+            ownerId: auth?.ownerId ?? config.ownerId,
+            endpoints: SyncDiagnosticsEndpoints(
+                backendURL: config.backendURL.absoluteString,
+                powersyncURL: config.powersyncURL.absoluteString
+            ),
+            counts: SyncTaskCounts(
+                total: rows.reduce(0) { $0 + $1.count },
+                proposed: byStatus["proposed"] ?? 0,
+                active: (byStatus["active"] ?? 0) + (byStatus["confirmed"] ?? 0),
+                done: byStatus["done"] ?? 0,
+                cancelled: byStatus["cancelled"] ?? 0,
+                byStatus: byStatus,
+                lastUpdatedAt: lastUpdatedAt
+            ),
+            ownerIds: ownerIds
+        )
+    }
+
     // MARK: - Capture (hot path)
 
     /// Instant capture: generates an id, fires a local insert + background

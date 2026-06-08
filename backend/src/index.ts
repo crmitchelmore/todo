@@ -971,6 +971,86 @@ app.get('/api/auth/token', requireAuth, async (req: AuthedRequest, res: Response
   res.json({ token, powersync_url: POWERSYNC_URL });
 });
 
+app.get('/api/diagnostics/sync', requireAuth, async (req: AuthedRequest, res: Response) => {
+  const ownerId = req.ownerId!;
+  const sessionHash = req.sessionToken ? hashToken(req.sessionToken) : null;
+  const [user, counts, currentSession, sessions] = await Promise.all([
+    pool.query<{ email: string | null; created_at: string }>(
+      `SELECT email, created_at
+         FROM public.users
+        WHERE id = $1
+        LIMIT 1`,
+      [ownerId]
+    ),
+    pool.query<{ status: string; count: string; last_updated_at: Date | string | null }>(
+      `SELECT status,
+              count(*)::text AS count,
+              max(updated_at) AS last_updated_at
+         FROM public.tasks
+        WHERE owner_id = $1
+        GROUP BY status
+        ORDER BY status`,
+      [ownerId]
+    ),
+    pool.query<{ client: string | null; created_at: string; last_seen_at: string | null; expires_at: string; revoked_at: string | null }>(
+      `SELECT client, created_at, last_seen_at, expires_at, revoked_at
+         FROM public.sessions
+        WHERE token_hash = $1
+          AND user_id = $2
+        LIMIT 1`,
+      [sessionHash ?? '', ownerId]
+    ),
+    pool.query<{ client: string; sessions: string; active_sessions: string; newest_seen_at: string | null }>(
+      `SELECT coalesce(client, 'unknown') AS client,
+              count(*)::text AS sessions,
+              count(*) FILTER (WHERE revoked_at IS NULL AND expires_at > now())::text AS active_sessions,
+              max(last_seen_at) AS newest_seen_at
+         FROM public.sessions
+        WHERE user_id = $1
+        GROUP BY coalesce(client, 'unknown')
+        ORDER BY newest_seen_at DESC NULLS LAST, client ASC
+        LIMIT 20`,
+      [ownerId]
+    ),
+  ]);
+  const statusCounts = Object.fromEntries(counts.rows.map((row) => [row.status, Number(row.count)]));
+  const lastUpdatedAt = counts.rows
+    .map((row) => (row.last_updated_at ? new Date(row.last_updated_at) : null))
+    .filter((value): value is Date => value !== null && !Number.isNaN(value.getTime()))
+    .sort((a, b) => a.getTime() - b.getTime())
+    .at(-1)
+    ?.toISOString() ?? null;
+  res.json({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    owner: {
+      id: ownerId,
+      email: user.rows[0]?.email ?? null,
+      created_at: user.rows[0]?.created_at ?? null,
+    },
+    endpoints: {
+      backend_url: publicBackendOrigin(req),
+      powersync_url: POWERSYNC_URL,
+    },
+    server_counts: {
+      total: counts.rows.reduce((sum, row) => sum + Number(row.count), 0),
+      proposed: statusCounts.proposed ?? 0,
+      active: (statusCounts.active ?? 0) + (statusCounts.confirmed ?? 0),
+      done: statusCounts.done ?? 0,
+      cancelled: statusCounts.cancelled ?? 0,
+      by_status: statusCounts,
+      last_updated_at: lastUpdatedAt,
+    },
+    current_session: currentSession.rows[0] ?? null,
+    sessions: sessions.rows.map((row) => ({
+      client: row.client,
+      sessions: Number(row.sessions),
+      active_sessions: Number(row.active_sessions),
+      newest_seen_at: row.newest_seen_at,
+    })),
+  });
+});
+
 interface CrudOp {
   op: 'PUT' | 'PATCH' | 'DELETE';
   type: string; // table name
