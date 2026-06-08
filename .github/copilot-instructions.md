@@ -20,6 +20,13 @@
 - Deploy Railway services from the repository root; only use service-specific paths where existing scripts document them.
 - Do not ship App Store/TestFlight clients with a schema-writing change until the live Railway backend and PowerSync service have been migrated and redeployed.
 
+## OpenClaw executor
+
+- Approved AI attempt checkpoints are executed by the worker only when `OPENCLAW_EXECUTOR_ENABLED=1` and SSH settings are configured; keep production/Railway safe-by-default unless the host can actually reach the Mac Mini.
+- The Mac Mini executor target is `bravostation@bravos-mac-mini.taile313a5.ts.net`, workdir `/Users/bravostation/clawd`, CLI `/opt/homebrew/bin/openclaw`, default agent `imessage-agent`, using `openclaw agent --agent imessage-agent --message "$PROMPT" --json --timeout 120`.
+- Use non-interactive SSH (`-o BatchMode=yes`) with the private key outside the repo. The current integration public key to authorise on the Mini is `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAB0tzfbA0+aKXye4HItr3TeUCwol4fg2GrOua8F8/Sa capture-openclaw-executor`.
+- Do not close OpenClaw execution work until SSH/OpenClaw smoke succeeds and a completed or failed attempt is recorded back into `task_events`.
+
 ## Web testing
 
 - On this macOS environment, bundled Playwright Chromium can crash during launch; use system Chrome for Playwright scripts (`p.chromium.launch(channel="chrome", headless=True)`).
