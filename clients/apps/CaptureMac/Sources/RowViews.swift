@@ -54,11 +54,14 @@ final class TagChipView: NSView {
     init(text: String, hex: String) {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = NSColor(hex: hex)?.cgColor ?? NSColor.systemGray.cgColor
-        layer?.cornerRadius = 6
+        let colour = NSColor(hex: hex) ?? Theme.textTertiary
+        layer?.backgroundColor = colour.withAlphaComponent(0.18).cgColor
+        layer?.borderColor = colour.withAlphaComponent(0.45).cgColor
+        layer?.borderWidth = 1
+        layer?.cornerRadius = 8
         let label = NSTextField(labelWithString: text)
-        label.font = .systemFont(ofSize: 10, weight: .medium)
-        label.textColor = .white
+        label.font = Theme.mono(10, .semibold)
+        label.textColor = colour.blended(withFraction: 0.35, of: Theme.textPrimary) ?? Theme.textPrimary
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
         NSLayoutConstraint.activate([
@@ -111,38 +114,47 @@ final class ProposedRowView: NSTableCellView {
 
     private func build(_ item: TaskItem, color: @escaping (String) -> String) {
         let title = NSTextField(labelWithString: item.title)
-        title.font = Theme.display(14, .semibold)
+        title.font = Theme.display(15, .semibold)
         title.textColor = Theme.textPrimary
         title.lineBreakMode = .byTruncatingTail
 
         var hintParts: [String] = []
         if let due = item.suggestedDueAt { hintParts.append(DueFormatter.short(due)) }
         if let cat = item.suggestedCategory { hintParts.append(cat) }
-        let hint = NSTextField(labelWithString: hintParts.isEmpty ? "no suggestion yet" : "suggested · " + hintParts.joined(separator: " · "))
-        hint.font = Theme.mono(11)
-        hint.textColor = hintParts.isEmpty ? Theme.textTertiary : Theme.signal
+        let hint = NSTextField(labelWithString: hintParts.isEmpty ? "awaiting signal" : "AI suggested · " + hintParts.joined(separator: " · "))
+        hint.font = Theme.mono(11, .semibold)
+        hint.textColor = hintParts.isEmpty ? Theme.textTertiary : Theme.iris
 
-        let textStack = NSStackView(views: [title, hint])
+        let decision = NSTextField(labelWithString: "STRUCTURE CHECK")
+        decision.font = Theme.mono(9, .bold)
+        decision.textColor = Theme.signal
+
+        let textStack = NSStackView(views: [decision, title, hint])
         textStack.orientation = .vertical
         textStack.alignment = .leading
-        textStack.spacing = 2
+        textStack.spacing = 3
         if let chips = tagChipRow(item.tags, color: color) { textStack.addArrangedSubview(chips) }
 
         let confirm = NSButton(title: "Confirm", target: self, action: #selector(confirmTapped))
         confirm.keyEquivalent = "\r"
         Theme.primary(confirm)
-        let reject = NSButton(title: "✕", target: self, action: #selector(rejectTapped))
+        confirm.setContentHuggingPriority(.required, for: .horizontal)
+        let reject = NSButton(title: "Reject", target: self, action: #selector(rejectTapped))
+        Theme.quietButton(reject)
         reject.contentTintColor = Theme.textTertiary
+        reject.setContentHuggingPriority(.required, for: .horizontal)
 
         let row = NSStackView(views: [textStack, NSView(), reject, confirm])
         row.orientation = .horizontal
-        row.spacing = 8
+        row.alignment = .centerY
+        row.spacing = 10
         row.translatesAutoresizingMaskIntoConstraints = false
         addSubview(row)
         NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-            row.centerYAnchor.constraint(equalTo: centerYAnchor)
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 18),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -18),
+            row.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12)
         ])
     }
 
@@ -173,12 +185,12 @@ final class ActiveRowView: NSTableCellView {
         check.contentTintColor = Theme.mint
 
         let title = NSTextField(labelWithString: item.title)
-        title.font = Theme.display(13, .regular)
+        title.font = Theme.display(14, .regular)
         title.textColor = item.status == .done ? Theme.textTertiary : Theme.textPrimary
         title.lineBreakMode = .byTruncatingTail
 
         let cat = NSTextField(labelWithString: item.category ?? "")
-        cat.font = Theme.mono(11)
+        cat.font = Theme.mono(11, .semibold)
         cat.textColor = Theme.textTertiary
 
         // Editable due: click to open presets + a date picker.
@@ -195,12 +207,13 @@ final class ActiveRowView: NSTableCellView {
         views.append(due)
         let row = NSStackView(views: views)
         row.orientation = .horizontal
-        row.spacing = 8
+        row.alignment = .centerY
+        row.spacing = 10
         row.translatesAutoresizingMaskIntoConstraints = false
         addSubview(row)
         NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
             row.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
     }

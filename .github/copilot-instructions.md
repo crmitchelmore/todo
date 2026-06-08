@@ -7,6 +7,12 @@
 - Markdown list ingestion must preserve nesting as parent-child task relationships.
 - Parent task views should roll up child progress and recent child `task_events` without duplicating or mutating child history.
 
+## UX patterns
+
+- Follow `docs/capture-ux-patterns.md` for product grammar, layout, and visual decisions.
+- Amber is reserved for human decisions; iris/purple is for AI evidence; mint is for completion/sync.
+- Mac, web, and iOS should keep the same command-deck / triage-queue / active-outline / inspector-card-stack model while using platform-native controls.
+
 ## Local Mac app refresh
 
 - Before validating or dogfooding the Mac app on this machine, run `scripts/refresh-mac-app.sh`.

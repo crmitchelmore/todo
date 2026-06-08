@@ -9,8 +9,11 @@ final class MacCaptureViewController: NSViewController {
     private let activeTable = NSTableView()
     private let proposedHeader = NSTextField(labelWithString: "")
     private let activeHeader = NSTextField(labelWithString: "ACTIVE")
+    private let commandLabel = NSTextField(labelWithString: "COMMAND DECK")
     private let filterBar = NSStackView()
     private let listPane = NSView()
+    private let proposedScroll = NSScrollView()
+    private let activeScroll = NSScrollView()
     private let detailScroll = NSScrollView()
     private let detailView = MacTaskDetailView()
     var onOpenSettings: (() -> Void)?
@@ -35,6 +38,11 @@ final class MacCaptureViewController: NSViewController {
         viewModel.start()
     }
 
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        resizeDetailDocument()
+    }
+
     func focusCapture() {
         view.window?.makeFirstResponder(captureField)
     }
@@ -45,8 +53,10 @@ final class MacCaptureViewController: NSViewController {
         view.window?.backgroundColor = Theme.ink
         captureField.textColor = Theme.textPrimary
         settingsButton.contentTintColor = Theme.textSecondary
+        commandLabel.textColor = Theme.textTertiary
         proposedHeader.textColor = Theme.signal
         activeHeader.textColor = Theme.textTertiary
+        styleScrollSurfaces()
         detailView.applyTheme()
         proposedTable.reloadData()
         activeTable.reloadData()
@@ -83,8 +93,17 @@ final class MacCaptureViewController: NSViewController {
         detailView.autoresizingMask = [.width]
         detailScroll.documentView = detailView
         detailScroll.hasVerticalScroller = true
+        detailScroll.hasHorizontalScroller = false
         detailScroll.drawsBackground = false
         detailScroll.translatesAutoresizingMaskIntoConstraints = false
+        detailScroll.scrollerStyle = .overlay
+        detailScroll.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(scrollContentBoundsChanged),
+            name: NSView.boundsDidChangeNotification,
+            object: detailScroll.contentView
+        )
         view.addSubview(detailScroll)
 
         captureField.placeholderString = "Capture anything…  (⌥Space to summon)"
@@ -99,9 +118,15 @@ final class MacCaptureViewController: NSViewController {
 
         settingsButton.target = self
         settingsButton.action = #selector(settingsTapped)
+        settingsButton.title = "⚙︎"
         settingsButton.bezelStyle = .rounded
         settingsButton.font = Theme.display(12, .semibold)
         settingsButton.translatesAutoresizingMaskIntoConstraints = false
+        settingsButton.toolTip = "Settings"
+
+        commandLabel.font = Theme.mono(10, .bold)
+        commandLabel.textColor = Theme.textTertiary
+        commandLabel.translatesAutoresizingMaskIntoConstraints = false
 
         proposedHeader.font = Theme.mono(11, .semibold)
         proposedHeader.textColor = Theme.signal
@@ -120,12 +145,13 @@ final class MacCaptureViewController: NSViewController {
         proposedTable.onConfirmSelected = { [weak self] in self?.confirmSelectedProposal() }
         proposedTable.onRejectSelected = { [weak self] in self?.rejectSelectedProposal() }
         proposedTable.onEditSelected = { [weak self] in self?.selectProposedForEditing() }
-        let proposedScroll = scroll(proposedTable)
-        let activeScroll = scroll(activeTable)
+        configure(scroll: proposedScroll, table: proposedTable)
+        configure(scroll: activeScroll, table: activeTable)
 
-        [captureField, settingsButton, proposedHeader, proposedScroll, activeHeader, filterBar, activeScroll].forEach {
+        [commandLabel, captureField, settingsButton, proposedHeader, proposedScroll, activeHeader, filterBar, activeScroll].forEach {
             listPane.addSubview($0)
         }
+        styleScrollSurfaces()
 
         NSLayoutConstraint.activate([
             listPane.topAnchor.constraint(equalTo: view.topAnchor),
@@ -133,39 +159,42 @@ final class MacCaptureViewController: NSViewController {
             listPane.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             listPane.widthAnchor.constraint(greaterThanOrEqualToConstant: 540),
 
-            detailScroll.topAnchor.constraint(equalTo: view.topAnchor, constant: 16),
-            detailScroll.leadingAnchor.constraint(equalTo: listPane.trailingAnchor, constant: 10),
-            detailScroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            detailScroll.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -16),
-            detailScroll.widthAnchor.constraint(equalToConstant: 410),
+            detailScroll.topAnchor.constraint(equalTo: view.topAnchor, constant: 18),
+            detailScroll.leadingAnchor.constraint(equalTo: listPane.trailingAnchor, constant: 14),
+            detailScroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -18),
+            detailScroll.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -18),
+            detailScroll.widthAnchor.constraint(equalToConstant: 520),
 
-            captureField.topAnchor.constraint(equalTo: listPane.topAnchor, constant: 16),
-            captureField.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 16),
+            commandLabel.topAnchor.constraint(equalTo: listPane.topAnchor, constant: 18),
+            commandLabel.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 22),
+
+            captureField.topAnchor.constraint(equalTo: commandLabel.bottomAnchor, constant: 6),
+            captureField.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 18),
             captureField.trailingAnchor.constraint(equalTo: settingsButton.leadingAnchor, constant: -10),
 
             settingsButton.centerYAnchor.constraint(equalTo: captureField.centerYAnchor),
-            settingsButton.trailingAnchor.constraint(equalTo: listPane.trailingAnchor, constant: -16),
-            settingsButton.widthAnchor.constraint(equalToConstant: 92),
+            settingsButton.trailingAnchor.constraint(equalTo: listPane.trailingAnchor, constant: -18),
+            settingsButton.widthAnchor.constraint(equalToConstant: 44),
 
-            proposedHeader.topAnchor.constraint(equalTo: captureField.bottomAnchor, constant: 16),
-            proposedHeader.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 18),
+            proposedHeader.topAnchor.constraint(equalTo: captureField.bottomAnchor, constant: 18),
+            proposedHeader.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 22),
 
-            proposedScroll.topAnchor.constraint(equalTo: proposedHeader.bottomAnchor, constant: 4),
-            proposedScroll.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 16),
-            proposedScroll.trailingAnchor.constraint(equalTo: listPane.trailingAnchor, constant: -16),
-            proposedScroll.heightAnchor.constraint(equalToConstant: 180),
+            proposedScroll.topAnchor.constraint(equalTo: proposedHeader.bottomAnchor, constant: 8),
+            proposedScroll.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 18),
+            proposedScroll.trailingAnchor.constraint(equalTo: listPane.trailingAnchor, constant: -18),
+            proposedScroll.heightAnchor.constraint(equalToConstant: 220),
 
-            activeHeader.topAnchor.constraint(equalTo: proposedScroll.bottomAnchor, constant: 16),
-            activeHeader.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 18),
+            activeHeader.topAnchor.constraint(equalTo: proposedScroll.bottomAnchor, constant: 18),
+            activeHeader.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 22),
 
             filterBar.topAnchor.constraint(equalTo: activeHeader.bottomAnchor, constant: 6),
-            filterBar.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 16),
-            filterBar.trailingAnchor.constraint(lessThanOrEqualTo: listPane.trailingAnchor, constant: -16),
+            filterBar.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 18),
+            filterBar.trailingAnchor.constraint(lessThanOrEqualTo: listPane.trailingAnchor, constant: -18),
 
-            activeScroll.topAnchor.constraint(equalTo: filterBar.bottomAnchor, constant: 6),
-            activeScroll.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 16),
-            activeScroll.trailingAnchor.constraint(equalTo: listPane.trailingAnchor, constant: -16),
-            activeScroll.bottomAnchor.constraint(equalTo: listPane.bottomAnchor, constant: -16)
+            activeScroll.topAnchor.constraint(equalTo: filterBar.bottomAnchor, constant: 8),
+            activeScroll.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 18),
+            activeScroll.trailingAnchor.constraint(equalTo: listPane.trailingAnchor, constant: -18),
+            activeScroll.bottomAnchor.constraint(equalTo: listPane.bottomAnchor, constant: -18)
         ])
         reload()
     }
@@ -175,20 +204,42 @@ final class MacCaptureViewController: NSViewController {
         column.resizingMask = .autoresizingMask
         table.addTableColumn(column)
         table.headerView = nil
-        table.rowHeight = identifier == "proposed" ? 78 : 36
+        table.rowHeight = identifier == "proposed" ? 92 : 44
         table.dataSource = self
         table.delegate = self
         table.identifier = NSUserInterfaceItemIdentifier(identifier)
         table.style = .inset
+        table.backgroundColor = .clear
+        table.selectionHighlightStyle = .regular
+        table.intercellSpacing = NSSize(width: 0, height: identifier == "proposed" ? 8 : 4)
     }
 
-    private func scroll(_ table: NSTableView) -> NSScrollView {
-        let s = NSScrollView()
-        s.documentView = table
-        s.hasVerticalScroller = true
-        s.drawsBackground = false
-        s.translatesAutoresizingMaskIntoConstraints = false
-        return s
+    private func configure(scroll: NSScrollView, table: NSTableView) {
+        scroll.documentView = table
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.drawsBackground = false
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.scrollerStyle = .overlay
+    }
+
+    private func styleScrollSurfaces() {
+        Theme.card(proposedScroll, color: Theme.surface)
+        Theme.card(activeScroll, color: Theme.surface)
+        Theme.card(detailScroll, color: Theme.surface)
+        [proposedScroll, activeScroll, detailScroll].forEach { $0.layer?.masksToBounds = true }
+    }
+
+    @objc private func scrollContentBoundsChanged() {
+        resizeDetailDocument()
+    }
+
+    private func resizeDetailDocument() {
+        guard detailScroll.documentView === detailView else { return }
+        let width = max(480, detailScroll.contentSize.width)
+        detailView.frame.size.width = width
+        detailView.layoutSubtreeIfNeeded()
+        detailView.frame.size.height = max(detailScroll.contentSize.height, detailView.fittingSize.height)
     }
 
     /// Rebuild the tag filter chip row from the synced tags ("slice by tag or multiple tags").
@@ -246,6 +297,7 @@ final class MacCaptureViewController: NSViewController {
                 self?.viewModel.setDone(item, done)
             }
         )
+        resizeDetailDocument()
     }
 
     @objc private func filterTapped(_ sender: NSButton) {
@@ -324,9 +376,13 @@ extension MacCaptureViewController: NSTableViewDataSource, NSTableViewDelegate {
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        if tableView == proposedTable { return 78 }
+        if tableView == proposedTable { return 92 }
         if case .header = viewModel.activeRows[row] { return 24 }
-        return 36
+        return 44
+    }
+
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        CockpitRowView()
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -339,6 +395,7 @@ extension MacCaptureViewController: NSTableViewDataSource, NSTableViewDelegate {
                 self?.viewModel.reject(item)
             }
         }
+
         switch viewModel.activeRows[row] {
         case let .header(label, count):
             return DateBucketHeaderView(label: label, count: count)
@@ -349,6 +406,7 @@ extension MacCaptureViewController: NSTableViewDataSource, NSTableViewDelegate {
                 self?.viewModel.setDue(item, date)
             }
         }
+
     }
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
@@ -364,6 +422,19 @@ extension MacCaptureViewController: NSTableViewDataSource, NSTableViewDelegate {
             viewModel.select(viewModel.proposed[row])
         } else if table == activeTable, case let .task(item) = viewModel.activeRows[row] {
             viewModel.select(item)
+        }
+    }
+
+    private final class CockpitRowView: NSTableRowView {
+        override func drawSelection(in dirtyRect: NSRect) {
+            guard selectionHighlightStyle != .none else { return }
+            let inset = bounds.insetBy(dx: 8, dy: 2)
+            let path = NSBezierPath(roundedRect: inset, xRadius: 14, yRadius: 14)
+            Theme.surfaceSelected.setFill()
+            path.fill()
+            Theme.signal.withAlphaComponent(0.28).setStroke()
+            path.lineWidth = 1
+            path.stroke()
         }
     }
 }

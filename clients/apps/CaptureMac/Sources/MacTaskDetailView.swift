@@ -50,10 +50,10 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
     deinit { feasibilityTask?.cancel() }
 
     func applyTheme() {
-        layer?.backgroundColor = Theme.surface.cgColor
+        layer?.backgroundColor = NSColor.clear.cgColor
         stateLabel.textColor = Theme.signal
         titleField.textColor = Theme.textPrimary
-        titleField.backgroundColor = Theme.surfaceHi
+        titleField.backgroundColor = .clear
         notesView.textColor = Theme.textPrimary
         notesView.backgroundColor = Theme.surfaceHi
         dueEnabled.contentTintColor = Theme.signal
@@ -114,8 +114,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
 
     private func build() {
         wantsLayer = true
-        layer?.backgroundColor = Theme.surface.cgColor
-        layer?.cornerRadius = 20
+        layer?.backgroundColor = NSColor.clear.cgColor
 
         emptyView.orientation = .vertical
         emptyView.alignment = .centerX
@@ -138,17 +137,19 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         addSubview(emptyView)
 
         formView.orientation = .vertical
-        formView.spacing = 14
-        formView.edgeInsets = NSEdgeInsets(top: 18, left: 18, bottom: 18, right: 18)
+        formView.alignment = .width
+        formView.spacing = 12
+        formView.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
         formView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(formView)
 
-        stateLabel.font = Theme.mono(11, .semibold)
+        stateLabel.font = Theme.mono(10, .bold)
         stateLabel.textColor = Theme.signal
 
-        titleField.font = Theme.display(21, .semibold)
+        titleField.font = Theme.display(24, .semibold)
         titleField.textColor = Theme.textPrimary
-        titleField.backgroundColor = Theme.surfaceHi
+        titleField.backgroundColor = .clear
+        titleField.isBezeled = false
         titleField.delegate = self
 
         dueEnabled.target = self
@@ -183,22 +184,29 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         notesScroll.documentView = notesView
         notesScroll.hasVerticalScroller = true
         notesScroll.drawsBackground = false
-        notesScroll.heightAnchor.constraint(equalToConstant: 130).isActive = true
+        notesScroll.wantsLayer = true
+        notesScroll.layer?.cornerRadius = 12
+        notesScroll.layer?.masksToBounds = true
+        notesScroll.layer?.borderWidth = 1
+        notesScroll.layer?.borderColor = Theme.hairline.cgColor
+        notesScroll.heightAnchor.constraint(equalToConstant: 150).isActive = true
 
         primaryButton.target = self
         primaryButton.action = #selector(primaryTapped)
         Theme.primary(primaryButton)
         secondaryButton.target = self
         secondaryButton.action = #selector(secondaryTapped)
-        secondaryButton.bezelStyle = .rounded
+        Theme.quietButton(secondaryButton)
         rejectButton.target = self
         rejectButton.action = #selector(rejectTapped)
-        rejectButton.bezelStyle = .rounded
+        Theme.quietButton(rejectButton)
         rejectButton.contentTintColor = Theme.danger
 
         rollupStack.orientation = .vertical
         rollupStack.spacing = 8
         rollupStack.alignment = .leading
+        rollupStack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
+        Theme.card(rollupStack, color: Theme.surfaceHi)
         rollupSummary.font = Theme.display(13, .semibold)
         rollupSummary.textColor = Theme.textPrimary
         rollupProgress.isIndeterminate = false
@@ -220,20 +228,28 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         actionRow.spacing = 8
         actionRow.distribution = .fillProportionally
 
-        formView.addArrangedSubview(stateLabel)
-        formView.addArrangedSubview(titleField)
-        formView.addArrangedSubview(actionRow)
+        formView.addArrangedSubview(card([
+            stateLabel,
+            titleField,
+            actionRow
+        ], color: Theme.surfaceRaised))
         formView.addArrangedSubview(rollupStack)
-        formView.addArrangedSubview(sectionTitle("Properties"))
-        formView.addArrangedSubview(row(label: "Due", views: [dueEnabled, duePicker]))
-        formView.addArrangedSubview(row(label: "Calendar", views: [feasibilityLabel]))
-        formView.addArrangedSubview(row(label: "Category", views: [categoryBox]))
-        formView.addArrangedSubview(row(label: "Priority", views: [priorityPopup]))
-        formView.addArrangedSubview(row(label: "Tags", views: [tagsField]))
-        formView.addArrangedSubview(sectionTitle("Expansion"))
-        formView.addArrangedSubview(notesScroll)
-        formView.addArrangedSubview(sectionTitle("AI + activity history"))
-        formView.addArrangedSubview(historyStack)
+        formView.addArrangedSubview(card([
+            sectionTitle("Structure"),
+            row(label: "Due", views: [dueEnabled, duePicker]),
+            row(label: "Calendar", views: [feasibilityLabel]),
+            row(label: "Category", views: [categoryBox]),
+            row(label: "Priority", views: [priorityPopup]),
+            row(label: "Tags", views: [tagsField])
+        ]))
+        formView.addArrangedSubview(card([
+            sectionTitle("Expansion"),
+            notesScroll
+        ]))
+        formView.addArrangedSubview(card([
+            sectionTitle("AI + activity"),
+            historyStack
+        ]))
 
         NSLayoutConstraint.activate([
             emptyView.centerXAnchor.constraint(equalTo: centerXAnchor),
@@ -242,7 +258,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
             formView.leadingAnchor.constraint(equalTo: leadingAnchor),
             formView.trailingAnchor.constraint(equalTo: trailingAnchor),
             formView.topAnchor.constraint(equalTo: topAnchor),
-            formView.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
+            formView.bottomAnchor.constraint(equalTo: bottomAnchor),
             categoryBox.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
             tagsField.widthAnchor.constraint(greaterThanOrEqualToConstant: 180)
         ])
@@ -328,6 +344,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         text.orientation = .vertical
         text.alignment = .leading
         text.spacing = 6
+        text.widthAnchor.constraint(lessThanOrEqualToConstant: 420).isActive = true
         let row = NSStackView(views: [icon, text])
         row.orientation = .horizontal
         row.alignment = .top
@@ -338,11 +355,12 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
     private func historyRow(_ event: TaskEvent) -> NSView {
         let icon = NSTextField(labelWithString: eventIcon(event))
         icon.font = Theme.display(16, .semibold)
-        icon.textColor = event.actor == "worker" || event.actor == "agent" ? Theme.signal : Theme.textTertiary
+        icon.textColor = event.actor == "worker" || event.actor == "agent" ? Theme.iris : Theme.textTertiary
 
         let title = NSTextField(labelWithString: event.title)
         title.font = Theme.display(13, .semibold)
         title.textColor = Theme.textPrimary
+        title.lineBreakMode = .byTruncatingTail
         let meta = NSTextField(labelWithString: "\(event.actor) · \(eventTime(event.createdAt))")
         meta.font = Theme.mono(10)
         meta.textColor = Theme.textTertiary
@@ -354,11 +372,13 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         body.font = Theme.display(12, .regular)
         body.textColor = Theme.textSecondary
         body.isHidden = (event.body ?? "").isEmpty
+        body.preferredMaxLayoutWidth = 400
 
         let text = NSStackView(views: [head, body])
         text.orientation = .vertical
         text.alignment = .leading
         text.spacing = 2
+        text.widthAnchor.constraint(lessThanOrEqualToConstant: 420).isActive = true
         let row = NSStackView(views: [icon, text])
         row.orientation = .horizontal
         row.alignment = .top
@@ -373,18 +393,39 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         return label
     }
 
+    private func card(_ views: [NSView], color: NSColor = Theme.surfaceHi) -> NSView {
+        let container = NSView()
+        Theme.card(container, color: color)
+        let stack = NSStackView(views: views)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: container.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
+        return container
+    }
+
     private func row(label text: String, views: [NSView]) -> NSStackView {
         let label = NSTextField(labelWithString: text)
         label.font = Theme.mono(11, .semibold)
         label.textColor = Theme.textTertiary
-        label.widthAnchor.constraint(equalToConstant: 72).isActive = true
+        label.widthAnchor.constraint(equalToConstant: 82).isActive = true
         let controls = NSStackView(views: views)
         controls.orientation = .horizontal
         controls.spacing = 8
+        controls.alignment = .firstBaseline
         let row = NSStackView(views: [label, controls])
         row.orientation = .horizontal
         row.alignment = .firstBaseline
         row.spacing = 10
+        row.widthAnchor.constraint(lessThanOrEqualToConstant: 450).isActive = true
         return row
     }
 
