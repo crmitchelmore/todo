@@ -85,6 +85,16 @@ Use `scripts/with-secrets.sh` rather than calling `railway` directly. Railway CL
 CLI report "Unauthorized" even when `RAILWAY_API_TOKEN` is valid. The wrapper normalises this by
 unsetting `RAILWAY_TOKEN` whenever `RAILWAY_API_TOKEN` is available.
 
+To open production Postgres from local terminal:
+
+```bash
+scripts/with-secrets.sh railway connect postgres
+```
+
+The `postgres` service is a custom container, not Railway's managed database plugin, so the raw
+Railway CLI looks for `DATABASE_PUBLIC_URL` and fails. The wrapper handles this repo-specific case
+by reading the Postgres service's TCP proxy variables and executing `psql` with `PGSSLMODE=disable`.
+
 For local/dev commands that need credentials, keep secrets in ignored `.env.local` files or in the
 macOS Keychain service `capture` using the env var as the account name:
 

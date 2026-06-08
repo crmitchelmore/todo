@@ -64,6 +64,34 @@ normalise_railway_auth_env() {
   fi
 }
 
+connect_custom_railway_postgres() {
+  command -v psql >/dev/null 2>&1 || {
+    printf 'psql is required for custom Railway Postgres connections.\n' >&2
+    exit 127
+  }
+  command -v jq >/dev/null 2>&1 || {
+    printf 'jq is required to read Railway Postgres connection variables.\n' >&2
+    exit 127
+  }
+
+  local vars pg_host pg_port pg_user pg_database pg_password
+  vars="$(railway variable list --service postgres --json)"
+  pg_host="$(jq -r '.RAILWAY_TCP_PROXY_DOMAIN // empty' <<<"$vars")"
+  pg_port="$(jq -r '.RAILWAY_TCP_PROXY_PORT // empty' <<<"$vars")"
+  pg_user="$(jq -r '.POSTGRES_USER // empty' <<<"$vars")"
+  pg_database="$(jq -r '.POSTGRES_DB // empty' <<<"$vars")"
+  pg_password="$(jq -r '.POSTGRES_PASSWORD // empty' <<<"$vars")"
+
+  if [[ -z "$pg_host" || -z "$pg_port" || -z "$pg_user" || -z "$pg_database" || -z "$pg_password" ]]; then
+    printf 'Railway postgres service is missing TCP proxy or Postgres credentials.\n' >&2
+    exit 1
+  fi
+
+  PGSSLMODE="${PGSSLMODE:-disable}" \
+    PGPASSWORD="$pg_password" \
+    exec psql -h "$pg_host" -p "$pg_port" -U "$pg_user" -d "$pg_database" "$@"
+}
+
 if [[ $# -eq 0 ]]; then
   usage
   exit 64
@@ -77,5 +105,10 @@ if [[ -n "${CAPTURE_SECRETS_ENV:-}" ]]; then
 fi
 load_keychain_defaults
 normalise_railway_auth_env
+
+if [[ "$1" == "railway" && "${2:-}" == "connect" && "${3:-}" == "postgres" ]]; then
+  shift 3
+  connect_custom_railway_postgres "$@"
+fi
 
 exec "$@"
