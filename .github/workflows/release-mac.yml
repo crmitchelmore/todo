@@ -11,10 +11,19 @@ name: Release macOS App
 #   + APPLE_DEVELOPER_ID_APPLICATION_PASSWORD. If absent, the export step relies
 #   on -allowProvisioningUpdates to obtain one via the App Store Connect API.
 #
-# Trigger: push a tag like `mac-v0.1.0`, or run manually (workflow_dispatch).
+# Trigger: push a tag like `mac-v0.1.0`, run manually, or merge Mac/shared native changes to main.
 
 on:
   push:
+    branches:
+      - main
+    paths:
+      - VERSION
+      - clients/CaptureCore/**
+      - clients/apps/project.yml
+      - clients/apps/CaptureMac/**
+      - scripts/generate-appcast.sh
+      - .github/workflows/release-mac.yml
     tags:
       - 'mac-v*'
   workflow_dispatch:
@@ -56,12 +65,18 @@ jobs:
           elif [[ "$GITHUB_REF" == refs/tags/mac-v* ]]; then
             VERSION="${GITHUB_REF#refs/tags/mac-v}"
           else
-            VERSION="0.1.0"
+            VERSION="$(cat VERSION)"
           fi
           BUILD_NUMBER=$(date -u +"%Y%m%d%H%M")
+          if [[ "$GITHUB_REF" == refs/tags/mac-v* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="mac-auto-${BUILD_NUMBER}"
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "build=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
-          echo "Building $VERSION (build $BUILD_NUMBER)"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Building $VERSION (build $BUILD_NUMBER, tag $TAG)"
 
       - name: Generate Xcode Project
         working-directory: clients/apps
@@ -204,10 +219,11 @@ jobs:
           echo "APPCAST_PATH=$RUNNER_TEMP/appcast.xml" >> "$GITHUB_ENV"
           cat "$RUNNER_TEMP/appcast.xml"
 
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/mac-v')
+      - name: Publish Sparkle Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Capture Mac ${{ steps.version.outputs.version }} (${{ steps.version.outputs.build }})
           files: |
             ${{ env.ZIP_PATH }}
             ${{ env.APPCAST_PATH }}
@@ -215,15 +231,6 @@ jobs:
           draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Artifact (manual builds)
-        if: "!startsWith(github.ref, 'refs/tags/mac-v')"
-        uses: actions/upload-artifact@v4
-        with:
-          name: Capture-${{ steps.version.outputs.version }}
-          path: |
-            ${{ env.ZIP_PATH }}
-            ${{ env.APPCAST_PATH }}
 
       - name: Cleanup
         if: always()

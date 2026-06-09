@@ -181,6 +181,10 @@ The backend deploy (above) covers the servers. The three clients ship on their o
 
 Release automation should prefer official, auditable tools first: `release-ios.yml`, `xcodebuild`,
 `xcrun altool` / App Store Connect API credentials, and `gh workflow run release-ios.yml --ref main`.
+Merging changes under `clients/apps/CaptureiOS/`, `CaptureShare/`, `CaptureWidget/`, `clients/CaptureCore/`,
+or `clients/apps/project.yml` to `main` automatically runs `release-ios.yml` and uploads a TestFlight
+build. If the automatic run fails, fix the workflow or signing issue rather than treating the merge as
+shipped.
 Use browser automation only for the Apple Developer portal gaps that the API key cannot mutate, such
 as assigning App Groups to App IDs. For that class of workflow, use Webwright/Playwright against a
 user-signed-in browser session, keep screenshots/logs as artefacts, and never store Apple passwords
@@ -195,12 +199,21 @@ or 2FA codes in the repo.
 - **Unsigned local build** — `xcodebuild … CODE_SIGNING_ALLOWED=NO` for running on your own machine
   during development (what the repo's build commands use).
 
+Merging changes under `clients/apps/CaptureMac/`, `clients/CaptureCore/`, or `clients/apps/project.yml`
+to `main` automatically runs `release-mac.yml`, publishes a signed/notarised GitHub Release, and updates
+the Sparkle appcast used by installed Mac apps.
+
 ### Web app
 - **Static host** — `cd web && npm run build` produces a static bundle; deploy `web/dist` to any
   static host (Vercel, Netlify, Cloudflare Pages, or a Railway static service). Set
   `VITE_BACKEND_URL` / `VITE_POWERSYNC_URL` at build time to the Railway domains.
 - **Same-project on Railway** — add a static/Nginx service to the `capture` project so everything
   lives in one place.
+
+Merging changes under `web/` to `main` automatically runs `release-web.yml`, validates the Vite build,
+and deploys the Railway `web` service. The workflow requires `RAILWAY_API_TOKEN` (or `RAILWAY_TOKEN`)
+and `RAILWAY_PROJECT_ID` repository secrets so it deploys into the existing `capture` project without
+interactive Railway linking.
 
 > Whichever track: the clients only need the two public HTTPS domains. No client embeds secrets —
 > the backend mints short-lived JWTs and the capture endpoint is the only write path.

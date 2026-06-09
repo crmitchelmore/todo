@@ -2,7 +2,15 @@ import AppKit
 import CaptureCore
 
 final class MacCaptureViewController: NSViewController {
+    private enum Layout {
+        static let minListWidth: CGFloat = 540
+        static let minDetailWidth: CGFloat = 500
+        static let defaultDetailWidth: CGFloat = 560
+        static let dividerDefaultsKey = "capture.mac.detailPaneWidth"
+    }
+
     private let viewModel: MacViewModel
+    private let splitView = NSSplitView()
     private let captureField = AttachmentCaptureTextField()
     private let settingsButton = NSButton(title: "Settings", target: nil, action: nil)
     private let proposedTable = FastConfirmTableView()
@@ -16,6 +24,7 @@ final class MacCaptureViewController: NSViewController {
     private let activeScroll = NSScrollView()
     private let detailScroll = NSScrollView()
     private let detailView = MacTaskDetailView()
+    private var didRestoreSplitPosition = false
     var onOpenSettings: (() -> Void)?
 
     init(viewModel: MacViewModel) {
@@ -40,6 +49,7 @@ final class MacCaptureViewController: NSViewController {
 
     override func viewDidLayout() {
         super.viewDidLayout()
+        restoreSplitPositionIfNeeded()
         resizeDetailDocument()
     }
 
@@ -85,11 +95,17 @@ final class MacCaptureViewController: NSViewController {
     }
 
     private func buildUI() {
+        splitView.isVertical = true
+        splitView.dividerStyle = .thin
+        splitView.delegate = self
+        splitView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(splitView)
+
         listPane.translatesAutoresizingMaskIntoConstraints = false
         Theme.paintInk(listPane)
-        view.addSubview(listPane)
+        splitView.addArrangedSubview(listPane)
 
-        detailView.frame = NSRect(x: 0, y: 0, width: 410, height: 820)
+        detailView.frame = NSRect(x: 0, y: 0, width: Layout.defaultDetailWidth, height: 820)
         detailView.autoresizingMask = [.width]
         detailScroll.documentView = detailView
         detailScroll.hasVerticalScroller = true
@@ -104,7 +120,7 @@ final class MacCaptureViewController: NSViewController {
             name: NSView.boundsDidChangeNotification,
             object: detailScroll.contentView
         )
-        view.addSubview(detailScroll)
+        splitView.addArrangedSubview(detailScroll)
 
         captureField.placeholderString = "Capture anything…  (⌥Space to summon)"
         captureField.font = Theme.display(18, .medium)
@@ -154,16 +170,12 @@ final class MacCaptureViewController: NSViewController {
         styleScrollSurfaces()
 
         NSLayoutConstraint.activate([
-            listPane.topAnchor.constraint(equalTo: view.topAnchor),
-            listPane.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            listPane.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            listPane.widthAnchor.constraint(greaterThanOrEqualToConstant: 540),
-
-            detailScroll.topAnchor.constraint(equalTo: view.topAnchor, constant: 18),
-            detailScroll.leadingAnchor.constraint(equalTo: listPane.trailingAnchor, constant: 14),
-            detailScroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -18),
-            detailScroll.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -18),
-            detailScroll.widthAnchor.constraint(equalToConstant: 520),
+            splitView.topAnchor.constraint(equalTo: view.topAnchor),
+            splitView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            splitView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            splitView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            listPane.widthAnchor.constraint(greaterThanOrEqualToConstant: Layout.minListWidth),
+            detailScroll.widthAnchor.constraint(greaterThanOrEqualToConstant: Layout.minDetailWidth),
 
             commandLabel.topAnchor.constraint(equalTo: listPane.topAnchor, constant: 18),
             commandLabel.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 22),
@@ -236,10 +248,19 @@ final class MacCaptureViewController: NSViewController {
 
     private func resizeDetailDocument() {
         guard detailScroll.documentView === detailView else { return }
-        let width = max(480, detailScroll.contentSize.width)
+        let width = max(Layout.minDetailWidth, detailScroll.contentSize.width)
         detailView.frame.size.width = width
         detailView.layoutSubtreeIfNeeded()
         detailView.frame.size.height = max(detailScroll.contentSize.height, detailView.fittingSize.height)
+    }
+
+    private func restoreSplitPositionIfNeeded() {
+        guard !didRestoreSplitPosition, splitView.bounds.width > 0 else { return }
+        let saved = UserDefaults.standard.double(forKey: Layout.dividerDefaultsKey)
+        let detailWidth = saved > 0 ? saved : Layout.defaultDetailWidth
+        let dividerPosition = splitView.bounds.width - min(max(detailWidth, Layout.minDetailWidth), splitView.bounds.width - Layout.minListWidth)
+        splitView.setPosition(max(Layout.minListWidth, dividerPosition), ofDividerAt: 0)
+        didRestoreSplitPosition = true
     }
 
     /// Rebuild the tag filter chip row from the synced tags ("slice by tag or multiple tags").
@@ -436,5 +457,21 @@ extension MacCaptureViewController: NSTableViewDataSource, NSTableViewDelegate {
             path.lineWidth = 1
             path.stroke()
         }
+    }
+}
+
+extension MacCaptureViewController: NSSplitViewDelegate {
+    func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+        Layout.minListWidth
+    }
+
+    func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+        max(Layout.minListWidth, splitView.bounds.width - Layout.minDetailWidth)
+    }
+
+    func splitViewDidResizeSubviews(_ notification: Notification) {
+        guard didRestoreSplitPosition, detailScroll.frame.width >= Layout.minDetailWidth else { return }
+        UserDefaults.standard.set(detailScroll.frame.width, forKey: Layout.dividerDefaultsKey)
+        resizeDetailDocument()
     }
 }
