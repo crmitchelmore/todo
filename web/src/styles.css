@@ -964,6 +964,21 @@ h2::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 .row:last-child { border-bottom: none; }
 .row-title { flex: 1; font-size: 15px; font-weight: 500; }
 .row-done .row-title { color: var(--text-faint); text-decoration: line-through; text-decoration-color: var(--line-strong); }
+.row-rejected {
+  cursor: default;
+  opacity: 0.76;
+  background: rgba(255, 255, 255, 0.018);
+}
+.row-rejected:hover,
+.row-rejected:focus-visible {
+  background: rgba(255, 255, 255, 0.018);
+}
+.row-rejected .row-title {
+  color: var(--text-faint);
+}
+.rejected-bin {
+  margin-top: 28px;
+}
 .tag {
   font-family: var(--font-mono);
   font-size: 10px;

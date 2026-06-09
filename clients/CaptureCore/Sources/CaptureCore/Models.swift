@@ -1,7 +1,8 @@
 import Foundation
 
 /// Lifecycle of a captured item. Only `confirmed`/`active`+ are "real" todos;
-/// `proposed` is the instant-capture inbox awaiting the mandatory human confirm.
+/// `proposed` is the instant-capture inbox awaiting the mandatory human confirm,
+/// and `cancelled` is the low-fidelity rejected bin.
 public enum TaskStatus: String, Sendable, CaseIterable {
     case proposed
     case active

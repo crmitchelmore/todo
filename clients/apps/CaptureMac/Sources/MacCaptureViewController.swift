@@ -399,6 +399,7 @@ extension MacCaptureViewController: NSTableViewDataSource, NSTableViewDelegate {
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
         if tableView == proposedTable { return 92 }
         if case .header = viewModel.activeRows[row] { return 24 }
+        if case .rejected = viewModel.activeRows[row] { return 34 }
         return 44
     }
 
@@ -426,12 +427,15 @@ extension MacCaptureViewController: NSTableViewDataSource, NSTableViewDelegate {
             } onSetDue: { [weak self] date in
                 self?.viewModel.setDue(item, date)
             }
+        case let .rejected(item):
+            return RejectedRowView(item: item)
         }
 
     }
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
         if tableView == activeTable, case .header = viewModel.activeRows[row] { return false }
+        if tableView == activeTable, case .rejected = viewModel.activeRows[row] { return false }
         return true
     }
 

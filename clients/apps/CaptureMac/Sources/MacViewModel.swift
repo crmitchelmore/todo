@@ -5,6 +5,7 @@ import CaptureCore
 enum MacActiveRow {
     case header(label: String, count: Int)
     case task(TaskItem)
+    case rejected(TaskItem)
 }
 
 @MainActor
@@ -13,6 +14,7 @@ final class MacViewModel {
     let auth: AuthStore
     private(set) var proposed: [TaskItem] = []
     private(set) var active: [TaskItem] = []
+    private(set) var rejected: [TaskItem] = []
     private(set) var allTags: [Tag] = []
     private(set) var tagColors: [String: String] = [:]   // lowercased name -> hex
     private(set) var tagFilter: Set<String> = []          // lowercased names; AND semantics
@@ -55,6 +57,7 @@ final class MacViewModel {
         }
         watch("proposed", { try self.store.watchProposed() }, assign: { self.proposed = $0 })
         watch("active", { try self.store.watchActive() }, assign: { self.active = $0 })
+        watch("rejected", { try self.store.watchRejected() }, assign: { self.rejected = $0 })
         watchTags()
     }
 
@@ -80,11 +83,13 @@ final class MacViewModel {
             do {
                 async let proposedRows = self.store.listProposed()
                 async let activeRows = self.store.listActive()
-                let (nextProposed, nextActive) = try await (proposedRows, activeRows)
+                async let rejectedRows = self.store.listRejected()
+                let (nextProposed, nextActive, nextRejected) = try await (proposedRows, activeRows, rejectedRows)
                 await MainActor.run {
                     self.proposed = nextProposed
                     self.active = nextActive
-                    NSLog("[Capture] Loaded task snapshot (\(reason)): proposed=\(nextProposed.count) active=\(nextActive.count)")
+                    self.rejected = nextRejected
+                    NSLog("[Capture] Loaded task snapshot (\(reason)): proposed=\(nextProposed.count) active=\(nextActive.count) rejected=\(nextRejected.count)")
                     self.notify()
                 }
             } catch {
@@ -161,6 +166,11 @@ final class MacViewModel {
             rows.append(.header(label: bucket.label, count: group.count))
             rows.append(contentsOf: group.map { .task($0) })
         }
+        let rejectedItems = rejected.filter(matchesFilter)
+        if !rejectedItems.isEmpty {
+            rows.append(.header(label: "Rejected", count: rejectedItems.count))
+            rows.append(contentsOf: rejectedItems.map { .rejected($0) })
+        }
         return rows
     }
 
@@ -211,6 +221,7 @@ final class MacViewModel {
                 category: item.suggestedCategory,
                 tags: item.tags
             )
+            self.refreshTaskSnapshots(reason: "confirm")
         }
     }
 
@@ -347,7 +358,10 @@ final class MacViewModel {
     }
 
     func reject(_ item: TaskItem) {
-        Task { try? await store.reject(id: item.id) }
+        Task {
+            try? await store.reject(id: item.id)
+            self.refreshTaskSnapshots(reason: "reject")
+        }
     }
 
     func rejectSelected() {

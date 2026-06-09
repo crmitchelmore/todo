@@ -396,7 +396,11 @@ public final class TaskStore: @unchecked Sendable {
     }
 
     public func reject(id: String) async throws {
-        try await db.execute(sql: "DELETE FROM \(TASKS_TABLE) WHERE id = ?", parameters: [id])
+        let now = ISO8601.string(Date())
+        try await db.execute(
+            sql: "UPDATE \(TASKS_TABLE) SET status = 'cancelled', updated_at = ? WHERE id = ?",
+            parameters: [now, id]
+        )
     }
 
     public func setDone(id: String, done: Bool) async throws {
@@ -450,6 +454,22 @@ public final class TaskStore: @unchecked Sendable {
     public func watchDone() throws -> AsyncThrowingStream<[TaskItem], Error> {
         try db.watch(
             sql: "SELECT * FROM \(TASKS_TABLE) WHERE status = 'done' ORDER BY completed_at DESC LIMIT 50",
+            parameters: [],
+            mapper: Self.map
+        )
+    }
+
+    public func watchRejected() throws -> AsyncThrowingStream<[TaskItem], Error> {
+        try db.watch(
+            sql: "SELECT * FROM \(TASKS_TABLE) WHERE status = 'cancelled' ORDER BY updated_at DESC LIMIT 50",
+            parameters: [],
+            mapper: Self.map
+        )
+    }
+
+    public func listRejected() async throws -> [TaskItem] {
+        try await db.getAll(
+            sql: "SELECT * FROM \(TASKS_TABLE) WHERE status = 'cancelled' ORDER BY updated_at DESC LIMIT 50",
             parameters: [],
             mapper: Self.map
         )

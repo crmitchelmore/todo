@@ -57,6 +57,7 @@ final class CaptureViewModel {
     private(set) var proposed: [TaskItem] = []
     private(set) var active: [TaskItem] = []
     private(set) var done: [TaskItem] = []
+    private(set) var rejected: [TaskItem] = []
     private(set) var allTags: [Tag] = []
     private(set) var tagColors: [String: String] = [:]   // lowercased name -> hex
     private(set) var tagFilter: Set<String> = []          // lowercased; AND semantics
@@ -76,6 +77,7 @@ final class CaptureViewModel {
         watch({ try self.store.watchProposed() }, assign: { self.proposed = $0 })
         watch({ try self.store.watchActive() }, assign: { self.active = $0 })
         watch({ try self.store.watchDone() }, assign: { self.done = $0 })
+        watch({ try self.store.watchRejected() }, assign: { self.rejected = $0 })
         watchTags()
         refreshSyncSummary()
     }
@@ -128,6 +130,7 @@ final class CaptureViewModel {
 
     var filteredActiveCount: Int { active.filter(matchesFilter).count }
     var filteredDoneCount: Int { done.filter(matchesFilter).count }
+    var filteredRejectedCount: Int { rejected.filter(matchesFilter).count }
 
     /// Filtered active items grouped into date buckets (in bucket order), for "view by date".
     var activeGroups: [(bucket: DateBucket, items: [TaskItem])] {
@@ -143,6 +146,27 @@ final class CaptureViewModel {
     }
 
     var filteredDone: [TaskItem] { done.filter(matchesFilter) }
+    var filteredRejected: [TaskItem] { rejected.filter(matchesFilter) }
+
+    private func refreshTaskSnapshots(reason: String) {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                async let proposedRows = self.store.listProposed()
+                async let activeRows = self.store.listActive()
+                async let rejectedRows = self.store.listRejected()
+                let (nextProposed, nextActive, nextRejected) = try await (proposedRows, activeRows, rejectedRows)
+                await MainActor.run {
+                    self.proposed = nextProposed
+                    self.active = nextActive
+                    self.rejected = nextRejected
+                    self.onChange?()
+                }
+            } catch {
+                NSLog("[Capture] Task snapshot failed (\(reason)): \(error)")
+            }
+        }
+    }
 
     private func watch(
         _ make: @escaping () throws -> AsyncThrowingStream<[TaskItem], Error>,
@@ -184,6 +208,7 @@ final class CaptureViewModel {
     func confirm(_ item: TaskItem, title: String, dueAt: Date?, category: String?, tags: [String]? = nil) {
         Task {
             try? await store.confirm(id: item.id, title: title, dueAt: dueAt, category: category, tags: tags)
+            refreshTaskSnapshots(reason: "confirm")
             refreshSyncSummary()
         }
     }
@@ -223,6 +248,7 @@ final class CaptureViewModel {
                 notes: form.notes,
                 priority: form.priority
             )
+            refreshTaskSnapshots(reason: "confirm detail")
             refreshSyncSummary()
         }
     }
@@ -230,6 +256,7 @@ final class CaptureViewModel {
     func reject(_ item: TaskItem) {
         Task {
             try? await store.reject(id: item.id)
+            refreshTaskSnapshots(reason: "reject")
             refreshSyncSummary()
         }
     }
