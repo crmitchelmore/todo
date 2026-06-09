@@ -184,7 +184,7 @@ final class CaptureViewModel {
     func confirm(_ item: TaskItem, title: String, dueAt: Date?, category: String?, tags: [String]? = nil) {
         Task {
             try? await store.confirm(id: item.id, title: title, dueAt: dueAt, category: category, tags: tags)
-            await MainActor.run { self.refreshSyncSummary() }
+            refreshSyncSummary()
         }
     }
 
@@ -199,7 +199,7 @@ final class CaptureViewModel {
                 tags: form.tags,
                 priority: form.priority
             )
-            await MainActor.run { self.refreshSyncSummary() }
+            refreshSyncSummary()
         }
     }
 
@@ -223,21 +223,21 @@ final class CaptureViewModel {
                 notes: form.notes,
                 priority: form.priority
             )
-            await MainActor.run { self.refreshSyncSummary() }
+            refreshSyncSummary()
         }
     }
 
     func reject(_ item: TaskItem) {
         Task {
             try? await store.reject(id: item.id)
-            await MainActor.run { self.refreshSyncSummary() }
+            refreshSyncSummary()
         }
     }
 
     func setDone(_ item: TaskItem, _ done: Bool) {
         Task {
             try? await store.setDone(id: item.id, done: done)
-            await MainActor.run { self.refreshSyncSummary() }
+            refreshSyncSummary()
         }
     }
 
@@ -245,7 +245,7 @@ final class CaptureViewModel {
     func setDue(_ item: TaskItem, _ date: Date?) {
         Task {
             try? await store.setDue(id: item.id, dueAt: date)
-            await MainActor.run { self.refreshSyncSummary() }
+            refreshSyncSummary()
         }
     }
 
@@ -259,16 +259,12 @@ final class CaptureViewModel {
                 async let server = self.auth.fetchSyncDiagnostics()
                 async let local = self.store.localSyncDiagnostics()
                 let (serverDiagnostics, localDiagnostics) = try await (server, local)
-                await MainActor.run {
-                    self.syncSummary = CaptureSyncSummary.from(server: serverDiagnostics, local: localDiagnostics)
-                    self.onChange?()
-                }
+                self.syncSummary = CaptureSyncSummary.from(server: serverDiagnostics, local: localDiagnostics)
+                self.onChange?()
             } catch {
                 let message = (error as? CaptureError)?.message ?? error.localizedDescription
-                await MainActor.run {
-                    self.syncSummary = .offline(message)
-                    self.onChange?()
-                }
+                self.syncSummary = .offline(message)
+                self.onChange?()
             }
         }
     }

@@ -226,12 +226,13 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         filterStack.translatesAutoresizingMaskIntoConstraints = false
         filterBar.addSubview(filterStack)
         view.addSubview(filterBar)
-        filterHeightConstraint = filterBar.heightAnchor.constraint(equalToConstant: 34)
+        let heightConstraint = filterBar.heightAnchor.constraint(equalToConstant: 34)
+        filterHeightConstraint = heightConstraint
         NSLayoutConstraint.activate([
             filterBar.topAnchor.constraint(equalTo: captureField.bottomAnchor, constant: 8),
             filterBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             filterBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            filterHeightConstraint!,
+            heightConstraint,
             filterStack.topAnchor.constraint(equalTo: filterBar.topAnchor),
             filterStack.bottomAnchor.constraint(equalTo: filterBar.bottomAnchor),
             filterStack.leadingAnchor.constraint(equalTo: filterBar.leadingAnchor),
@@ -692,7 +693,7 @@ private final class CaptureTaskCell: UITableViewCell {
         if proposed {
             Theme.primary(primary)
         } else {
-            Theme.quiet(primary, colour: done ? Theme.mint : Theme.mint)
+            Theme.quiet(primary, colour: done ? Theme.textSecondary : Theme.mint)
         }
         secondary.setTitle("Reject", for: .normal)
         Theme.quiet(secondary, colour: Theme.danger)
@@ -700,36 +701,22 @@ private final class CaptureTaskCell: UITableViewCell {
     }
 
     private func chip(text: String, hex: String) -> UILabel {
-        let label = UILabel()
+        let label = PaddedLabel()
         label.text = text
         label.font = Theme.mono(10, .semibold)
-        label.textColor = UIColor(hex: hex) ?? Theme.textSecondary
-        label.backgroundColor = (UIColor(hex: hex) ?? Theme.textTertiary).withAlphaComponent(0.16)
+        let colour = UIColor(hex: hex) ?? Theme.textSecondary
+        label.textColor = colour
+        label.backgroundColor = colour.withAlphaComponent(0.16)
         label.layer.cornerRadius = 7
         label.layer.borderWidth = 1
-        label.layer.borderColor = (UIColor(hex: hex) ?? Theme.textTertiary).withAlphaComponent(0.36).cgColor
+        label.layer.borderColor = colour.withAlphaComponent(0.36).cgColor
         label.layer.masksToBounds = true
-        label.layoutMargins = UIEdgeInsets(top: 2, left: 7, bottom: 2, right: 7)
-        return PaddedLabel(label)
+        return label
     }
 }
 
 private final class PaddedLabel: UILabel {
     private let insets = UIEdgeInsets(top: 3, left: 7, bottom: 3, right: 7)
-
-    init(_ source: UILabel) {
-        super.init(frame: .zero)
-        text = source.text
-        font = source.font
-        textColor = source.textColor
-        backgroundColor = source.backgroundColor
-        layer.cornerRadius = source.layer.cornerRadius
-        layer.borderWidth = source.layer.borderWidth
-        layer.borderColor = source.layer.borderColor
-        layer.masksToBounds = true
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override var intrinsicContentSize: CGSize {
         let size = super.intrinsicContentSize
