@@ -344,6 +344,9 @@ final class MacCaptureViewController: NSViewController {
             onDone: { [weak self] done in
                 guard let item = self?.viewModel.selectedTask else { return }
                 self?.viewModel.setDone(item, done)
+            },
+            onAgentHandoff: { [weak self] mode, instructions in
+                self?.viewModel.requestAgentHandoff(mode: mode, instructions: instructions)
             }
         )
         resizeDetailDocument()

@@ -38,6 +38,10 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
     private let rollupStack = UIStackView()
     private let rollupSummaryLabel = UILabel()
     private let rollupProgress = UIProgressView(progressViewStyle: .bar)
+    private let handoffField = UITextField()
+    private let researchButton = UIButton(type: .system)
+    private let attemptButton = UIButton(type: .system)
+    private let handoffStatusLabel = UILabel()
     private let historyStack = UIStackView()
 
     init(viewModel: CaptureViewModel, item: TaskItem) {
@@ -143,6 +147,23 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
         rollupStack.addArrangedSubview(rollupProgress)
         rollupStack.isHidden = true
 
+        handoffField.placeholder = "Ask for research or an attempted next action"
+        handoffField.textColor = Theme.textPrimary
+        handoffField.backgroundColor = Theme.surfaceHi
+        handoffField.layer.cornerRadius = 10
+        handoffField.layer.masksToBounds = true
+        handoffField.returnKeyType = .done
+        handoffField.delegate = self
+        Theme.quiet(researchButton, colour: Theme.iris)
+        researchButton.setTitle("Research", for: .normal)
+        researchButton.addAction(UIAction { [weak self] _ in self?.requestAgentHandoff(.research) }, for: .touchUpInside)
+        Theme.quiet(attemptButton, colour: Theme.iris)
+        attemptButton.setTitle("Attempt", for: .normal)
+        attemptButton.addAction(UIAction { [weak self] _ in self?.requestAgentHandoff(.attempt) }, for: .touchUpInside)
+        handoffStatusLabel.font = Theme.display(13, .regular)
+        handoffStatusLabel.textColor = Theme.textTertiary
+        handoffStatusLabel.numberOfLines = 0
+
         historyStack.axis = .vertical
         historyStack.spacing = 12
 
@@ -164,6 +185,13 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
         stack.addArrangedSubview(section("Expansion"))
         stack.addArrangedSubview(notesView)
         stack.addArrangedSubview(section("AI + activity history"))
+        stack.addArrangedSubview(handoffField)
+        let handoffActions = UIStackView(arrangedSubviews: [researchButton, attemptButton])
+        handoffActions.axis = .horizontal
+        handoffActions.spacing = 10
+        handoffActions.distribution = .fillEqually
+        stack.addArrangedSubview(handoffActions)
+        stack.addArrangedSubview(handoffStatusLabel)
         stack.addArrangedSubview(historyStack)
 
         NSLayoutConstraint.activate([
@@ -256,6 +284,9 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
         secondaryButton.setTitle(currentTask.status == .done ? "Reopen" : "Mark done", for: .normal)
         rejectButton.isHidden = !proposed
         duePicker.isEnabled = dueSwitch.isOn
+        let handoffEnabled = currentTask.status != .cancelled
+        researchButton.isEnabled = handoffEnabled
+        attemptButton.isEnabled = handoffEnabled
     }
 
     private func updateRollup() {
@@ -454,6 +485,14 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
     private func rejectTapped() {
         viewModel.reject(currentTask)
         navigationController?.popViewController(animated: true)
+    }
+
+    private func requestAgentHandoff(_ mode: TaskStore.AgentHandoffMode) {
+        let instructions = (handoffField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        handoffStatusLabel.text = mode == .research ? "Research queued" : "Attempt queued"
+        viewModel.requestAgentHandoff(currentTask, mode: mode, instructions: instructions.isEmpty ? nil : instructions)
+        handoffField.text = nil
+        handoffField.resignFirstResponder()
     }
 
     private func eventIcon(_ event: TaskEvent) -> String {

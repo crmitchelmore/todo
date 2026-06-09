@@ -379,6 +379,19 @@ final class MacViewModel {
         Task { try? await store.setDue(id: item.id, dueAt: date) }
     }
 
+    func requestAgentHandoff(mode: TaskStore.AgentHandoffMode, instructions: String?) {
+        guard let item = selectedTask else { return }
+        Task {
+            do {
+                _ = try await store.requestAgentHandoff(taskId: item.id, mode: mode, instructions: instructions)
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                await MainActor.run { self.refreshTaskSnapshots(reason: "agent handoff") }
+            } catch {
+                NSLog("[Capture] Failed to request agent handoff: \(error)")
+            }
+        }
+    }
+
     deinit {
         tasks.forEach { $0.cancel() }
         detailTasks.forEach { $0.cancel() }

@@ -27,6 +27,11 @@ public final class TaskStore: @unchecked Sendable {
     /// filtered straight back out on the next sync round-trip.
     private var ownerId: String { auth?.ownerId ?? config.ownerId }
 
+    public enum AgentHandoffMode: String, Sendable {
+        case research
+        case attempt
+    }
+
     public func connect() async throws {
         try await db.connect(connector: connector)
     }
@@ -43,11 +48,50 @@ public final class TaskStore: @unchecked Sendable {
         try await db.disconnect()
     }
 
+    @discardableResult
+    public func requestAgentHandoff(taskId: String, mode: AgentHandoffMode, instructions: String?) async throws -> String {
+        guard let token = auth?.currentToken() else { throw CaptureError.auth("not signed in") }
+        let url = config.backendURL
+            .appendingPathComponent("api")
+            .appendingPathComponent("tasks")
+            .appendingPathComponent(taskId)
+            .appendingPathComponent("agent-handoff")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.applyBearer(token)
+        request.timeoutInterval = 20
+        let cleanedInstructions = instructions?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        let body: [String: Any] = [
+            "mode": mode.rawValue,
+            "instructions": cleanedInstructions ?? NSNull()
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw CaptureError.upload("agent handoff failed: no response") }
+        let decoded = try? JSONDecoder().decode(AgentHandoffResponse.self, from: data)
+        guard (200..<300).contains(http.statusCode), decoded?.ok == true, let requestId = decoded?.requestId else {
+            throw CaptureError.upload(decoded?.error ?? "agent handoff failed (\(http.statusCode))")
+        }
+        return requestId
+    }
+
     /// Wipe the local SQLite DB and pending upload queue. Call on a real account boundary (sign-out,
     /// or sign-in as a *different* user) so one account's optimistic, not-yet-uploaded writes can
     /// never replay or leak into another account's synced view.
     public func resetLocalData() async throws {
         try await db.disconnectAndClear()
+    }
+
+    private struct AgentHandoffResponse: Decodable {
+        let ok: Bool?
+        let requestId: String?
+        let error: String?
+
+        enum CodingKeys: String, CodingKey {
+            case ok, error
+            case requestId = "request_id"
+        }
     }
 
     private static let lastOwnerKey = "capture.lastOwnerId"

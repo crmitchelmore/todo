@@ -29,6 +29,10 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
     private let rollupStack = NSStackView()
     private let rollupSummary = NSTextField(labelWithString: "")
     private let rollupProgress = NSProgressIndicator()
+    private let handoffField = NSTextField()
+    private let researchButton = NSButton(title: "Research", target: nil, action: nil)
+    private let attemptButton = NSButton(title: "Attempt", target: nil, action: nil)
+    private let handoffStatusLabel = NSTextField(labelWithString: "")
     private let historyStack = NSStackView()
 
     private var currentTask: TaskItem?
@@ -39,6 +43,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
     private var onConfirm: ((MacTaskDetailForm) -> Void)?
     private var onReject: (() -> Void)?
     private var onDone: ((Bool) -> Void)?
+    private var onAgentHandoff: ((TaskStore.AgentHandoffMode, String?) -> Void)?
     private var feasibilityTask: Task<Void, Never>?
 
     override init(frame frameRect: NSRect) {
@@ -72,7 +77,8 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         onSave: @escaping (MacTaskDetailForm) -> Void,
         onConfirm: @escaping (MacTaskDetailForm) -> Void,
         onReject: @escaping () -> Void,
-        onDone: @escaping (Bool) -> Void
+        onDone: @escaping (Bool) -> Void,
+        onAgentHandoff: @escaping (TaskStore.AgentHandoffMode, String?) -> Void
     ) {
         self.currentTask = task
         self.colourForTag = colourForTag
@@ -80,6 +86,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         self.onConfirm = onConfirm
         self.onReject = onReject
         self.onDone = onDone
+        self.onAgentHandoff = onAgentHandoff
 
         guard let task else {
             currentTaskId = nil
@@ -97,6 +104,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         formView.isHidden = false
         if changedTask || !isDirty {
             populate(task)
+            handoffStatusLabel.stringValue = ""
             isDirty = false
         }
         updateActions(task)
@@ -201,6 +209,17 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         rejectButton.action = #selector(rejectTapped)
         Theme.quietButton(rejectButton)
         rejectButton.contentTintColor = Theme.danger
+        handoffField.placeholderString = "Ask the AI loop what to research or try next"
+        researchButton.target = self
+        researchButton.action = #selector(researchTapped)
+        Theme.quietButton(researchButton)
+        researchButton.contentTintColor = Theme.iris
+        attemptButton.target = self
+        attemptButton.action = #selector(attemptTapped)
+        Theme.quietButton(attemptButton)
+        attemptButton.contentTintColor = Theme.iris
+        handoffStatusLabel.font = Theme.display(12, .regular)
+        handoffStatusLabel.textColor = Theme.textTertiary
 
         rollupStack.orientation = .vertical
         rollupStack.spacing = 8
@@ -248,6 +267,8 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         ]))
         formView.addArrangedSubview(card([
             sectionTitle("AI + activity"),
+            row(label: "AI loop", views: [handoffField]),
+            NSStackView(views: [researchButton, attemptButton, handoffStatusLabel]),
             historyStack
         ]))
 
@@ -287,6 +308,9 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         secondaryButton.title = task.status == .done ? "Reopen" : "Mark done"
         rejectButton.isHidden = !proposed
         duePicker.isEnabled = dueEnabled.state == .on
+        let handoffEnabled = task.status != .cancelled
+        researchButton.isEnabled = handoffEnabled
+        attemptButton.isEnabled = handoffEnabled
     }
 
     private func updateRollup(_ rollup: TaskRollup) {
@@ -497,6 +521,21 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
 
     @objc private func rejectTapped() {
         onReject?()
+    }
+
+    @objc private func researchTapped() {
+        requestAgentHandoff(.research)
+    }
+
+    @objc private func attemptTapped() {
+        requestAgentHandoff(.attempt)
+    }
+
+    private func requestAgentHandoff(_ mode: TaskStore.AgentHandoffMode) {
+        let instructions = handoffField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        handoffStatusLabel.stringValue = mode == .research ? "Research queued" : "Attempt queued"
+        onAgentHandoff?(mode, instructions.isEmpty ? nil : instructions)
+        handoffField.stringValue = ""
     }
 
     private func eventIcon(_ event: TaskEvent) -> String {
