@@ -60,8 +60,12 @@ public final class TaskStore: @unchecked Sendable {
         let last = UserDefaults.standard.string(forKey: Self.lastOwnerKey)
         if let last {
             guard last != current else { return }
-            try? await resetLocalData()
-            UserDefaults.standard.set(current, forKey: Self.lastOwnerKey)
+            do {
+                try await resetLocalData()
+                UserDefaults.standard.set(current, forKey: Self.lastOwnerKey)
+            } catch {
+                NSLog("[Capture] Failed to reset local data when switching users; preserving owner marker for retry: \(error)")
+            }
             return
         }
 
@@ -72,8 +76,7 @@ public final class TaskStore: @unchecked Sendable {
             }
             UserDefaults.standard.set(current, forKey: Self.lastOwnerKey)
         } catch {
-            NSLog("[Capture] Could not inspect local owners before activation; preserving local cache: \(error)")
-            UserDefaults.standard.set(current, forKey: Self.lastOwnerKey)
+            NSLog("[Capture] Could not inspect local owners before activation; preserving local cache and owner marker for retry: \(error)")
         }
     }
 

@@ -256,11 +256,11 @@ final class MacCaptureViewController: NSViewController {
 
     private func restoreSplitPositionIfNeeded() {
         guard !didRestoreSplitPosition, splitView.bounds.width > 0 else { return }
-        didRestoreSplitPosition = true
         let saved = UserDefaults.standard.double(forKey: Layout.dividerDefaultsKey)
         let detailWidth = saved > 0 ? saved : Layout.defaultDetailWidth
         let dividerPosition = splitView.bounds.width - min(max(detailWidth, Layout.minDetailWidth), splitView.bounds.width - Layout.minListWidth)
         splitView.setPosition(max(Layout.minListWidth, dividerPosition), ofDividerAt: 0)
+        didRestoreSplitPosition = true
     }
 
     /// Rebuild the tag filter chip row from the synced tags ("slice by tag or multiple tags").
