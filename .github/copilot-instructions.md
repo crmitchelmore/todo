@@ -12,6 +12,8 @@
 - Follow `docs/capture-ux-patterns.md` for product grammar, layout, and visual decisions.
 - Amber is reserved for human decisions; iris/purple is for AI evidence; mint is for completion/sync.
 - Mac, web, and iOS should keep the same command-deck / triage-queue / active-outline / inspector-card-stack model while using platform-native controls.
+- When changing Capture UI, check Mac, iOS, and web parity together: preserve the same capabilities and design grammar while respecting each platform's HIG/native interaction patterns.
+- Auth and code-entry screens must remain keyboard-safe on iOS and mobile web; client settings should expose enough version/sync diagnostics to identify stale installs or endpoint mismatches.
 
 ## Local Mac app refresh
 
