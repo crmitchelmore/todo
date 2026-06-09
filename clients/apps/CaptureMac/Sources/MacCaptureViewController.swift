@@ -281,10 +281,13 @@ final class MacCaptureViewController: NSViewController {
             Layout.minProposedHeight,
             min(listPane.bounds.height * 0.55, listPane.bounds.height - Layout.minActiveHeight)
         )
-        proposedHeightConstraint.constant = max(
+        let newHeight = max(
             Layout.minProposedHeight,
             min(maxByViewport, max(Layout.defaultProposedHeight, rowDrivenHeight))
         )
+        if abs(proposedHeightConstraint.constant - newHeight) > 0.5 {
+            proposedHeightConstraint.constant = newHeight
+        }
     }
 
     /// Rebuild the tag filter chip row from the synced tags ("slice by tag or multiple tags").
