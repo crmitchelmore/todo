@@ -1,15 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@powersync/react';
-import type { AgentProposalRecord, TaskAttachmentRecord, TaskEventRecord, TaskRecord } from '../powersync/schema';
+import type { AgentProposalRecord, CategoryRecord, TaskAttachmentRecord, TaskEventRecord, TaskRecord } from '../powersync/schema';
 import { requestAgentHandoff, type AgentHandoffMode } from '../lib/agentHandoff';
 import { decideAgentProposal, proposalMeta } from '../lib/proposals';
 import { addTaskComment, confirm, reject, setDone, updateTask } from '../lib/tasks';
-import { decodeTags } from '../lib/tags';
+import { DEFAULT_CATEGORIES } from '../lib/categories';
+import { decodeTags, tagKey } from '../lib/tags';
 import { formatDue } from '../lib/format';
 import { DueEditor } from './DueEditor';
 import { TagEditor } from './TagChips';
-
-const CATEGORIES = ['engineering', 'leadership', 'home', 'errands', 'health', 'finance', 'personal', 'inbox'];
 
 type TaskRollupRecord = {
   total: number;
@@ -315,6 +314,7 @@ export function TaskDetailPane({
       : `SELECT * FROM agent_proposals WHERE 0`,
     task ? [task.id] : []
   );
+  const { data: categories } = useQuery<CategoryRecord>(`SELECT * FROM categories ORDER BY name COLLATE NOCASE ASC`);
 
   useEffect(() => {
     if (!task) return;
@@ -344,6 +344,23 @@ export function TaskDetailPane({
   const isProposed = task?.status === 'proposed';
   const suggestedDue = task?.suggested_due_at ?? null;
   const suggestedCategory = task?.suggested_category ?? null;
+  const categoryOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const name of [
+      ...(categories ?? []).map((c) => c.name).filter((name): name is string => Boolean(name)),
+      ...DEFAULT_CATEGORIES,
+      suggestedCategory,
+      category,
+    ]) {
+      if (!name) continue;
+      const key = tagKey(name);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(name);
+    }
+    return out;
+  }, [categories, suggestedCategory, category]);
 
   const sortedEvents = useMemo(() => events ?? [], [events]);
   const sortedAttachments = useMemo(() => attachments ?? [], [attachments]);
@@ -611,7 +628,7 @@ export function TaskDetailPane({
           <span>Category</span>
           <select value={category ?? ''} onChange={(e) => { setCategory(e.target.value || null); setDirty(true); }}>
             <option value="">None</option>
-            {CATEGORIES.map((c) => <option value={c} key={c}>{c}</option>)}
+            {categoryOptions.map((c) => <option value={c} key={c}>{c}</option>)}
           </select>
         </label>
         <label className="detail-field">

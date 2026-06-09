@@ -3,6 +3,7 @@ import PowerSync
 
 public let TASKS_TABLE = "tasks"
 public let TAGS_TABLE = "tags"
+public let CATEGORIES_TABLE = "categories"
 public let TASK_EVENTS_TABLE = "task_events"
 public let TASK_ATTACHMENTS_TABLE = "task_attachments"
 public let AGENT_PROPOSALS_TABLE = "agent_proposals"
@@ -44,6 +45,16 @@ public let AppSchema = Schema(
     ),
     Table(
         name: TAGS_TABLE,
+        columns: [
+            .text("owner_id"),
+            .text("name"),
+            .text("color"),
+            .text("created_at"),
+            .text("updated_at")
+        ]
+    ),
+    Table(
+        name: CATEGORIES_TABLE,
         columns: [
             .text("owner_id"),
             .text("name"),

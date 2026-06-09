@@ -10,6 +10,8 @@ final class SettingsViewController: UIViewController {
     private let diagnosticsDetail = UILabel()
     private let diagnosticsMeta = UILabel()
     private let diagnosticsRefresh = UIButton(type: .system)
+    private let categoriesStack = UIStackView()
+    private let tagsStack = UIStackView()
 
     init(viewModel: CaptureViewModel) {
         self.viewModel = viewModel
@@ -81,8 +83,15 @@ final class SettingsViewController: UIViewController {
 
         stack.addArrangedSubview(header)
         stack.addArrangedSubview(section(title: "Appearance", controls: [appearanceControl]))
+        stack.addArrangedSubview(section(title: "Categories", controls: [makeAddButton(title: "Add category", action: { [weak self] in self?.promptCreateCategory() }), categoriesStack]))
+        stack.addArrangedSubview(section(title: "Tags", controls: [makeAddButton(title: "Add tag", action: { [weak self] in self?.promptCreateTag() }), tagsStack]))
         stack.addArrangedSubview(section(title: "Sync Diagnostics", controls: [diagnosticsStatus, diagnosticsDetail, diagnosticsMeta, diagnosticsRefresh]))
         stack.addArrangedSubview(section(title: "Account", controls: [accountNote, signOutButton]))
+        categoriesStack.axis = .vertical
+        categoriesStack.spacing = 8
+        tagsStack.axis = .vertical
+        tagsStack.spacing = 8
+        rebuildTaxonomy()
 
         NSLayoutConstraint.activate([
             scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
@@ -120,6 +129,7 @@ final class SettingsViewController: UIViewController {
         view.window?.tintColor = Theme.signal
         scrollView.backgroundColor = Theme.ink
         stack.backgroundColor = Theme.ink
+        rebuildTaxonomy()
     }
 
     private func loadDiagnostics() {
@@ -176,6 +186,185 @@ final class SettingsViewController: UIViewController {
             await viewModel.auth.signOut()
             await viewModel.store.clearActiveUser()
         }
+    }
+
+    private func rebuildTaxonomy() {
+        categoriesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        tagsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let existingCategories = Set(viewModel.allCategories.map { CategoryPalette.key($0.name) })
+        let missingDefaults = CAPTURE_CATEGORIES.filter { !existingCategories.contains(CategoryPalette.key($0)) }
+        if !missingDefaults.isEmpty {
+            let defaults = UIStackView()
+            defaults.axis = .horizontal
+            defaults.spacing = 6
+            defaults.alignment = .leading
+            for name in missingDefaults {
+                defaults.addArrangedSubview(chipButton("+ \(name)", color: Theme.textSecondary) { [weak self] in
+                    self?.viewModel.createCategory(name)
+                    self?.reloadTaxonomySoon()
+                })
+            }
+            categoriesStack.addArrangedSubview(defaults)
+        }
+        for category in viewModel.allCategories {
+            categoriesStack.addArrangedSubview(taxonomyRow(
+                name: category.name,
+                color: category.color,
+                onRename: { [weak self] in self?.promptRenameCategory(category) },
+                onRecolor: { [weak self] in self?.presentColorPicker(current: category.color) { color in
+                    self?.viewModel.recolorCategory(category.id, color: color)
+                    self?.reloadTaxonomySoon()
+                }},
+                onDelete: { [weak self] in
+                    self?.viewModel.deleteCategory(category.id)
+                    self?.reloadTaxonomySoon()
+                }
+            ))
+        }
+        if viewModel.allCategories.isEmpty {
+            categoriesStack.addArrangedSubview(emptyLabel("No categories yet. Add defaults or create your own."))
+        }
+        for tag in viewModel.allTags {
+            tagsStack.addArrangedSubview(taxonomyRow(
+                name: tag.name,
+                color: tag.color,
+                onRename: { [weak self] in self?.promptRenameTag(tag) },
+                onRecolor: { [weak self] in self?.presentColorPicker(current: tag.color) { color in
+                    self?.viewModel.recolorTag(tag.id, color: color)
+                    self?.reloadTaxonomySoon()
+                }},
+                onDelete: { [weak self] in
+                    self?.viewModel.deleteTag(tag.id)
+                    self?.reloadTaxonomySoon()
+                }
+            ))
+        }
+        if viewModel.allTags.isEmpty {
+            tagsStack.addArrangedSubview(emptyLabel("No tags yet. Create tags here, then apply them from task details."))
+        }
+    }
+
+    private func reloadTaxonomySoon() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in self?.rebuildTaxonomy() }
+    }
+
+    private func makeAddButton(title: String, action: @escaping () -> Void) -> UIButton {
+        let button = UIButton(type: .system)
+        button.setTitle(title, for: .normal)
+        button.setTitleColor(Theme.signal, for: .normal)
+        button.backgroundColor = Theme.surfaceHi
+        button.layer.cornerRadius = 12
+        button.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        button.addAction(UIAction { _ in action() }, for: .touchUpInside)
+        return button
+    }
+
+    private func taxonomyRow(
+        name: String,
+        color: String,
+        onRename: @escaping () -> Void,
+        onRecolor: @escaping () -> Void,
+        onDelete: @escaping () -> Void
+    ) -> UIView {
+        let dot = UIView()
+        dot.backgroundColor = UIColor(hex: color) ?? Theme.textSecondary
+        dot.layer.cornerRadius = 5
+        dot.widthAnchor.constraint(equalToConstant: 10).isActive = true
+        dot.heightAnchor.constraint(equalToConstant: 10).isActive = true
+
+        let nameButton = UIButton(type: .system)
+        nameButton.setTitle(name, for: .normal)
+        nameButton.setTitleColor(Theme.textPrimary, for: .normal)
+        nameButton.titleLabel?.font = Theme.display(14, .semibold)
+        nameButton.contentHorizontalAlignment = .leading
+        nameButton.addAction(UIAction { _ in onRename() }, for: .touchUpInside)
+
+        let colorButton = chipButton("Colour", color: UIColor(hex: color) ?? Theme.iris, action: onRecolor)
+        let deleteButton = chipButton("Delete", color: Theme.danger, action: onDelete)
+        let row = UIStackView(arrangedSubviews: [dot, nameButton, colorButton, deleteButton])
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 8
+        row.layoutMargins = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        row.isLayoutMarginsRelativeArrangement = true
+        row.backgroundColor = Theme.surfaceHi
+        row.layer.cornerRadius = 12
+        return row
+    }
+
+    private func chipButton(_ title: String, color: UIColor, action: @escaping () -> Void) -> UIButton {
+        let button = UIButton(type: .system)
+        button.setTitle(title, for: .normal)
+        button.setTitleColor(color, for: .normal)
+        button.backgroundColor = color.withAlphaComponent(0.12)
+        button.layer.cornerRadius = 10
+        button.titleLabel?.font = Theme.mono(11, .semibold)
+        button.contentEdgeInsets = UIEdgeInsets(top: 5, left: 8, bottom: 5, right: 8)
+        button.addAction(UIAction { _ in action() }, for: .touchUpInside)
+        return button
+    }
+
+    private func emptyLabel(_ text: String) -> UILabel {
+        let label = UILabel()
+        label.text = text
+        label.font = Theme.display(13, .regular)
+        label.textColor = Theme.textTertiary
+        label.numberOfLines = 0
+        return label
+    }
+
+    private func promptCreateCategory() {
+        promptText(title: "New category", placeholder: "engineering") { [weak self] value in
+            self?.viewModel.createCategory(value)
+            self?.reloadTaxonomySoon()
+        }
+    }
+
+    private func promptCreateTag() {
+        promptText(title: "New tag", placeholder: "project-name") { [weak self] value in
+            self?.viewModel.createTag(value)
+            self?.reloadTaxonomySoon()
+        }
+    }
+
+    private func promptRenameCategory(_ category: TaskCategory) {
+        promptText(title: "Rename category", placeholder: category.name, defaultValue: category.name) { [weak self] value in
+            self?.viewModel.renameCategory(category.id, to: value)
+            self?.reloadTaxonomySoon()
+        }
+    }
+
+    private func promptRenameTag(_ tag: Tag) {
+        promptText(title: "Rename tag", placeholder: tag.name, defaultValue: tag.name) { [weak self] value in
+            self?.viewModel.renameTag(tag.id, to: value)
+            self?.reloadTaxonomySoon()
+        }
+    }
+
+    private func promptText(title: String, placeholder: String, defaultValue: String = "", onSave: @escaping (String) -> Void) {
+        let alert = UIAlertController(title: title, message: nil, preferredStyle: .alert)
+        alert.addTextField { field in
+            field.placeholder = placeholder
+            field.text = defaultValue
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { _ in
+            let value = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !value.isEmpty else { return }
+            onSave(value)
+        })
+        present(alert, animated: true)
+    }
+
+    private func presentColorPicker(current: String, onPick: @escaping (String) -> Void) {
+        let sheet = UIAlertController(title: "Colour", message: nil, preferredStyle: .actionSheet)
+        for color in TagPalette.colors {
+            sheet.addAction(UIAlertAction(title: color == current ? "✓ \(color)" : color, style: .default) { _ in onPick(color) })
+        }
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        sheet.popoverPresentationController?.sourceView = view
+        sheet.popoverPresentationController?.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
+        present(sheet, animated: true)
     }
 
     private static var appVersion: String {

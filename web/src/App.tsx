@@ -5,6 +5,7 @@ import { CaptureBar } from './components/CaptureBar';
 import { ConfirmCard } from './components/ConfirmCard';
 import { TaskRow } from './components/TaskRow';
 import { TaskDetailPane } from './components/TaskDetailPane';
+import { CategoryManager } from './components/CategoryManager';
 import { TagManager } from './components/TagManager';
 import { TagFilter } from './components/TagFilter';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -103,7 +104,7 @@ export default function App() {
         <h1>Capture</h1>
         <span className="header-spacer" />
         <button className="tags-toggle" onClick={() => setShowTags((s) => !s)}>
-          {showTags ? 'Close tags' : 'Manage tags'}
+          {showTags ? 'Close labels' : 'Manage labels'}
         </button>
         <button className="tags-toggle" onClick={() => setShowSettings((s) => !s)}>
           {showSettings ? 'Close settings' : 'Settings'}
@@ -124,6 +125,8 @@ export default function App() {
 
       {showTags && (
         <section>
+          <h2>Categories</h2>
+          <CategoryManager />
           <h2>Tags</h2>
           <TagManager />
         </section>

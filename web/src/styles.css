@@ -1586,6 +1586,16 @@ input[type='checkbox']:checked::after {
 }
 .tag-manager-add input:focus { border-color: var(--signal-line); }
 .tag-manager-list { display: flex; flex-direction: column; gap: 4px; }
+.category-seeds { display: flex; flex-wrap: wrap; gap: 6px; }
+.category-seeds button {
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text-muted);
+  padding: 5px 9px;
+  cursor: pointer;
+}
+.category-seeds button:hover { border-color: var(--signal-line); color: var(--text); }
 .tag-manager-row {
   display: flex; align-items: center; gap: 12px;
   padding: 8px 6px; border-radius: var(--r-sm);

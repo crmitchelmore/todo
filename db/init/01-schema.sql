@@ -265,6 +265,23 @@ create table if not exists public.tags (
 create unique index if not exists tags_owner_name_idx on public.tags (owner_id, lower(name));
 create index if not exists tags_owner_id_idx on public.tags (owner_id, id);
 
+-- User-managed categories. Tasks reference categories by name; this table holds the editable
+-- category vocabulary and presentation metadata.
+create table if not exists public.categories (
+  id          uuid primary key default gen_random_uuid(),
+  owner_id    uuid not null references public.users(id) on delete cascade,
+  name        text not null,
+  color       text not null default '#9BA1A6',
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+
+  constraint categories_name_len_chk check (char_length(name) between 1 and 80),
+  constraint categories_color_hex_chk check (color ~ '^#[0-9A-Fa-f]{6}$')
+);
+
+create unique index if not exists categories_owner_name_idx on public.categories (owner_id, lower(name));
+create index if not exists categories_owner_id_idx on public.categories (owner_id, id);
+
 -- Server-owned, append-only task history / agent work log. Synced read-only to clients and loaded
 -- only for the selected task; callers mutate tasks, the backend/worker records events.
 create table if not exists public.task_events (
@@ -386,4 +403,4 @@ create index if not exists agent_proposals_owner_task_status_idx
   where task_id is not null;
 
 -- PowerSync logical replication publication.
-create publication powersync for table public.tasks, public.tags, public.task_events, public.task_attachments, public.agent_proposals;
+create publication powersync for table public.tasks, public.tags, public.categories, public.task_events, public.task_attachments, public.agent_proposals;

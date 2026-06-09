@@ -59,6 +59,7 @@ final class CaptureViewModel {
     private(set) var done: [TaskItem] = []
     private(set) var rejected: [TaskItem] = []
     private(set) var allTags: [Tag] = []
+    private(set) var allCategories: [TaskCategory] = []
     private(set) var tagColors: [String: String] = [:]   // lowercased name -> hex
     private(set) var tagFilter: Set<String> = []          // lowercased; AND semantics
     private(set) var syncSummary: CaptureSyncSummary = .checking
@@ -79,6 +80,7 @@ final class CaptureViewModel {
         watch({ try self.store.watchDone() }, assign: { self.done = $0 })
         watch({ try self.store.watchRejected() }, assign: { self.rejected = $0 })
         watchTags()
+        watchCategories()
         refreshSyncSummary()
     }
 
@@ -94,6 +96,21 @@ final class CaptureViewModel {
                             uniquingKeysWith: { a, _ in a }
                         )
                         self.tagFilter.formIntersection(Set(rows.map { $0.name.lowercased() }))
+                        self.onChange?()
+                    }
+                }
+            } catch {}
+        }
+        tasks.append(t)
+    }
+
+    private func watchCategories() {
+        let t = Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await rows in try self.store.watchCategories() {
+                    await MainActor.run {
+                        self.allCategories = rows
                         self.onChange?()
                     }
                 }
@@ -285,6 +302,38 @@ final class CaptureViewModel {
                 NSLog("[Capture] Failed to request agent handoff: \(error)")
             }
         }
+    }
+
+    func createCategory(_ name: String) {
+        Task { try? await store.createCategory(name: name) }
+    }
+
+    func renameCategory(_ id: String, to name: String) {
+        Task { try? await store.renameCategory(id: id, to: name) }
+    }
+
+    func recolorCategory(_ id: String, color: String) {
+        Task { try? await store.recolorCategory(id: id, color: color) }
+    }
+
+    func deleteCategory(_ id: String) {
+        Task { try? await store.deleteCategory(id: id) }
+    }
+
+    func createTag(_ name: String) {
+        Task { try? await store.createTag(name: name) }
+    }
+
+    func renameTag(_ id: String, to name: String) {
+        Task { try? await store.renameTag(id: id, to: name) }
+    }
+
+    func recolorTag(_ id: String, color: String) {
+        Task { try? await store.recolorTag(id: id, color: color) }
+    }
+
+    func deleteTag(_ id: String) {
+        Task { try? await store.deleteTag(id: id) }
     }
 
     func refreshSyncSummary() {

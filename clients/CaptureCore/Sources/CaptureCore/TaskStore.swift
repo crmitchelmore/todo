@@ -677,6 +677,98 @@ public final class TaskStore: @unchecked Sendable {
 
     // MARK: - Tags (metadata for management + colours)
 
+    public func watchCategories() throws -> AsyncThrowingStream<[TaskCategory], Error> {
+        try db.watch(
+            sql: "SELECT * FROM \(CATEGORIES_TABLE) ORDER BY name COLLATE NOCASE ASC",
+            parameters: [],
+            mapper: Self.mapCategory
+        )
+    }
+
+    @discardableResult
+    public func createCategory(name: String, color: String? = nil) async throws -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw CategoryError.emptyName }
+        if let existing = try await db.getOptional(
+            sql: "SELECT id FROM \(CATEGORIES_TABLE) WHERE name = ? COLLATE NOCASE",
+            parameters: [trimmed],
+            mapper: { try $0.getString(name: "id") }
+        ) { return existing }
+        let id = UUID().uuidString.lowercased()
+        let now = ISO8601.string(Date())
+        try await db.execute(
+            sql: """
+            INSERT INTO \(CATEGORIES_TABLE) (id, owner_id, name, color, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            parameters: [id, ownerId, trimmed, color ?? CategoryPalette.color(for: trimmed), now, now]
+        )
+        return id
+    }
+
+    public func recolorCategory(id: String, color: String) async throws {
+        try await db.execute(
+            sql: "UPDATE \(CATEGORIES_TABLE) SET color = ?, updated_at = ? WHERE id = ?",
+            parameters: [color, ISO8601.string(Date()), id]
+        )
+    }
+
+    public func renameCategory(id: String, to newName: String) async throws {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw CategoryError.emptyName }
+        let now = ISO8601.string(Date())
+        let oldName = try await db.getOptional(
+            sql: "SELECT name FROM \(CATEGORIES_TABLE) WHERE id = ?",
+            parameters: [id],
+            mapper: { try $0.getString(name: "name") }
+        )
+        guard let oldName else { return }
+        if CategoryPalette.key(oldName) == CategoryPalette.key(trimmed) {
+            try await db.execute(
+                sql: "UPDATE \(CATEGORIES_TABLE) SET name = ?, updated_at = ? WHERE id = ?",
+                parameters: [trimmed, now, id]
+            )
+            try await rewriteCategoryOnTasks(from: oldName, to: trimmed)
+            return
+        }
+        let collision = try await db.getOptional(
+            sql: "SELECT id FROM \(CATEGORIES_TABLE) WHERE name = ? COLLATE NOCASE AND id <> ?",
+            parameters: [trimmed, id],
+            mapper: { try $0.getString(name: "id") }
+        )
+        if collision != nil {
+            try await rewriteCategoryOnTasks(from: oldName, to: trimmed)
+            try await db.execute(sql: "DELETE FROM \(CATEGORIES_TABLE) WHERE id = ?", parameters: [id])
+        } else {
+            try await db.execute(
+                sql: "UPDATE \(CATEGORIES_TABLE) SET name = ?, updated_at = ? WHERE id = ?",
+                parameters: [trimmed, now, id]
+            )
+            try await rewriteCategoryOnTasks(from: oldName, to: trimmed)
+        }
+    }
+
+    public func deleteCategory(id: String) async throws {
+        let name = try await db.getOptional(
+            sql: "SELECT name FROM \(CATEGORIES_TABLE) WHERE id = ?",
+            parameters: [id],
+            mapper: { try $0.getString(name: "name") }
+        )
+        try await db.execute(sql: "DELETE FROM \(CATEGORIES_TABLE) WHERE id = ?", parameters: [id])
+        if let name { try await rewriteCategoryOnTasks(from: name, to: nil) }
+    }
+
+    private func rewriteCategoryOnTasks(from oldName: String, to newName: String?) async throws {
+        try await db.execute(
+            sql: """
+            UPDATE \(TASKS_TABLE)
+               SET category = ?, updated_at = ?
+             WHERE category = ? COLLATE NOCASE
+            """,
+            parameters: [newName, ISO8601.string(Date()), oldName]
+        )
+    }
+
     public func watchTags() throws -> AsyncThrowingStream<[Tag], Error> {
         try db.watch(
             sql: "SELECT * FROM \(TAGS_TABLE) ORDER BY name COLLATE NOCASE ASC",
@@ -809,6 +901,19 @@ public final class TaskStore: @unchecked Sendable {
     }
 
     public enum TagError: Error { case emptyName }
+    public enum CategoryError: Error { case emptyName }
+
+    static func mapCategory(_ cursor: SqlCursor) throws -> TaskCategory {
+        let name = try cursor.getString(name: "name")
+        return TaskCategory(
+            id: try cursor.getString(name: "id"),
+            ownerId: (try cursor.getStringOptional(name: "owner_id")) ?? "",
+            name: name,
+            color: (try cursor.getStringOptional(name: "color")) ?? CategoryPalette.color(for: name),
+            createdAt: ISO8601.date(try cursor.getStringOptional(name: "created_at")),
+            updatedAt: ISO8601.date(try cursor.getStringOptional(name: "updated_at"))
+        )
+    }
 
     static func mapTag(_ cursor: SqlCursor) throws -> Tag {
         Tag(

@@ -11,7 +11,7 @@ struct MacTaskDetailForm {
 }
 
 @MainActor
-final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, NSComboBoxDelegate {
+final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, NSComboBoxDelegate, NSTokenFieldDelegate {
     private let emptyView = NSStackView()
     private let formView = NSStackView()
     private let stateLabel = NSTextField(labelWithString: "")
@@ -22,7 +22,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
     private let feasibilityLabel = NSTextField(wrappingLabelWithString: "")
     private let categoryBox = NSComboBox()
     private let priorityPopup = NSPopUpButton()
-    private let tagsField = NSTextField()
+    private let tagsField = NSTokenField()
     private let primaryButton = NSButton(title: "Save changes", target: nil, action: nil)
     private let secondaryButton = NSButton(title: "Mark done", target: nil, action: nil)
     private let rejectButton = NSButton(title: "Reject", target: nil, action: nil)
@@ -38,6 +38,8 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
     private var currentTask: TaskItem?
     private var currentTaskId: String?
     private var isDirty = false
+    private var availableCategories: [String] = CAPTURE_CATEGORIES
+    private var availableTags: [Tag] = []
     private var colourForTag: (String) -> String = { TagPalette.color(for: $0) }
     private var onSave: ((MacTaskDetailForm) -> Void)?
     private var onConfirm: ((MacTaskDetailForm) -> Void)?
@@ -73,6 +75,8 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         events: [TaskEvent],
         attachments: [TaskAttachment],
         rollup: TaskRollup,
+        categories: [TaskCategory],
+        tags: [Tag],
         colourForTag: @escaping (String) -> String,
         onSave: @escaping (MacTaskDetailForm) -> Void,
         onConfirm: @escaping (MacTaskDetailForm) -> Void,
@@ -81,6 +85,8 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         onAgentHandoff: @escaping (TaskStore.AgentHandoffMode, String?) -> Void
     ) {
         self.currentTask = task
+        self.availableCategories = Self.categoryOptions(categories: categories, selected: task?.category ?? task?.suggestedCategory)
+        self.availableTags = tags
         self.colourForTag = colourForTag
         self.onSave = onSave
         self.onConfirm = onConfirm
@@ -97,6 +103,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
             rebuildHistory([], attachments: [])
             return
         }
+        updateCategoryItems(selected: task.category ?? task.suggestedCategory)
 
         let changedTask = currentTaskId != task.id
         currentTaskId = task.id
@@ -173,13 +180,16 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         categoryBox.addItem(withObjectValue: "")
         categoryBox.addItems(withObjectValues: CAPTURE_CATEGORIES)
         categoryBox.completes = true
+        categoryBox.isEditable = false
         categoryBox.delegate = self
 
         priorityPopup.addItems(withTitles: ["None", "P0 · immediate", "P1 · important", "P2 · normal", "P3 · someday", "P4 · reference"])
         priorityPopup.target = self
         priorityPopup.action = #selector(markDirty)
 
-        tagsField.placeholderString = "engineering, home, project-name"
+        tagsField.placeholderString = "Add managed tags…"
+        tagsField.tokenizingCharacterSet = CharacterSet(charactersIn: ",")
+        tagsField.completionDelay = 0
         tagsField.delegate = self
 
         notesView.font = Theme.display(13, .regular)
@@ -295,7 +305,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         categoryBox.stringValue = task.category ?? task.suggestedCategory ?? ""
         let priority = task.priority.flatMap { (0...4).contains($0) ? $0 : nil }
         priorityPopup.selectItem(at: (priority ?? -1) + 1)
-        tagsField.stringValue = task.tags.joined(separator: ", ")
+        tagsField.objectValue = task.tags
     }
 
     private func updateActions(_ task: TaskItem) {
@@ -457,10 +467,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         let title = titleField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let notes = notesView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         let category = categoryBox.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let tags = tagsField.stringValue
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let tags = tokenFieldTags()
         let priorityIndex = priorityPopup.indexOfSelectedItem
         return MacTaskDetailForm(
             title: title.isEmpty ? (currentTask?.title ?? "") : title,
@@ -502,6 +509,20 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
     func controlTextDidChange(_ obj: Notification) { markDirty() }
     func textDidChange(_ notification: Notification) { markDirty() }
     func comboBoxSelectionDidChange(_ notification: Notification) { markDirty() }
+
+    func tokenField(
+        _ tokenField: NSTokenField,
+        completionsForSubstring substring: String,
+        indexOfToken tokenIndex: Int,
+        indexOfSelectedItem selectedIndex: UnsafeMutablePointer<Int>?
+    ) -> [Any]? {
+        let key = substring.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let selected = Set(tokenFieldTags().map { TagPalette.key($0) })
+        return availableTags
+            .map(\.name)
+            .filter { !selected.contains(TagPalette.key($0)) }
+            .filter { key.isEmpty || $0.lowercased().contains(key) }
+    }
 
     @objc private func primaryTapped() {
         guard let task = currentTask else { return }
@@ -555,6 +576,41 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
             formatter.dateFormat = "d MMM"
         }
         return formatter.string(from: date)
+    }
+
+    private func updateCategoryItems(selected: String?) {
+        let current = categoryBox.stringValue
+        categoryBox.removeAllItems()
+        categoryBox.addItem(withObjectValue: "")
+        categoryBox.addItems(withObjectValues: availableCategories)
+        categoryBox.stringValue = selected ?? current
+    }
+
+    private func tokenFieldTags() -> [String] {
+        if let tags = tagsField.objectValue as? [String] {
+            return TagsCodec.normalize(tags)
+        }
+        if let tags = tagsField.objectValue as? [Any] {
+            return TagsCodec.normalize(tags.map { String(describing: $0) })
+        }
+        return TagsCodec.normalize(
+            tagsField.stringValue
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        )
+    }
+
+    private static func categoryOptions(categories: [TaskCategory], selected: String?) -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for name in categories.map(\.name) + CAPTURE_CATEGORIES + [selected].compactMap({ $0 }) {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = CategoryPalette.key(trimmed)
+            guard !trimmed.isEmpty, !seen.contains(key) else { continue }
+            seen.insert(key)
+            out.append(trimmed)
+        }
+        return out
     }
 }
 
