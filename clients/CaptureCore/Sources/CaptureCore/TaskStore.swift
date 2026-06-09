@@ -58,8 +58,21 @@ public final class TaskStore: @unchecked Sendable {
     public func prepareForActiveUser() async {
         let current = ownerId
         let last = UserDefaults.standard.string(forKey: Self.lastOwnerKey)
-        if last != current {
+        if let last {
+            guard last != current else { return }
             try? await resetLocalData()
+            UserDefaults.standard.set(current, forKey: Self.lastOwnerKey)
+            return
+        }
+
+        do {
+            let existingOwners = try await localOwnerIds()
+            if existingOwners.contains(where: { $0 != current }) {
+                try? await resetLocalData()
+            }
+            UserDefaults.standard.set(current, forKey: Self.lastOwnerKey)
+        } catch {
+            NSLog("[Capture] Could not inspect local owners before activation; preserving local cache: \(error)")
             UserDefaults.standard.set(current, forKey: Self.lastOwnerKey)
         }
     }
@@ -89,13 +102,7 @@ public final class TaskStore: @unchecked Sendable {
             ) }
         )
         let ownerIds: [String] = try await db.getAll(
-            sql: """
-            SELECT DISTINCT owner_id
-              FROM \(TASKS_TABLE)
-             WHERE owner_id IS NOT NULL
-             ORDER BY owner_id
-             LIMIT 20
-            """,
+            sql: Self.localOwnerIdsSQL,
             parameters: nil,
             mapper: { try $0.getString(name: "owner_id") }
         )
@@ -119,6 +126,26 @@ public final class TaskStore: @unchecked Sendable {
                 lastUpdatedAt: lastUpdatedAt
             ),
             ownerIds: ownerIds
+        )
+    }
+
+    private static var localOwnerIdsSQL: String {
+        """
+        SELECT DISTINCT owner_id
+          FROM \(TASKS_TABLE)
+         WHERE owner_id IS NOT NULL
+         ORDER BY owner_id
+         LIMIT 20
+        """
+    }
+
+    private func localOwnerIds() async throws -> [String] {
+        try await db.getAll(
+            sql: """
+            \(Self.localOwnerIdsSQL)
+            """,
+            parameters: nil,
+            mapper: { try $0.getString(name: "owner_id") }
         )
     }
 
