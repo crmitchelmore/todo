@@ -54,6 +54,4 @@ jobs:
             echo "::error::Set RAILWAY_PROJECT_ID to the Railway capture project id."
             exit 1
           fi
-          unset RAILWAY_TOKEN
-          export RAILWAY_TOKEN="$RAILWAY_API_TOKEN"
           railway up ./web --path-as-root --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service web
