@@ -7,6 +7,13 @@
 - Markdown list ingestion must preserve nesting as parent-child task relationships.
 - Parent task views should roll up child progress and recent child `task_events` without duplicating or mutating child history.
 
+## Conformance profile
+
+- Follow the repository conformance profile when planning, implementing, and reviewing changes.
+- Optimise for Conceptual Integrity, Production/Stability, Outcome Over Output, and Human-Centred Design.
+- Prefer the existing Modular Monolith, Client-Server, Layered Architecture, Repository, Materialized View, Idempotency, DTO, Guard Clause, and Arrange-Act-Assert patterns where they fit.
+- Reuse the canonical homes instead of adding parallel implementations: task lifecycle state machine in `clients/CaptureCore/Sources/CaptureCore/TaskStore.swift`, backend write allowlist in `backend/src/index.ts`, and background enrichment worker in `worker/src/index.ts`.
+
 ## UX patterns
 
 - Follow `docs/capture-ux-patterns.md` for product grammar, layout, and visual decisions.
