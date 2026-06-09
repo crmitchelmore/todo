@@ -276,6 +276,17 @@ final class CaptureViewModel {
         }
     }
 
+    func requestAgentHandoff(_ item: TaskItem, mode: TaskStore.AgentHandoffMode, instructions: String?) {
+        Task {
+            do {
+                _ = try await store.requestAgentHandoff(taskId: item.id, mode: mode, instructions: instructions)
+                refreshSyncSummary()
+            } catch {
+                NSLog("[Capture] Failed to request agent handoff: \(error)")
+            }
+        }
+    }
+
     func refreshSyncSummary() {
         syncTask?.cancel()
         syncSummary = .checking
