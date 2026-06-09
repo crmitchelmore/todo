@@ -4,8 +4,12 @@ import CaptureCore
 final class MacCaptureViewController: NSViewController {
     private enum Layout {
         static let minListWidth: CGFloat = 540
-        static let minDetailWidth: CGFloat = 500
-        static let defaultDetailWidth: CGFloat = 560
+        static let minDetailWidth: CGFloat = 560
+        static let defaultDetailWidth: CGFloat = 680
+        static let maxDefaultDetailWidth: CGFloat = 860
+        static let minProposedHeight: CGFloat = 180
+        static let defaultProposedHeight: CGFloat = 260
+        static let minActiveHeight: CGFloat = 280
         static let dividerDefaultsKey = "capture.mac.detailPaneWidth"
     }
 
@@ -25,6 +29,7 @@ final class MacCaptureViewController: NSViewController {
     private let detailScroll = NSScrollView()
     private let detailView = MacTaskDetailView()
     private var didRestoreSplitPosition = false
+    private var proposedHeightConstraint: NSLayoutConstraint?
     var onOpenSettings: (() -> Void)?
 
     init(viewModel: MacViewModel) {
@@ -50,6 +55,7 @@ final class MacCaptureViewController: NSViewController {
     override func viewDidLayout() {
         super.viewDidLayout()
         restoreSplitPositionIfNeeded()
+        updateProposedHeight()
         resizeDetailDocument()
     }
 
@@ -168,6 +174,8 @@ final class MacCaptureViewController: NSViewController {
             listPane.addSubview($0)
         }
         styleScrollSurfaces()
+        let proposedHeight = proposedScroll.heightAnchor.constraint(equalToConstant: Layout.defaultProposedHeight)
+        proposedHeightConstraint = proposedHeight
 
         NSLayoutConstraint.activate([
             splitView.topAnchor.constraint(equalTo: view.topAnchor),
@@ -194,7 +202,7 @@ final class MacCaptureViewController: NSViewController {
             proposedScroll.topAnchor.constraint(equalTo: proposedHeader.bottomAnchor, constant: 8),
             proposedScroll.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 18),
             proposedScroll.trailingAnchor.constraint(equalTo: listPane.trailingAnchor, constant: -18),
-            proposedScroll.heightAnchor.constraint(equalToConstant: 220),
+            proposedHeight,
 
             activeHeader.topAnchor.constraint(equalTo: proposedScroll.bottomAnchor, constant: 18),
             activeHeader.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 22),
@@ -257,10 +265,26 @@ final class MacCaptureViewController: NSViewController {
     private func restoreSplitPositionIfNeeded() {
         guard !didRestoreSplitPosition, splitView.bounds.width > 0 else { return }
         let saved = UserDefaults.standard.double(forKey: Layout.dividerDefaultsKey)
-        let detailWidth = saved > 0 ? saved : Layout.defaultDetailWidth
+        let dynamicDefault = min(Layout.maxDefaultDetailWidth, max(Layout.defaultDetailWidth, splitView.bounds.width * 0.34))
+        let detailWidth = saved > 0 ? saved : dynamicDefault
         let dividerPosition = splitView.bounds.width - min(max(detailWidth, Layout.minDetailWidth), splitView.bounds.width - Layout.minListWidth)
         splitView.setPosition(max(Layout.minListWidth, dividerPosition), ofDividerAt: 0)
         didRestoreSplitPosition = true
+    }
+
+    private func updateProposedHeight() {
+        guard let proposedHeightConstraint, listPane.bounds.height > 0 else { return }
+        let rowDrivenHeight = viewModel.proposed.isEmpty
+            ? Layout.minProposedHeight
+            : CGFloat(min(viewModel.proposed.count, 8)) * 96 + 18
+        let maxByViewport = max(
+            Layout.minProposedHeight,
+            min(listPane.bounds.height * 0.55, listPane.bounds.height - Layout.minActiveHeight)
+        )
+        proposedHeightConstraint.constant = max(
+            Layout.minProposedHeight,
+            min(maxByViewport, max(Layout.defaultProposedHeight, rowDrivenHeight))
+        )
     }
 
     /// Rebuild the tag filter chip row from the synced tags ("slice by tag or multiple tags").
@@ -301,6 +325,7 @@ final class MacCaptureViewController: NSViewController {
             ? "ACTIVE · \(filtered)"
             : "ACTIVE · \(filtered) of \(viewModel.active.count)"
         rebuildFilterBar()
+        updateProposedHeight()
         proposedTable.reloadData()
         activeTable.reloadData()
         let color: (String) -> String = { [weak self] in self?.viewModel.color(forTag: $0) ?? TagPalette.color(for: $0) }
