@@ -1311,7 +1311,8 @@ function taskEventForOp(
   applied: boolean,
   before: TaskEventState | null
 ): Omit<TaskEventInput, 'ownerId' | 'actor' | 'taskId' | 'idempotencyKey'> | null {
-  if (!applied || op.type !== 'tasks' || op.op === 'DELETE') return null;
+  if (!applied || op.type !== 'tasks') return null;
+  if (op.op === 'DELETE') return { eventType: 'deleted', title: 'Rejected', body: 'Moved to rejected items.' };
   const data = op.data ?? {};
   const status = typeof data.status === 'string' ? data.status : null;
   if (!before && status === 'proposed') {
@@ -1334,6 +1335,9 @@ function taskEventForOp(
   }
   if (status === 'proposed') {
     return { eventType: 'reopened', title: 'Reopened', body: 'Moved back to the capture inbox.' };
+  }
+  if (status === 'cancelled') {
+    return { eventType: 'deleted', title: 'Rejected', body: 'Moved to rejected items.' };
   }
   const changes = semanticTaskChanges(before, data);
   const changed = changes.map((change) => change.field);
@@ -1375,7 +1379,17 @@ async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Prom
   }
 
   if (op.op === 'DELETE') {
-    if (table === 'tasks') await markLinkedAgentProposals(client, ownerId, op.id, 'rejected', false);
+    if (table === 'tasks') {
+      await markLinkedAgentProposals(client, ownerId, op.id, 'rejected', false);
+      const result = await client.query(
+        `UPDATE public.tasks
+            SET status = 'cancelled',
+                updated_at = now()
+          WHERE id = $1 AND owner_id = $2`,
+        [op.id, ownerId]
+      );
+      return (result.rowCount ?? 0) > 0;
+    }
     const result = await client.query(`DELETE FROM ${table} WHERE id = $1 AND owner_id = $2`, [op.id, ownerId]);
     return (result.rowCount ?? 0) > 0;
   }

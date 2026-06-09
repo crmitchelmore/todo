@@ -20,6 +20,7 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         case proposed([TaskItem])
         case active(DateBucket, [TaskItem])
         case done([TaskItem])
+        case rejected([TaskItem])
 
         var title: String {
             switch self {
@@ -29,6 +30,8 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
                 return "\(bucket.label.uppercased()) · \(items.count)"
             case let .done(items):
                 return "DONE · \(items.count)"
+            case let .rejected(items):
+                return "REJECTED · \(items.count)"
             }
         }
     }
@@ -331,6 +334,8 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         sections.append(contentsOf: viewModel.activeGroups.map { .active($0.bucket, $0.items) })
         let done = viewModel.filteredDone
         if !done.isEmpty { sections.append(.done(done)) }
+        let rejected = viewModel.filteredRejected
+        if !rejected.isEmpty { sections.append(.rejected(rejected)) }
         return sections
     }
 
@@ -364,7 +369,7 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         guard !sections.isEmpty else { return 1 }
         switch sections[section] {
-        case let .proposed(items), let .done(items): return items.count
+        case let .proposed(items), let .done(items), let .rejected(items): return items.count
         case let .active(_, items): return items.count
         }
     }
@@ -410,12 +415,23 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
                 onPrimary: { [weak self] in self?.viewModel.setDone(item, false) },
                 onSecondary: nil
             )
+        case let .rejected(items):
+            let item = items[indexPath.row]
+            cell.configure(
+                item,
+                kind: .rejected,
+                meta: rejectedSubtitle(item),
+                colourForTag: color,
+                onPrimary: nil,
+                onSecondary: nil
+            )
         }
         return cell
     }
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
+        if case .rejected? = sections[safe: indexPath.section] { return }
         guard let item = item(at: indexPath) else { return }
         navigationController?.pushViewController(TaskDetailViewController(viewModel: viewModel, item: item), animated: true)
     }
@@ -435,7 +451,7 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
             confirm.backgroundColor = Theme.signal
             return UISwipeActionsConfiguration(actions: [reject, confirm])
         }
-        guard let item = item(at: indexPath), item.status != .done else { return nil }
+        guard let item = item(at: indexPath), item.status != .done, item.status != .cancelled else { return nil }
         let date = UIContextualAction(style: .normal, title: "Date") { [weak self] _, _, done in
             self?.presentDateEditor(for: item)
             done(true)
@@ -527,7 +543,7 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
     private func item(at indexPath: IndexPath) -> TaskItem? {
         guard let section = sections[safe: indexPath.section] else { return nil }
         switch section {
-        case let .proposed(items), let .done(items):
+        case let .proposed(items), let .done(items), let .rejected(items):
             return items[safe: indexPath.row]
         case let .active(_, items):
             return items[safe: indexPath.row]
@@ -542,7 +558,12 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
             if bucket == .today { return Theme.iris }
             return Theme.textTertiary
         case .done: return Theme.mint
+        case .rejected: return Theme.textTertiary
         }
+    }
+
+    private func rejectedSubtitle(_ item: TaskItem) -> String? {
+        item.updatedAt.map { "Rejected \(DueFormatter.short($0))" } ?? "Rejected"
     }
 }
 
@@ -553,7 +574,7 @@ private extension Array {
 }
 
 private final class CaptureTaskCell: UITableViewCell {
-    enum Kind { case proposed, active, done }
+    enum Kind { case proposed, active, done, rejected }
 
     static let reuseIdentifier = "CaptureTaskCell"
 
@@ -669,15 +690,16 @@ private final class CaptureTaskCell: UITableViewCell {
         self.onPrimary = onPrimary
         self.onSecondary = onSecondary
         let done = kind == .done
+        let rejected = kind == .rejected
         let proposed = kind == .proposed
 
         Theme.card(card, color: proposed ? Theme.surfaceRaised : Theme.surface)
         card.layer.borderColor = (proposed ? Theme.signal.withAlphaComponent(0.45) : Theme.hairline).cgColor
 
-        statusLabel.text = proposed ? "STRUCTURE CHECK" : done ? "DONE" : "ACTIVE"
+        statusLabel.text = proposed ? "STRUCTURE CHECK" : done ? "DONE" : rejected ? "REJECTED" : "ACTIVE"
         statusLabel.textColor = proposed ? Theme.signal : done ? Theme.mint : Theme.textTertiary
         titleLabel.text = item.title
-        titleLabel.textColor = done ? Theme.textTertiary : Theme.textPrimary
+        titleLabel.textColor = (done || rejected) ? Theme.textTertiary : Theme.textPrimary
         metaLabel.text = meta ?? (proposed ? "awaiting signal" : "no metadata")
         metaLabel.textColor = proposed ? Theme.iris : Theme.textTertiary
 

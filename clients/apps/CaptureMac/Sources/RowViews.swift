@@ -248,6 +248,35 @@ final class DateBucketHeaderView: NSTableCellView {
     required init?(coder: NSCoder) { fatalError() }
 }
 
+/// A low-fidelity rejected-bin row: title plus when it was rejected.
+final class RejectedRowView: NSTableCellView {
+    init(item: TaskItem) {
+        super.init(frame: .zero)
+        let title = NSTextField(labelWithString: item.title)
+        title.font = Theme.display(12, .regular)
+        title.textColor = Theme.textTertiary
+        title.lineBreakMode = .byTruncatingTail
+
+        let time = NSTextField(labelWithString: item.updatedAt.map { "rejected \(DueFormatter.short($0))" } ?? "rejected")
+        time.font = Theme.mono(10, .medium)
+        time.textColor = Theme.textTertiary.withAlphaComponent(0.72)
+
+        let row = NSStackView(views: [title, NSView(), time])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 10
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            row.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+}
+
 /// Popover content for editing a due date: quick presets + a precise date picker + Clear.
 final class DuePopoverController: NSViewController {
     private let current: Date?

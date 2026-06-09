@@ -44,6 +44,9 @@ export default function App() {
   const { data: done } = useQuery<TaskRecord>(
     `SELECT * FROM tasks WHERE status = 'done' ORDER BY completed_at DESC LIMIT 20`
   );
+  const { data: rejected } = useQuery<TaskRecord>(
+    `SELECT * FROM tasks WHERE status = 'cancelled' ORDER BY updated_at DESC LIMIT 50`
+  );
   const { data: pendingProposals } = useQuery<AgentProposalRecord>(
     `SELECT * FROM agent_proposals
       WHERE status = 'pending' AND task_id IS NOT NULL AND proposal_type <> 'action'
@@ -57,6 +60,7 @@ export default function App() {
 
   const filteredActive = useMemo(() => active.filter((t) => matchesTags(t, filter)), [active, filter]);
   const filteredDone = useMemo(() => done.filter((t) => matchesTags(t, filter)), [done, filter]);
+  const filteredRejected = useMemo(() => rejected.filter((t) => matchesTags(t, filter)), [rejected, filter]);
   const allVisibleTasks = useMemo(
     () => [...proposed, ...filteredActive, ...filteredDone],
     [proposed, filteredActive, filteredDone]
@@ -187,6 +191,22 @@ export default function App() {
                     task={t}
                     selected={selectedId === t.id}
                     onSelect={(task) => setSelectedId(task.id)}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {filteredRejected.length > 0 && (
+            <section className="rejected-bin">
+              <h2>Rejected · {filteredRejected.length}</h2>
+              <div className="rows">
+                {filteredRejected.map((t) => (
+                  <TaskRow
+                    key={t.id}
+                    task={t}
+                    readOnly
+                    tone="rejected"
                   />
                 ))}
               </div>
