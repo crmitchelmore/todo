@@ -54,4 +54,4 @@ jobs:
             echo "::error::Set RAILWAY_PROJECT_ID to the Railway capture project id."
             exit 1
           fi
-          railway up ./web --path-as-root --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service web
+          railway up --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service web
