@@ -221,7 +221,7 @@ final class MacViewModel {
                 category: item.suggestedCategory,
                 tags: item.tags
             )
-            await MainActor.run { self.refreshTaskSnapshots(reason: "confirm") }
+            self.refreshTaskSnapshots(reason: "confirm")
         }
     }
 
@@ -360,7 +360,7 @@ final class MacViewModel {
     func reject(_ item: TaskItem) {
         Task {
             try? await store.reject(id: item.id)
-            await MainActor.run { self.refreshTaskSnapshots(reason: "reject") }
+            self.refreshTaskSnapshots(reason: "reject")
         }
     }
 

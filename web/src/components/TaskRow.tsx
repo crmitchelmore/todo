@@ -45,7 +45,7 @@ export function TaskRow({
       {task.category && <span className="tag">{task.category}</span>}
       <TagChips tags={tags} />
       {rejected
-        ? <span className="row-due row-due-static">Rejected {formatTimestamp(task.updated_at)}</span>
+        ? <span className="row-due row-due-static">{task.updated_at ? `Rejected ${formatTimestamp(task.updated_at)}` : 'Rejected'}</span>
         : done
           ? task.due_at && <span className="row-due row-due-static">{formatDue(task.due_at)}</span>
           : <RowDue taskId={task.id} due={task.due_at ?? null} />}

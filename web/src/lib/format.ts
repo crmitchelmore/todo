@@ -24,5 +24,5 @@ export function formatTimestamp(iso: string | null): string {
   const sameDay = d.toDateString() === now.toDateString();
   const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   if (sameDay) return `Today ${time}`;
-  return d.toLocaleDateString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+  return d.toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
 }
