@@ -52,7 +52,7 @@ final class SettingsViewController: UIViewController {
         appearanceControl.addTarget(self, action: #selector(appearanceChanged), for: .valueChanged)
 
         let accountNote = UILabel()
-        accountNote.text = "Password changes use the emailed reset flow from the sign-in screen."
+        accountNote.text = "Password changes use the emailed reset flow from the sign-in screen.\nBuild \(Self.appVersion)."
         accountNote.font = Theme.display(13, .regular)
         accountNote.textColor = Theme.textTertiary
         accountNote.numberOfLines = 0
@@ -176,6 +176,13 @@ final class SettingsViewController: UIViewController {
             await viewModel.auth.signOut()
             await viewModel.store.clearActiveUser()
         }
+    }
+
+    private static var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "unknown"
+        let build = info?["CFBundleVersion"] as? String ?? "unknown"
+        return "\(version) (\(build))"
     }
 
     private func section(title: String, controls: [UIView]) -> UIView {

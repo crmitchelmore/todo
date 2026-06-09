@@ -1648,11 +1648,42 @@ input[type='checkbox']:checked::after {
 .signin {
   position: relative;
   z-index: 1;
-  max-width: 380px;
-  margin: 14vh auto 0;
+  min-height: 100dvh;
+  width: min(100%, 480px);
+  margin: 0 auto;
+  display: grid;
+  align-items: center;
   text-align: center;
-  padding: 0 24px;
+  padding: clamp(28px, 8dvh, 72px) 20px calc(28px + env(safe-area-inset-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   animation: rise 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.signin-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 30px;
+  padding: clamp(22px, 5vw, 34px);
+  background:
+    radial-gradient(100% 90% at 50% 0%, var(--signal-soft), transparent 46%),
+    linear-gradient(180deg, var(--panel-raised), var(--panel-solid));
+  box-shadow: var(--shadow-pop);
+}
+.signin-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.24;
+  background:
+    linear-gradient(115deg, transparent 0 44%, rgba(255,255,255,0.08) 46%, transparent 50%),
+    repeating-linear-gradient(90deg, transparent 0 28px, rgba(255, 159, 46, 0.10) 28px 29px);
+  mask-image: linear-gradient(180deg, #000, transparent 70%);
+}
+.signin-card > * {
+  position: relative;
+  z-index: 1;
 }
 .signin h1 {
   font-family: var(--font-display);
@@ -1818,8 +1849,58 @@ input[type='checkbox']:checked::after {
 }
 
 @media (max-width: 560px) {
-  .app { padding: 28px 16px 100px; }
-  header h1 { font-size: 26px; }
-  .capture-bar input { font-size: 16px; }
+  .app { padding: 22px 14px calc(88px + env(safe-area-inset-bottom)); }
+  header {
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  header h1 { font-size: 26px; flex-basis: 100%; }
+  .sync { order: 2; }
+  .tags-toggle { padding-inline: 11px; }
+  .capture-bar {
+    position: sticky;
+    top: 8px;
+    z-index: 10;
+    margin-bottom: 28px;
+    padding: 8px;
+  }
+  .capture-bar::before { display: none; }
+  .capture-bar input {
+    flex-basis: 100%;
+    font-size: 16px;
+    padding: 11px 8px;
+  }
+  .capture-bar button {
+    width: 100%;
+    justify-content: center;
+  }
+  .row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    padding: 13px 10px;
+  }
+  .row-title { flex-basis: calc(100% - 34px); }
+  .row-due-wrap,
+  .row-due,
+  .tag-chips {
+    margin-left: 31px;
+  }
+  .signin {
+    align-items: start;
+    padding-top: max(16px, env(safe-area-inset-top));
+  }
+  .signin-card {
+    border-radius: 24px;
+    padding: 18px;
+  }
+  .signin h1 { font-size: 40px; }
+  .signin-sub { margin-bottom: 22px; }
+  .signin-tabs { margin-bottom: 14px; }
+  .signin-form { gap: 10px; }
+  .signin-form input { height: 46px; }
+  .signin-submit { height: 48px; }
+  .signin-divider { margin: 18px 0 12px; }
+  .signin-alt { height: 44px; }
   .security-grid { grid-template-columns: 1fr; }
 }
