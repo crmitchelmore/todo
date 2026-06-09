@@ -51,7 +51,12 @@ public final class TaskStore: @unchecked Sendable {
     @discardableResult
     public func requestAgentHandoff(taskId: String, mode: AgentHandoffMode, instructions: String?) async throws -> String {
         guard let token = auth?.currentToken() else { throw CaptureError.auth("not signed in") }
-        var request = URLRequest(url: config.backendURL.appendingPathComponent("api/tasks/\(taskId)/agent-handoff"))
+        let url = config.backendURL
+            .appendingPathComponent("api")
+            .appendingPathComponent("tasks")
+            .appendingPathComponent(taskId)
+            .appendingPathComponent("agent-handoff")
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.applyBearer(token)

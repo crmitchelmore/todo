@@ -210,7 +210,6 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         Theme.quietButton(rejectButton)
         rejectButton.contentTintColor = Theme.danger
         handoffField.placeholderString = "Ask the AI loop what to research or try next"
-        handoffField.delegate = self
         researchButton.target = self
         researchButton.action = #selector(researchTapped)
         Theme.quietButton(researchButton)
