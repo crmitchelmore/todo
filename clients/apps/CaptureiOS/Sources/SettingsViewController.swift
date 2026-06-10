@@ -12,11 +12,92 @@ final class SettingsViewController: UIViewController {
     private let diagnosticsRefresh = UIButton(type: .system)
     private let categoriesStack = UIStackView()
     private let tagsStack = UIStackView()
+    private let rulesStack = UIStackView()
     private var taxonomyWatchTasks: [Task<Void, Never>] = []
+    private var rules: [CategorisationRule] = []
 
     init(viewModel: CaptureViewModel) {
         self.viewModel = viewModel
         super.init(nibName: nil, bundle: nil)
+    }
+
+    private func promptCreateRule() {
+        promptRule(title: "New rule", rule: nil)
+    }
+
+    private func promptRenameRule(_ rule: CategorisationRule) {
+        promptRule(title: "Edit rule", rule: rule)
+    }
+
+    private func promptRule(title: String, rule: CategorisationRule?) {
+        let alert = UIAlertController(title: title, message: "Rules guide AI suggestions only; you still confirm the task.", preferredStyle: .alert)
+        alert.addTextField { field in
+            field.placeholder = "Rule title"
+            field.text = rule?.title
+        }
+        alert.addTextField { field in
+            field.placeholder = "When should this apply?"
+            field.text = rule?.instructions
+        }
+        alert.addTextField { field in
+            field.placeholder = "Category (optional)"
+            field.text = rule?.category
+        }
+        alert.addTextField { field in
+            field.placeholder = "tags, comma-separated"
+            field.text = rule?.tags.joined(separator: ", ")
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self] _ in
+            guard let self else { return }
+            let title = (alert.textFields?[0].text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let instructions = (alert.textFields?[1].text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty, !instructions.isEmpty else { return }
+            let rawCategory = alert.textFields?[2].text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let category = rawCategory.isEmpty ? nil : rawCategory
+            let tags = (alert.textFields?[3].text ?? "")
+                .split(separator: ",")
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if let rule {
+                self.viewModel.updateCategorisationRule(id: rule.id, title: title, instructions: instructions, category: category, tags: tags, enabled: rule.enabled)
+            } else {
+                self.viewModel.createCategorisationRule(title: title, instructions: instructions, category: category, tags: tags, enabled: true)
+            }
+        })
+        present(alert, animated: true)
+    }
+
+    private func ruleRow(_ rule: CategorisationRule) -> UIView {
+        let title = UILabel()
+        title.text = rule.title
+        title.font = Theme.display(14, .semibold)
+        title.textColor = Theme.textPrimary
+        let body = UILabel()
+        body.text = rule.instructions
+        body.font = Theme.display(12, .regular)
+        body.textColor = Theme.textSecondary
+        body.numberOfLines = 2
+        let meta = UILabel()
+        let metaText = ([rule.category].compactMap { $0 } + rule.tags.map { "#\($0)" }).joined(separator: " · ")
+        meta.text = metaText.isEmpty ? "suggestion context only" : metaText
+        meta.font = Theme.mono(11)
+        meta.textColor = Theme.iris
+        let text = UIStackView(arrangedSubviews: [title, body, meta])
+        text.axis = .vertical
+        text.spacing = 3
+        let edit = chipButton("Edit", color: Theme.signal) { [weak self] in self?.promptRenameRule(rule) }
+        let delete = chipButton("Delete", color: Theme.danger) { [weak self] in self?.viewModel.deleteCategorisationRule(rule.id) }
+        let row = UIStackView(arrangedSubviews: [text, edit, delete])
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 8
+        row.layoutMargins = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        row.isLayoutMarginsRelativeArrangement = true
+        row.backgroundColor = Theme.surfaceHi
+        row.layer.cornerRadius = 12
+        row.alpha = rule.enabled ? 1 : 0.56
+        return row
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -89,6 +170,7 @@ final class SettingsViewController: UIViewController {
         stack.addArrangedSubview(header)
         stack.addArrangedSubview(section(title: "Appearance", controls: [appearanceControl]))
         stack.addArrangedSubview(section(title: "Categories", controls: [makeAddButton(title: "Add category", action: { [weak self] in self?.promptCreateCategory() }), categoriesStack]))
+        stack.addArrangedSubview(section(title: "AI Categorisation Rules", controls: [makeAddButton(title: "Add rule", action: { [weak self] in self?.promptCreateRule() }), rulesStack]))
         stack.addArrangedSubview(section(title: "Tags", controls: [makeAddButton(title: "Add tag", action: { [weak self] in self?.promptCreateTag() }), tagsStack]))
         stack.addArrangedSubview(section(title: "Sync Diagnostics", controls: [diagnosticsStatus, diagnosticsDetail, diagnosticsMeta, diagnosticsRefresh]))
         stack.addArrangedSubview(section(title: "Account", controls: [accountNote, signOutButton]))
@@ -96,6 +178,8 @@ final class SettingsViewController: UIViewController {
         categoriesStack.spacing = 8
         tagsStack.axis = .vertical
         tagsStack.spacing = 8
+        rulesStack.axis = .vertical
+        rulesStack.spacing = 8
         rebuildTaxonomy()
 
         NSLayoutConstraint.activate([
@@ -197,6 +281,7 @@ final class SettingsViewController: UIViewController {
         startTaxonomyWatchersIfNeeded()
         categoriesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         tagsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        rulesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let existingCategories = Set(viewModel.allCategories.map { CategoryPalette.key($0.name) })
         let missingDefaults = CAPTURE_CATEGORIES.filter { !existingCategories.contains(CategoryPalette.key($0)) }
         if !missingDefaults.isEmpty {
@@ -230,6 +315,12 @@ final class SettingsViewController: UIViewController {
         if viewModel.allCategories.isEmpty {
             categoriesStack.addArrangedSubview(emptyLabel("No categories yet. Add defaults or create your own."))
         }
+        for rule in rules {
+            rulesStack.addArrangedSubview(ruleRow(rule))
+        }
+        if rules.isEmpty {
+            rulesStack.addArrangedSubview(emptyLabel("No rules yet. Add one like “wok research → errands + shopping”."))
+        }
         for tag in viewModel.allTags {
             tagsStack.addArrangedSubview(taxonomyRow(
                 name: tag.name,
@@ -256,18 +347,32 @@ final class SettingsViewController: UIViewController {
     private func startTaxonomyWatchersIfNeeded() {
         guard taxonomyWatchTasks.isEmpty else { return }
         taxonomyWatchTasks.append(Task { [weak self] in
-            guard let self else { return }
+            guard let store = self?.viewModel.store else { return }
             do {
-                for try await _ in try self.viewModel.store.watchCategories() {
+                for try await _ in try store.watchCategories() {
+                    guard let self else { break }
                     await MainActor.run { self.rebuildTaxonomy() }
                 }
             } catch {}
         })
         taxonomyWatchTasks.append(Task { [weak self] in
-            guard let self else { return }
+            guard let store = self?.viewModel.store else { return }
             do {
-                for try await _ in try self.viewModel.store.watchTags() {
+                for try await _ in try store.watchTags() {
+                    guard let self else { break }
                     await MainActor.run { self.rebuildTaxonomy() }
+                }
+            } catch {}
+        })
+        taxonomyWatchTasks.append(Task { [weak self] in
+            guard let store = self?.viewModel.store else { return }
+            do {
+                for try await rules in try store.watchCategorisationRules() {
+                    guard let self else { break }
+                    await MainActor.run {
+                        self.rules = rules
+                        self.rebuildTaxonomy()
+                    }
                 }
             } catch {}
         })

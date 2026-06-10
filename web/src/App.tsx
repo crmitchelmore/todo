@@ -6,6 +6,7 @@ import { ConfirmCard } from './components/ConfirmCard';
 import { TaskRow } from './components/TaskRow';
 import { TaskDetailPane } from './components/TaskDetailPane';
 import { CategoryManager } from './components/CategoryManager';
+import { CategorisationRulesManager } from './components/CategorisationRulesManager';
 import { TagManager } from './components/TagManager';
 import { TagFilter } from './components/TagFilter';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -127,6 +128,8 @@ export default function App() {
         <section>
           <h2>Categories</h2>
           <CategoryManager />
+          <h2>AI categorisation rules</h2>
+          <CategorisationRulesManager />
           <h2>Tags</h2>
           <TagManager />
         </section>

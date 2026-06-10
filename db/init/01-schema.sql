@@ -282,6 +282,30 @@ create table if not exists public.categories (
 create unique index if not exists categories_owner_name_idx on public.categories (owner_id, lower(name));
 create index if not exists categories_owner_id_idx on public.categories (owner_id, id);
 
+-- User-owned guidance for background categorisation. The worker reads these as suggestion hints
+-- only; task status/category/tag changes still require normal human confirmation.
+create table if not exists public.categorisation_rules (
+  id            uuid primary key default gen_random_uuid(),
+  owner_id      uuid not null references public.users(id) on delete cascade,
+  title         text not null,
+  instructions  text not null,
+  category      text,
+  tags          text,
+  enabled       integer not null default 1,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now(),
+
+  constraint categorisation_rules_title_len_chk check (char_length(title) between 1 and 120),
+  constraint categorisation_rules_instructions_len_chk check (char_length(instructions) between 1 and 1000),
+  constraint categorisation_rules_category_len_chk check (category is null or char_length(category) between 1 and 80),
+  constraint categorisation_rules_tags_len_chk check (tags is null or octet_length(tags) <= 2000),
+  constraint categorisation_rules_tags_json_chk check (tags is null or jsonb_typeof(tags::jsonb) = 'array'),
+  constraint categorisation_rules_enabled_chk check (enabled in (0, 1))
+);
+
+create index if not exists categorisation_rules_owner_enabled_idx
+  on public.categorisation_rules (owner_id, enabled, updated_at desc);
+
 -- Server-owned, append-only task history / agent work log. Synced read-only to clients and loaded
 -- only for the selected task; callers mutate tasks, the backend/worker records events.
 create table if not exists public.task_events (
@@ -403,4 +427,4 @@ create index if not exists agent_proposals_owner_task_status_idx
   where task_id is not null;
 
 -- PowerSync logical replication publication.
-create publication powersync for table public.tasks, public.tags, public.categories, public.task_events, public.task_attachments, public.agent_proposals;
+create publication powersync for table public.tasks, public.tags, public.categories, public.categorisation_rules, public.task_events, public.task_attachments, public.agent_proposals;

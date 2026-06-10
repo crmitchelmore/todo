@@ -106,6 +106,42 @@ public struct TaskCategory: Identifiable, Sendable, Equatable {
     }
 }
 
+/// User-owned, human-readable instructions that guide background categorisation. The worker only
+/// uses these to propose category/tag suggestions; task confirmation remains a human action.
+public struct CategorisationRule: Identifiable, Sendable, Equatable {
+    public let id: String
+    public var ownerId: String
+    public var title: String
+    public var instructions: String
+    public var category: String?
+    public var tags: [String]
+    public var enabled: Bool
+    public var createdAt: Date?
+    public var updatedAt: Date?
+
+    public init(
+        id: String,
+        ownerId: String,
+        title: String,
+        instructions: String,
+        category: String? = nil,
+        tags: [String] = [],
+        enabled: Bool = true,
+        createdAt: Date? = nil,
+        updatedAt: Date? = nil
+    ) {
+        self.id = id
+        self.ownerId = ownerId
+        self.title = title
+        self.instructions = instructions
+        self.category = category
+        self.tags = tags
+        self.enabled = enabled
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
 /// Append-only history row for a task. Written by the backend/worker and synced read-only to
 /// clients so detail panes can show user changes and AI/agent work without joining into hot lists.
 public struct TaskEvent: Identifiable, Sendable, Equatable {

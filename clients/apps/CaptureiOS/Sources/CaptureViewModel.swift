@@ -336,6 +336,18 @@ final class CaptureViewModel {
         Task { try? await store.deleteTag(id: id) }
     }
 
+    func createCategorisationRule(title: String, instructions: String, category: String?, tags: [String], enabled: Bool) {
+        Task { try? await store.createCategorisationRule(title: title, instructions: instructions, category: category, tags: tags, enabled: enabled) }
+    }
+
+    func updateCategorisationRule(id: String, title: String, instructions: String, category: String?, tags: [String], enabled: Bool) {
+        Task { try? await store.updateCategorisationRule(id: id, title: title, instructions: instructions, category: category, tags: tags, enabled: enabled) }
+    }
+
+    func deleteCategorisationRule(_ id: String) {
+        Task { try? await store.deleteCategorisationRule(id: id) }
+    }
+
     func refreshSyncSummary() {
         syncTask?.cancel()
         syncSummary = .checking

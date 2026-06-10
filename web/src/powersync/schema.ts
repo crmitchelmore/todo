@@ -50,6 +50,20 @@ const categories = new Table(
   { indexes: {} }
 );
 
+const categorisation_rules = new Table(
+  {
+    owner_id: column.text,
+    title: column.text,
+    instructions: column.text,
+    category: column.text,
+    tags: column.text,
+    enabled: column.integer,
+    created_at: column.text,
+    updated_at: column.text
+  },
+  { indexes: {} }
+);
+
 const task_events = new Table(
   {
     owner_id: column.text,
@@ -97,12 +111,13 @@ const agent_proposals = new Table(
   { indexes: { by_status: ['status', 'created_at'], by_task_status: ['task_id', 'status'] } }
 );
 
-export const AppSchema = new Schema({ tasks, tags, categories, task_events, task_attachments, agent_proposals });
+export const AppSchema = new Schema({ tasks, tags, categories, categorisation_rules, task_events, task_attachments, agent_proposals });
 
 export type Database = (typeof AppSchema)['types'];
 export type TaskRecord = Database['tasks'];
 export type TagRecord = Database['tags'];
 export type CategoryRecord = Database['categories'];
+export type CategorisationRuleRecord = Database['categorisation_rules'];
 export type TaskEventRecord = Database['task_events'];
 export type TaskAttachmentRecord = Database['task_attachments'];
 export type AgentProposalRecord = Database['agent_proposals'];
