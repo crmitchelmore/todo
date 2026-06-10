@@ -306,6 +306,35 @@ create table if not exists public.categorisation_rules (
 create index if not exists categorisation_rules_owner_enabled_idx
   on public.categorisation_rules (owner_id, enabled, updated_at desc);
 
+-- User-visible memory/facts that guide agent research. These are owner-scoped, editable, and
+-- soft-deletable so an agent cannot permanently erase context through a retried write.
+create table if not exists public.user_memories (
+  id          uuid primary key default gen_random_uuid(),
+  owner_id    uuid not null references public.users(id) on delete cascade,
+  content     text not null,
+  domain      text,
+  source      text not null default 'manual',
+  confidence  double precision not null default 1,
+  tags        text,
+  status      text not null default 'active',
+  expires_at  timestamptz,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  deleted_at  timestamptz,
+
+  constraint user_memories_content_len_chk check (char_length(content) between 1 and 1000),
+  constraint user_memories_domain_len_chk check (domain is null or char_length(domain) between 1 and 80),
+  constraint user_memories_source_chk check (source in ('manual', 'correction', 'inferred', 'agent')),
+  constraint user_memories_confidence_chk check (confidence >= 0 and confidence <= 1),
+  constraint user_memories_tags_len_chk check (tags is null or octet_length(tags) <= 2000),
+  constraint user_memories_tags_json_chk check (tags is null or jsonb_typeof(tags::jsonb) = 'array'),
+  constraint user_memories_status_chk check (status in ('active', 'disabled', 'deleted')),
+  constraint user_memories_deleted_at_chk check ((status = 'deleted') = (deleted_at is not null))
+);
+
+create index if not exists user_memories_owner_status_expires_idx
+  on public.user_memories (owner_id, status, expires_at, updated_at desc);
+
 -- Server-owned, append-only task history / agent work log. Synced read-only to clients and loaded
 -- only for the selected task; callers mutate tasks, the backend/worker records events.
 create table if not exists public.task_events (
@@ -427,4 +456,4 @@ create index if not exists agent_proposals_owner_task_status_idx
   where task_id is not null;
 
 -- PowerSync logical replication publication.
-create publication powersync for table public.tasks, public.tags, public.categories, public.categorisation_rules, public.task_events, public.task_attachments, public.agent_proposals;
+create publication powersync for table public.tasks, public.tags, public.categories, public.categorisation_rules, public.user_memories, public.task_events, public.task_attachments, public.agent_proposals;

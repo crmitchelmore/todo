@@ -177,6 +177,10 @@ const ALLOWED_COLUMNS: Record<string, Set<string>> = {
   categorisation_rules: new Set([
     'id', 'owner_id', 'title', 'instructions', 'category', 'tags', 'enabled', 'created_at', 'updated_at'
   ]),
+  user_memories: new Set([
+    'id', 'owner_id', 'content', 'domain', 'source', 'confidence', 'tags', 'status',
+    'expires_at', 'created_at', 'updated_at', 'deleted_at'
+  ]),
   task_attachments: new Set([
     'id', 'owner_id', 'task_id', 'filename', 'mime_type', 'byte_size', 'preview_data_url', 'created_at'
   ])
@@ -1094,7 +1098,18 @@ function sanitize(table: string, data: Record<string, unknown>): Record<string, 
   for (const [k, v] of Object.entries(data)) {
     if (allowed.has(k)) out[k] = v;
   }
+  if (table === 'user_memories') normalizeUserMemoryWrite(out);
   return out;
+}
+
+function normalizeUserMemoryWrite(data: Record<string, unknown>): void {
+  const status = typeof data.status === 'string' ? data.status : 'active';
+  data.status = status === 'disabled' || status === 'deleted' ? status : 'active';
+  if (data.status === 'deleted') {
+    data.deleted_at = typeof data.deleted_at === 'string' && data.deleted_at ? data.deleted_at : new Date().toISOString();
+  } else {
+    data.deleted_at = null;
+  }
 }
 
 function deterministicUuid(input: string): string {
@@ -1390,6 +1405,17 @@ async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Prom
       const result = await client.query(
         `UPDATE public.tasks
             SET status = 'cancelled',
+                updated_at = now()
+          WHERE id = $1 AND owner_id = $2`,
+        [op.id, ownerId]
+      );
+      return (result.rowCount ?? 0) > 0;
+    }
+    if (table === 'user_memories') {
+      const result = await client.query(
+        `UPDATE public.user_memories
+            SET status = 'deleted',
+                deleted_at = COALESCE(deleted_at, now()),
                 updated_at = now()
           WHERE id = $1 AND owner_id = $2`,
         [op.id, ownerId]

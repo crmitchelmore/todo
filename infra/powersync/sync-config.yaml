@@ -25,6 +25,10 @@ streams:
     auto_subscribe: true
     queries:
       - SELECT * FROM categorisation_rules WHERE owner_id = auth.user_id()
+  user_memories:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM user_memories WHERE owner_id = auth.user_id()
   task_events:
     auto_subscribe: true
     queries:

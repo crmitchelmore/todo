@@ -13,16 +13,97 @@ final class SettingsViewController: UIViewController {
     private let categoriesStack = UIStackView()
     private let tagsStack = UIStackView()
     private let rulesStack = UIStackView()
+    private let memoriesStack = UIStackView()
     private var taxonomyWatchTasks: [Task<Void, Never>] = []
     private var rules: [CategorisationRule] = []
+    private var memories: [UserMemory] = []
 
     init(viewModel: CaptureViewModel) {
         self.viewModel = viewModel
         super.init(nibName: nil, bundle: nil)
     }
 
+    private func memoryRow(_ memory: UserMemory) -> UIView {
+        let title = UILabel()
+        title.text = memory.domain ?? "general"
+        title.font = Theme.mono(11, .semibold)
+        title.textColor = Theme.iris
+        let body = UILabel()
+        body.text = memory.content
+        body.font = Theme.display(13, .regular)
+        body.textColor = Theme.textPrimary
+        body.numberOfLines = 3
+        let meta = UILabel()
+        let metaText = ([memory.source.rawValue] + memory.tags.map { "#\($0)" } + [memory.expiresAt.map { "expires \($0.formatted(date: .abbreviated, time: .omitted))" }].compactMap { $0 }).joined(separator: " · ")
+        meta.text = metaText.isEmpty ? "agent context" : metaText
+        meta.font = Theme.mono(11)
+        meta.textColor = Theme.textTertiary
+        let text = UIStackView(arrangedSubviews: [title, body, meta])
+        text.axis = .vertical
+        text.spacing = 3
+        let edit = chipButton("Edit", color: Theme.signal) { [weak self] in self?.promptRenameMemory(memory) }
+        let toggle = chipButton(memory.status == .disabled ? "Enable" : "Disable", color: Theme.textSecondary) { [weak self] in
+            self?.viewModel.setUserMemoryStatus(memory.id, status: memory.status == .disabled ? .active : .disabled)
+        }
+        let delete = chipButton("Delete", color: Theme.danger) { [weak self] in
+            self?.viewModel.setUserMemoryStatus(memory.id, status: .deleted)
+        }
+        let row = UIStackView(arrangedSubviews: [text, edit, toggle, delete])
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 8
+        row.layoutMargins = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        row.isLayoutMarginsRelativeArrangement = true
+        row.backgroundColor = Theme.surfaceHi
+        row.layer.cornerRadius = 12
+        row.alpha = memory.status == .active ? 1 : 0.56
+        return row
+    }
+
     private func promptCreateRule() {
         promptRule(title: "New rule", rule: nil)
+    }
+
+    private func promptCreateMemory() {
+        promptMemory(title: "New memory", memory: nil)
+    }
+
+    private func promptRenameMemory(_ memory: UserMemory) {
+        promptMemory(title: "Edit memory", memory: memory)
+    }
+
+    private func promptMemory(title: String, memory: UserMemory?) {
+        let alert = UIAlertController(title: title, message: "Facts and preferences guide agent research. Disable or delete stale context.", preferredStyle: .alert)
+        alert.addTextField { field in
+            field.placeholder = "Preference or fact"
+            field.text = memory?.content
+        }
+        alert.addTextField { field in
+            field.placeholder = "Domain, e.g. shopping"
+            field.text = memory?.domain
+        }
+        alert.addTextField { field in
+            field.placeholder = "tags, comma-separated"
+            field.text = memory?.tags.joined(separator: ", ")
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self, weak alert] _ in
+            guard let self, let alert else { return }
+            let content = (alert.textFields?[0].text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !content.isEmpty else { return }
+            let rawDomain = alert.textFields?[1].text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let domain = rawDomain.isEmpty ? nil : rawDomain
+            let tags = (alert.textFields?[2].text ?? "")
+                .split(separator: ",")
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if let memory {
+                self.viewModel.updateUserMemory(memory, content: content, domain: domain, tags: tags, expiresAt: memory.expiresAt, status: memory.status == .disabled ? .disabled : .active)
+            } else {
+                self.viewModel.createUserMemory(content: content, domain: domain, tags: tags, expiresAt: nil)
+            }
+        })
+        present(alert, animated: true)
     }
 
     private func promptRenameRule(_ rule: CategorisationRule) {
@@ -170,6 +251,7 @@ final class SettingsViewController: UIViewController {
         stack.addArrangedSubview(header)
         stack.addArrangedSubview(section(title: "Appearance", controls: [appearanceControl]))
         stack.addArrangedSubview(section(title: "Categories", controls: [makeAddButton(title: "Add category", action: { [weak self] in self?.promptCreateCategory() }), categoriesStack]))
+        stack.addArrangedSubview(section(title: "Agent Memory", controls: [makeAddButton(title: "Add memory", action: { [weak self] in self?.promptCreateMemory() }), memoriesStack]))
         stack.addArrangedSubview(section(title: "AI Categorisation Rules", controls: [makeAddButton(title: "Add rule", action: { [weak self] in self?.promptCreateRule() }), rulesStack]))
         stack.addArrangedSubview(section(title: "Tags", controls: [makeAddButton(title: "Add tag", action: { [weak self] in self?.promptCreateTag() }), tagsStack]))
         stack.addArrangedSubview(section(title: "Sync Diagnostics", controls: [diagnosticsStatus, diagnosticsDetail, diagnosticsMeta, diagnosticsRefresh]))
@@ -180,6 +262,8 @@ final class SettingsViewController: UIViewController {
         tagsStack.spacing = 8
         rulesStack.axis = .vertical
         rulesStack.spacing = 8
+        memoriesStack.axis = .vertical
+        memoriesStack.spacing = 8
         rebuildTaxonomy()
 
         NSLayoutConstraint.activate([
@@ -282,6 +366,7 @@ final class SettingsViewController: UIViewController {
         categoriesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         tagsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         rulesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        memoriesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let existingCategories = Set(viewModel.allCategories.map { CategoryPalette.key($0.name) })
         let missingDefaults = CAPTURE_CATEGORIES.filter { !existingCategories.contains(CategoryPalette.key($0)) }
         if !missingDefaults.isEmpty {
@@ -314,6 +399,12 @@ final class SettingsViewController: UIViewController {
         }
         if viewModel.allCategories.isEmpty {
             categoriesStack.addArrangedSubview(emptyLabel("No categories yet. Add defaults or create your own."))
+        }
+        for memory in memories {
+            memoriesStack.addArrangedSubview(memoryRow(memory))
+        }
+        if memories.isEmpty {
+            memoriesStack.addArrangedSubview(emptyLabel("No memories yet. Add preferences the agent should use for research."))
         }
         for rule in rules {
             rulesStack.addArrangedSubview(ruleRow(rule))
@@ -371,6 +462,18 @@ final class SettingsViewController: UIViewController {
                     guard let self else { break }
                     await MainActor.run {
                         self.rules = rules
+                        self.rebuildTaxonomy()
+                    }
+                }
+            } catch {}
+        })
+        taxonomyWatchTasks.append(Task { [weak self] in
+            guard let store = self?.viewModel.store else { return }
+            do {
+                for try await memories in try store.watchUserMemories() {
+                    guard let self else { break }
+                    await MainActor.run {
+                        self.memories = memories
                         self.rebuildTaxonomy()
                     }
                 }
