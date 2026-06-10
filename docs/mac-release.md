@@ -36,7 +36,8 @@ The **Release macOS App** workflow (`.github/workflows/release-mac.yml`) then:
 
 1. Generates the Xcode project (XcodeGen) and stamps version + build number.
 2. Archives `CaptureMac` with hardened runtime using the imported **Developer ID Application**
-   identity; do not let automation create fresh Mac Development certificates for routine releases.
+   identity and a minimal Developer ID entitlements file; do not let automation create fresh Mac
+   Development certificates for routine releases.
 3. Exports + signs for **Developer ID** using the App Store Connect API key.
 4. Notarises with `notarytool` (API key) and staples the ticket.
 5. Zips the stapled app, generates a signed `appcast.xml`.
@@ -64,6 +65,13 @@ a Developer ID Application cert, create one in the Apple Developer portal → Ce
 Prefer reusing a valid existing Developer ID Application certificate and private key. Creating new
 Apple certificates for routine CI retries can exhaust the account certificate limit and block both
 Mac and iOS releases.
+
+The checked-in Mac entitlements include Associated Domains for passkeys/webcredentials. That
+capability requires a provisioning profile, which is appropriate for development/App Store-style
+signing but brittle for Developer ID Sparkle releases. The GitHub workflow therefore archives with
+a temporary minimal entitlements plist for Developer ID distribution. Email/code sign-in remains the
+reliable release path; native passkey support can be revisited if a reusable Developer ID provisioning
+profile for Associated Domains is added as an explicit signing asset.
 
 ## Feed URL constraint
 
