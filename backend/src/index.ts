@@ -48,6 +48,7 @@ import {
 import { agentHandoffRequestId, parseAgentHandoffInput } from './agentHandoff.js';
 import { validateAttachmentData } from './attachments.js';
 import { sendEmailBestEffort, loginCodeEmail, resetCodeEmail } from './mailer.js';
+import { normalizeUserMemoryWrite, softDeleteUserMemory } from './userMemoryUpload.js';
 import {
   githubAuthorizeUrl,
   githubOAuthConfig,
@@ -1102,16 +1103,6 @@ function sanitize(table: string, data: Record<string, unknown>): Record<string, 
   return out;
 }
 
-function normalizeUserMemoryWrite(data: Record<string, unknown>): void {
-  const status = typeof data.status === 'string' ? data.status : 'active';
-  data.status = status === 'disabled' || status === 'deleted' ? status : 'active';
-  if (data.status === 'deleted') {
-    data.deleted_at = typeof data.deleted_at === 'string' && data.deleted_at ? data.deleted_at : new Date().toISOString();
-  } else {
-    data.deleted_at = null;
-  }
-}
-
 function deterministicUuid(input: string): string {
   const chars = createHash('sha256').update(input).digest('hex').slice(0, 32).split('');
   chars[12] = '5'; // version 5-ish deterministic UUID (hash-derived, not namespace RFC4122)
@@ -1412,15 +1403,7 @@ async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Prom
       return (result.rowCount ?? 0) > 0;
     }
     if (table === 'user_memories') {
-      const result = await client.query(
-        `UPDATE public.user_memories
-            SET status = 'deleted',
-                deleted_at = COALESCE(deleted_at, now()),
-                updated_at = now()
-          WHERE id = $1 AND owner_id = $2`,
-        [op.id, ownerId]
-      );
-      return (result.rowCount ?? 0) > 0;
+      return softDeleteUserMemory(client, ownerId, op.id);
     }
     const result = await client.query(`DELETE FROM ${table} WHERE id = $1 AND owner_id = $2`, [op.id, ownerId]);
     return (result.rowCount ?? 0) > 0;

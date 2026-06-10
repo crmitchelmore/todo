@@ -1,11 +1,12 @@
 import pg from 'pg';
 import { createHash } from 'crypto';
 import { enrich, type CategorisationRule } from './enrich.js';
-import { discoverTaskContext, type MemoryContext, type TaskDiscovery } from './discovery.js';
+import { discoverTaskContext, type TaskDiscovery } from './discovery.js';
 import { parseAgentHandoffMetadata, type AgentHandoffRequest } from './handoff.js';
 import { interruptForHumanDecision } from './hitl.js';
 import { learnCategoryHints, type CategoryHints, type HistoricalTask } from './historyLearning.js';
 import { bestMatch, discoverConfiguredGitHubRepositories, shouldAssociateGitHubProject, type GitHubRepository } from './githubProject.js';
+import { compactMemories, loadActiveMemories } from './memories.js';
 import {
   openClawConfigFromEnv,
   runOpenClawAttempt,
@@ -40,16 +41,6 @@ const SELECT_SQL = `
     AND coalesce(suggestion_source, 'on-device') NOT IN ('server', 'llm')
   ORDER BY created_at ASC
   LIMIT $1
-`;
-
-const ACTIVE_MEMORIES_SQL = `
-  SELECT content, domain, source, confidence, tags, expires_at
-  FROM public.user_memories
-  WHERE owner_id = $1
-    AND status = 'active'
-    AND (expires_at IS NULL OR expires_at > now())
-  ORDER BY confidence DESC, updated_at DESC
-  LIMIT 24
 `;
 
 const HISTORY_SQL = `
@@ -137,15 +128,6 @@ interface HandoffRequestRow {
   title: string;
 }
 
-interface MemoryRow {
-  content: string;
-  domain: string | null;
-  source: string;
-  confidence: number;
-  tags: string | null;
-  expires_at: string | Date | null;
-}
-
 interface GitHubAssociationRow {
   id: string;
   owner_id: string;
@@ -153,18 +135,6 @@ interface GitHubAssociationRow {
   category: string | null;
   suggested_category: string | null;
   github_repo: string | null;
-}
-
-async function loadActiveMemories(ownerId: string): Promise<MemoryContext[]> {
-  const { rows } = await pool.query<MemoryRow>(ACTIVE_MEMORIES_SQL, [ownerId]);
-  return rows.map((row) => ({
-    content: row.content,
-    domain: row.domain,
-    source: row.source,
-    confidence: Number(row.confidence),
-    tags: decodeTags(row.tags),
-    expiresAt: row.expires_at instanceof Date ? row.expires_at.toISOString() : row.expires_at,
-  }));
 }
 
 interface ApprovedAttemptRow {
@@ -328,7 +298,7 @@ async function recordDiscoveryEvent(
         source: 'agent-discovery',
         query: discovery.query,
         location: discovery.location,
-        memories: discovery.memories,
+        memories: compactMemories(discovery.memories),
         web: discovery.web,
         next_actions: discovery.nextActions,
         confidence: discovery.confidence,
@@ -348,7 +318,7 @@ async function recordDiscoveryProposal(
     action_type: 'task_context_lookup',
     query: discovery.query,
     location: discovery.location,
-    memories: discovery.memories,
+    memories: compactMemories(discovery.memories),
     web: discovery.web,
     next_actions: discovery.nextActions,
   };
@@ -462,7 +432,7 @@ async function recordHandoffCompletionEvent(
         source: 'agent-handoff',
         query: discovery.query,
         location: discovery.location,
-        memories: discovery.memories,
+        memories: compactMemories(discovery.memories),
         web: discovery.web,
         next_actions: discovery.nextActions,
         confidence: discovery.confidence,
@@ -745,7 +715,7 @@ async function processAgentHandoffRequests(): Promise<number> {
     try {
       const discovery = await discoverTaskContext(
         { id: row.task_id, ownerId: row.owner_id, title: row.title },
-        { force: true, instructions: request.instructions, memories: await loadActiveMemories(row.owner_id) }
+        { force: true, instructions: request.instructions, memories: await loadActiveMemories(pool, row.owner_id) }
       );
       if (!discovery) {
         await recordHandoffFailureEvent(row, request, 'handoff discovery returned no result');

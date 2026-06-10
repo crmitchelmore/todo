@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery } from '@powersync/react';
 import type { UserMemoryRecord } from '../powersync/schema';
-import { createUserMemory, setUserMemoryStatus, updateUserMemory, type UserMemoryStatus } from '../lib/userMemories';
+import { createUserMemory, setUserMemoryStatus, updateUserMemory } from '../lib/userMemories';
+import { parseMemoryExpiry, type UserMemoryStatus } from '../lib/userMemoryModel';
 import { decodeTags } from '../lib/tags';
 
 type Draft = {
@@ -44,7 +45,7 @@ export function UserMemoryManager() {
       confidence: 1,
       tags: parseTags(draft.tags),
       status: draft.status,
-      expires_at: safeExpiry(draft.expires_at),
+      expires_at: parseMemoryExpiry(draft.expires_at),
     };
     if (editingId) {
       await updateUserMemory(editingId, input);
@@ -52,11 +53,6 @@ export function UserMemoryManager() {
       await createUserMemory(input);
     }
 
-    function safeExpiry(value: string): string | null {
-      if (!value) return null;
-      const date = new Date(`${value}T23:59:59.000Z`);
-      return Number.isNaN(date.getTime()) ? null : date.toISOString();
-    }
     setEditingId(null);
     setDraft(emptyDraft);
   }

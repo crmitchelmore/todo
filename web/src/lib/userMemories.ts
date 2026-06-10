@@ -1,38 +1,11 @@
 import { db, ownerId } from '../powersync/db';
-import { encodeTags, normalizeTags } from './tags';
-
-export type UserMemoryStatus = 'active' | 'disabled' | 'deleted';
-export type UserMemorySource = 'manual' | 'correction' | 'inferred' | 'agent';
-
-export interface UserMemoryInput {
-  content: string;
-  domain: string | null;
-  source?: UserMemorySource;
-  confidence?: number;
-  tags: string[];
-  status?: UserMemoryStatus;
-  expires_at: string | null;
-}
-
-function clean(input: UserMemoryInput): Required<UserMemoryInput> | null {
-  const content = input.content.trim().slice(0, 1000);
-  if (!content) return null;
-  const status = input.status === 'disabled' || input.status === 'deleted' ? input.status : 'active';
-  return {
-    content,
-    domain: input.domain?.trim().slice(0, 80) || null,
-    source: input.source ?? 'manual',
-    confidence: Math.max(0, Math.min(1, input.confidence ?? 1)),
-    tags: normalizeTags(input.tags).map((tag) => tag.slice(0, 80)),
-    status,
-    expires_at: input.expires_at,
-  };
-}
+import { encodeTags } from './tags';
+import { cleanUserMemoryInput, randomUserMemoryId, type UserMemoryInput, type UserMemoryStatus } from './userMemoryModel';
 
 export async function createUserMemory(input: UserMemoryInput): Promise<string | null> {
-  const cleaned = clean(input);
+  const cleaned = cleanUserMemoryInput(input);
   if (!cleaned) return null;
-  const id = randomId();
+  const id = randomUserMemoryId();
   const now = new Date().toISOString();
   await db.execute(
     `INSERT INTO user_memories
@@ -56,17 +29,8 @@ export async function createUserMemory(input: UserMemoryInput): Promise<string |
   return id;
 }
 
-function randomId(): string {
-  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = Math.random() * 16 | 0;
-    const v = c === 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
-}
-
 export async function updateUserMemory(id: string, input: UserMemoryInput): Promise<void> {
-  const cleaned = clean(input);
+  const cleaned = cleanUserMemoryInput(input);
   if (!cleaned) return;
   const now = new Date().toISOString();
   await db.execute(
