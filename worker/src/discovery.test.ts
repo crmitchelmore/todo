@@ -125,6 +125,38 @@ test('agent handoff discovery carries user memory context into shopping research
   assert.ok(discovery.nextActions.some((action) => action.includes('Apply user context')));
 });
 
+test('memory-enhanced web discovery keeps outgoing search query bounded', async () => {
+  const calls: string[] = [];
+  const response = new Response(JSON.stringify({ results: [] }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+
+  const discovery = await discoverTaskContext(
+    { id: 'task-long', ownerId: 'owner-1', title: 'Need to buy a wok' },
+    {
+      env: { CAPTURE_WEB_SEARCH_ENDPOINT: 'https://search.example.invalid/api' },
+      force: true,
+      memories: Array.from({ length: 12 }, (_, index) => ({
+        content: `memory-${index} ` + 'x'.repeat(1000),
+        domain: 'shopping',
+        source: 'manual',
+        confidence: 1,
+        tags: [],
+        expiresAt: null,
+      })),
+      fetchImpl: async (input) => {
+        calls.push(String(input));
+        return response;
+      },
+    },
+  );
+
+  assert.ok(discovery);
+  assert.ok(discovery.query.length <= 500);
+  assert.equal(new URL(calls[0]).searchParams.get('q')?.length, discovery.query.length);
+});
+
 test('agent handoff discovery generalises user memory context across task domains', async () => {
   const cases = [
     {
