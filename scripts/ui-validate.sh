@@ -110,8 +110,10 @@ run_ios() {
   sleep 3
   # Simulator can show system banners (for example Apple Intelligence prompts) over the app after
   # boot. Dismiss transient overlays so the screenshot proves Capture UI quality, not SpringBoard.
-  osascript -e 'tell application "Simulator" to activate' \
-            -e 'tell application "System Events" to key code 53' >/dev/null 2>&1 || true
+  if pgrep -x "Simulator" >/dev/null; then
+    osascript -e 'tell application "Simulator" to activate' \
+              -e 'tell application "System Events" to key code 53' >/dev/null 2>&1 || true
+  fi
   sleep 2
   xcrun simctl io "$device" screenshot "$ARTIFACT_ROOT/ios/capture-ios.png"
   xcrun simctl spawn "$device" log show --last 2m --style compact \
@@ -140,12 +142,16 @@ run_mac() {
   app_path="$(find "$ROOT/clients/apps/DerivedData/UIValidation/Build/Products" -name 'CaptureMac.app' -type d | head -1)"
   [[ -n "$app_path" ]] || { echo "CaptureMac.app not found"; exit 1; }
   open -n "$app_path"
-  sleep 4
-  osascript -e "tell application id \"$MAC_BUNDLE_ID\" to activate" >/dev/null 2>&1 || true
-  sleep 1
-  local frontmost window_count
-  frontmost="$(osascript -e 'tell application "System Events" to name of first process whose frontmost is true' 2>/dev/null || true)"
-  window_count="$(osascript -e "tell application \"System Events\" to count windows of (first process whose bundle identifier is \"$MAC_BUNDLE_ID\")" 2>/dev/null || echo 0)"
+  local frontmost="" window_count=0
+  for _ in {1..10}; do
+    osascript -e "tell application \"System Events\" to set frontmost of (first process whose bundle identifier is \"$MAC_BUNDLE_ID\") to true" >/dev/null 2>&1 || true
+    sleep 1
+    frontmost="$(osascript -e 'tell application "System Events" to name of first process whose frontmost is true' 2>/dev/null || true)"
+    window_count="$(osascript -e "tell application \"System Events\" to count windows of (first process whose bundle identifier is \"$MAC_BUNDLE_ID\")" 2>/dev/null || echo 0)"
+    if [[ ( "$frontmost" == "CaptureMac" || "$frontmost" == "Capture" ) && "${window_count:-0}" -ge 1 ]]; then
+      break
+    fi
+  done
   if [[ "$frontmost" != "CaptureMac" && "$frontmost" != "Capture" ]]; then
     echo "CaptureMac is not frontmost after launch (frontmost=$frontmost)." > "$ARTIFACT_ROOT/mac/frontmost.txt"
     echo "The app may be blocked by a keychain/system prompt; screenshot would not prove Capture UI quality." >&2
