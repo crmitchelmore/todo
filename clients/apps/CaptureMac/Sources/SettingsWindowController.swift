@@ -29,9 +29,10 @@ final class TaxonomySettingsStore: ObservableObject {
     func start() {
         guard watchers.isEmpty else { return }
         watchers.append(Task { [weak self] in
-            guard let self else { return }
+            guard let store = self?.taskStore else { return }
             do {
-                for try await rows in try self.taskStore.watchCategories() {
+                for try await rows in try store.watchCategories() {
+                    guard let self else { break }
                     await MainActor.run { self.categories = rows }
                 }
             } catch {
@@ -39,9 +40,10 @@ final class TaxonomySettingsStore: ObservableObject {
             }
         })
         watchers.append(Task { [weak self] in
-            guard let self else { return }
+            guard let store = self?.taskStore else { return }
             do {
-                for try await rows in try self.taskStore.watchTags() {
+                for try await rows in try store.watchTags() {
+                    guard let self else { break }
                     await MainActor.run { self.tags = rows }
                 }
             } catch {
@@ -49,9 +51,10 @@ final class TaxonomySettingsStore: ObservableObject {
             }
         })
         watchers.append(Task { [weak self] in
-            guard let self else { return }
+            guard let store = self?.taskStore else { return }
             do {
-                for try await rows in try self.taskStore.watchCategorisationRules() {
+                for try await rows in try store.watchCategorisationRules() {
+                    guard let self else { break }
                     await MainActor.run { self.rules = rows }
                 }
             } catch {
@@ -422,7 +425,7 @@ private struct RuleDraft {
             }
 
             var parsedTags: [String] {
-                tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+                tags.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
             }
         }
 

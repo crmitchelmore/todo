@@ -86,6 +86,15 @@ const RECURRENCE_MATCHERS = RECURRENCE_HINTS.map(([label, hints]) => ({
   patterns: hints.map(boundedMatcher),
 }));
 let llmDisabledReason: string | null = null;
+const STOP_WORDS = new Set([
+  'the', 'and', 'for', 'this', 'that', 'with', 'from', 'you', 'are', 'not', 'but',
+  'all', 'any', 'can', 'get', 'has', 'had', 'was', 'were', 'his', 'her', 'its',
+  'our', 'out', 'who', 'how', 'why', 'one', 'two', 'new', 'use', 'she', 'him',
+  'they', 'them', 'their', 'there', 'these', 'than', 'then', 'also', 'some',
+  'into', 'other', 'about', 'after', 'been', 'when', 'where', 'which', 'would',
+  'could', 'should', 'will', 'your', 'only', 'very', 'just', 'more', 'most',
+  'such', 'even', 'over', 'back', 'down', 'well'
+]);
 
 function normalizeTags(tags: unknown): string[] {
   if (!Array.isArray(tags)) return [];
@@ -103,9 +112,9 @@ function titleTokens(text: string): Set<string> {
   return new Set(
     text
       .toLowerCase()
-      .split(/[^a-z0-9]+/)
+      .split(/[^\p{L}\p{N}]+/u)
       .map((token) => token.trim())
-      .filter((token) => token.length >= 3)
+      .filter((token) => token.length >= 3 && !STOP_WORDS.has(token))
   );
 }
 

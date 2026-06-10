@@ -50,12 +50,14 @@ final class SettingsViewController: UIViewController {
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self] _ in
             guard let self else { return }
-            let title = alert.textFields?[0].text ?? ""
-            let instructions = alert.textFields?[1].text ?? ""
-            let category = alert.textFields?[2].text?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            let title = (alert.textFields?[0].text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let instructions = (alert.textFields?[1].text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty, !instructions.isEmpty else { return }
+            let rawCategory = alert.textFields?[2].text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let category = rawCategory.isEmpty ? nil : rawCategory
             let tags = (alert.textFields?[3].text ?? "")
                 .split(separator: ",")
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
             if let rule {
                 self.viewModel.updateCategorisationRule(id: rule.id, title: title, instructions: instructions, category: category, tags: tags, enabled: rule.enabled)
@@ -77,7 +79,8 @@ final class SettingsViewController: UIViewController {
         body.textColor = Theme.textSecondary
         body.numberOfLines = 2
         let meta = UILabel()
-        meta.text = ([rule.category].compactMap { $0 } + rule.tags.map { "#\($0)" }).joined(separator: " · ").nilIfEmpty ?? "suggestion context only"
+        let metaText = ([rule.category].compactMap { $0 } + rule.tags.map { "#\($0)" }).joined(separator: " · ")
+        meta.text = metaText.isEmpty ? "suggestion context only" : metaText
         meta.font = Theme.mono(11)
         meta.textColor = Theme.iris
         let text = UIStackView(arrangedSubviews: [title, body, meta])
@@ -344,25 +347,28 @@ final class SettingsViewController: UIViewController {
     private func startTaxonomyWatchersIfNeeded() {
         guard taxonomyWatchTasks.isEmpty else { return }
         taxonomyWatchTasks.append(Task { [weak self] in
-            guard let self else { return }
+            guard let store = self?.viewModel.store else { return }
             do {
-                for try await _ in try self.viewModel.store.watchCategories() {
+                for try await _ in try store.watchCategories() {
+                    guard let self else { break }
                     await MainActor.run { self.rebuildTaxonomy() }
                 }
             } catch {}
         })
         taxonomyWatchTasks.append(Task { [weak self] in
-            guard let self else { return }
+            guard let store = self?.viewModel.store else { return }
             do {
-                for try await _ in try self.viewModel.store.watchTags() {
+                for try await _ in try store.watchTags() {
+                    guard let self else { break }
                     await MainActor.run { self.rebuildTaxonomy() }
                 }
             } catch {}
         })
         taxonomyWatchTasks.append(Task { [weak self] in
-            guard let self else { return }
+            guard let store = self?.viewModel.store else { return }
             do {
-                for try await rules in try self.viewModel.store.watchCategorisationRules() {
+                for try await rules in try store.watchCategorisationRules() {
+                    guard let self else { break }
                     await MainActor.run {
                         self.rules = rules
                         self.rebuildTaxonomy()
