@@ -60,6 +60,19 @@ test('mapMemoryRow tolerates malformed tags', () => {
   assert.deepEqual(memory.tags, []);
 });
 
+test('mapMemoryRow preserves pre-parsed postgres json tags', () => {
+  const memory = mapMemoryRow({
+    content: 'Prefers induction-safe pans.',
+    domain: 'shopping',
+    source: 'manual',
+    confidence: 0.8,
+    tags: ['kitchen', 42, 'induction'],
+    expires_at: null,
+  });
+
+  assert.deepEqual(memory.tags, ['kitchen', 'induction']);
+});
+
 test('compactMemories bounds memory metadata for task event payloads', () => {
   const compacted = compactMemories(Array.from({ length: 8 }, (_, i) => ({
     content: `${i}-` + 'x'.repeat(500),

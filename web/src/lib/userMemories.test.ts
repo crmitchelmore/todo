@@ -26,6 +26,17 @@ test('cleanUserMemoryInput rejects empty content', () => {
   assert.equal(cleanUserMemoryInput({ content: '   ', domain: null, tags: [], expires_at: null }), null);
 });
 
+test('cleanUserMemoryInput tolerates missing or malformed tags', () => {
+  const cleaned = cleanUserMemoryInput({
+    content: 'Remember this',
+    domain: null,
+    tags: null as any,
+    expires_at: null,
+  });
+
+  assert.deepEqual(cleaned?.tags, []);
+});
+
 test('parseMemoryExpiry returns ISO end-of-day or null', () => {
   assert.equal(parseMemoryExpiry(''), null);
   assert.equal(parseMemoryExpiry('not-a-date'), null);

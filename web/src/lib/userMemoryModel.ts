@@ -26,10 +26,12 @@ export function cleanUserMemoryInput(input: UserMemoryInput): Required<UserMemor
   };
 }
 
-function normalizeMemoryTags(tags: string[]): string[] {
+function normalizeMemoryTags(tags: unknown): string[] {
+  if (!Array.isArray(tags)) return [];
   const seen = new Set<string>();
   const out: string[] = [];
   for (const tag of tags) {
+    if (typeof tag !== 'string') continue;
     const trimmed = tag.trim();
     const key = trimmed.toLowerCase();
     if (trimmed && !seen.has(key)) {
@@ -41,7 +43,7 @@ function normalizeMemoryTags(tags: string[]): string[] {
 }
 
 export function randomUserMemoryId(): string {
-  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
     const r = Math.random() * 16 | 0;
     const v = c === 'x' ? r : (r & 0x3 | 0x8);

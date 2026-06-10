@@ -16,12 +16,16 @@ export interface MemoryRow {
   domain: string | null;
   source: string;
   confidence: number;
-  tags: string | null;
+  tags: unknown;
   expires_at: string | Date | null;
 }
 
-export function decodeMemoryTags(raw: string | null): string[] {
+export function decodeMemoryTags(raw: unknown): string[] {
   if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw.filter((tag): tag is string => typeof tag === 'string');
+  }
+  if (typeof raw !== 'string') return [];
   try {
     const parsed = JSON.parse(raw) as unknown;
     return Array.isArray(parsed) ? parsed.filter((tag): tag is string => typeof tag === 'string') : [];
