@@ -69,3 +69,14 @@ Prerequisites:
 4. Rerun only the affected surface, then rerun `all` before shipping.
 
 Keep validation focused on speed and productivity: login/capture/detail surfaces should render without console/runtime errors, primary inputs must be editable, and no critical controls should collapse or disappear at common mobile/desktop widths.
+
+## Design-quality loop
+
+Every run writes `.ui-artifacts/<timestamp>/design-review.md`. Treat it as the UI acceptance checklist:
+
+1. Generate evidence: `scripts/ui-validate.sh web ios mac`.
+2. Open the screenshots/logs and fill the checklist mentally or directly in the artefact file.
+3. For web usability regressions, use Playwright/Webwright to interact with the running app rather than only reading DOM. Use system Chrome on this machine (`channel="chrome"`) because bundled Chromium can crash.
+4. For iOS, build/install/launch in Simulator and inspect `ios/capture-ios.png` plus `ios/error-log.txt`.
+5. For Mac, run the native app and inspect `mac/capture-mac.png`; grant Screen Recording/Accessibility if screenshots or interaction fail. If the script writes `mac/frontmost.txt`, treat that as a failed validation: a keychain/system prompt or missing app window blocked Capture, so the screenshot would not prove design quality.
+6. Iterate until the surface fits `docs/capture-ux-patterns.md`: Capture should feel like a calm command cockpit, not a generic CRUD dashboard.
