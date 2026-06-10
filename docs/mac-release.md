@@ -35,7 +35,8 @@ git push origin mac-v0.1.0
 The **Release macOS App** workflow (`.github/workflows/release-mac.yml`) then:
 
 1. Generates the Xcode project (XcodeGen) and stamps version + build number.
-2. Archives `CaptureMac` with hardened runtime.
+2. Archives `CaptureMac` with hardened runtime using the imported **Developer ID Application**
+   identity; do not let automation create fresh Mac Development certificates for routine releases.
 3. Exports + signs for **Developer ID** using the App Store Connect API key.
 4. Notarises with `notarytool` (API key) and staples the ticket.
 5. Zips the stapled app, generates a signed `appcast.xml`.
@@ -59,6 +60,10 @@ workflow fails fast if these secrets are absent. Add:
 To create the `.p12` locally from your keychain: export the "Developer ID Application"
 identity from Keychain Access, then `base64 -i cert.p12 | pbcopy`. (If you don't yet have
 a Developer ID Application cert, create one in the Apple Developer portal → Certificates.)
+
+Prefer reusing a valid existing Developer ID Application certificate and private key. Creating new
+Apple certificates for routine CI retries can exhaust the account certificate limit and block both
+Mac and iOS releases.
 
 ## Feed URL constraint
 

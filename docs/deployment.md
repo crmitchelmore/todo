@@ -185,6 +185,12 @@ Merging changes under `clients/apps/CaptureiOS/`, `CaptureShare/`, `CaptureWidge
 or `clients/apps/project.yml` to `main` automatically runs `release-ios.yml` and uploads a TestFlight
 build. If the automatic run fails, fix the workflow or signing issue rather than treating the merge as
 shipped.
+Apple Developer accounts have hard certificate limits. Prefer reusing existing valid Apple Development,
+Apple Distribution, Mac Development, and Developer ID certificates/profiles before creating new ones.
+Only create a new certificate when no compatible non-expired certificate is available for the team and
+target. If the account hits the certificate cap, revoke only clearly unused or expired certificates,
+then rerun the release workflow; never commit certificates, profiles, passwords, or app-specific
+passwords into the repository.
 Use browser automation only for the Apple Developer portal gaps that the API key cannot mutate, such
 as assigning App Groups to App IDs. For that class of workflow, use Webwright/Playwright against a
 user-signed-in browser session, keep screenshots/logs as artefacts, and never store Apple passwords
@@ -202,6 +208,9 @@ or 2FA codes in the repo.
 Merging changes under `clients/apps/CaptureMac/`, `clients/CaptureCore/`, or `clients/apps/project.yml`
 to `main` automatically runs `release-mac.yml`, publishes a signed/notarised GitHub Release, and updates
 the Sparkle appcast used by installed Mac apps.
+Reuse existing Developer ID and Mac Development signing assets where possible. Do not let CI or local
+automation create fresh Apple certificates on every run; certificate churn blocks both Mac and iOS
+releases for the whole account.
 
 ### Web app
 - **Static host** — `cd web && npm run build` produces a static bundle; deploy `web/dist` to any

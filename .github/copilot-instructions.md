@@ -29,11 +29,21 @@
 - The script pulls/rebases, builds, moves old `/Applications` and `~/Applications` Capture bundles to `/tmp/todo/capture-mac-old-installs/<timestamp>/`, installs `/Applications/CaptureMac.app`, and launches it.
 - Do not manually delete old app installs; move them aside or use the script.
 
+## UI validation loop
+
+- After UI changes, run `scripts/ui-validate.sh web ios mac` or the narrow affected surface, then inspect the generated `.ui-artifacts/<timestamp>/design-review.md` checklist and screenshots/logs.
+- Use Playwright/Webwright for browser interaction, iOS Simulator for iOS, and the built Mac app screenshot/log path for macOS. Fix usability/design issues before claiming parity.
+
 ## PowerSync/Railway rollouts
 
 - Schema changes that sync to clients must be rolled out across every layer together: Postgres migration/publication, PowerSync sync rules, backend upload allow-list, and web/Swift local schemas.
 - Deploy Railway services from the repository root; only use service-specific paths where existing scripts document them.
 - Do not ship App Store/TestFlight clients with a schema-writing change until the live Railway backend and PowerSync service have been migrated and redeployed.
+
+## Apple signing
+
+- Reuse existing valid Apple signing certificates and provisioning profiles where possible; do not create new certificates/profiles on every release attempt.
+- If signing fails due certificate capacity, clean up clearly unused/expired Apple Developer certificates and repair profiles, then rerun the release workflow. Never commit certificates, profiles, Apple passwords, or app-specific passwords.
 
 ## OpenClaw executor
 
