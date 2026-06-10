@@ -12,6 +12,7 @@ final class SettingsViewController: UIViewController {
     private let diagnosticsRefresh = UIButton(type: .system)
     private let categoriesStack = UIStackView()
     private let tagsStack = UIStackView()
+    private var taxonomyWatchTasks: [Task<Void, Never>] = []
 
     init(viewModel: CaptureViewModel) {
         self.viewModel = viewModel
@@ -32,6 +33,10 @@ final class SettingsViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         applyTheme()
+    }
+
+    deinit {
+        taxonomyWatchTasks.forEach { $0.cancel() }
     }
 
     private func build() {
@@ -189,6 +194,7 @@ final class SettingsViewController: UIViewController {
     }
 
     private func rebuildTaxonomy() {
+        startTaxonomyWatchersIfNeeded()
         categoriesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         tagsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let existingCategories = Set(viewModel.allCategories.map { CategoryPalette.key($0.name) })
@@ -245,7 +251,26 @@ final class SettingsViewController: UIViewController {
     }
 
     private func reloadTaxonomySoon() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in self?.rebuildTaxonomy() }
+    }
+
+    private func startTaxonomyWatchersIfNeeded() {
+        guard taxonomyWatchTasks.isEmpty else { return }
+        taxonomyWatchTasks.append(Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await _ in try self.viewModel.store.watchCategories() {
+                    await MainActor.run { self.rebuildTaxonomy() }
+                }
+            } catch {}
+        })
+        taxonomyWatchTasks.append(Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await _ in try self.viewModel.store.watchTags() {
+                    await MainActor.run { self.rebuildTaxonomy() }
+                }
+            } catch {}
+        })
     }
 
     private func makeAddButton(title: String, action: @escaping () -> Void) -> UIButton {

@@ -687,7 +687,7 @@ public final class TaskStore: @unchecked Sendable {
 
     @discardableResult
     public func createCategory(name: String, color: String? = nil) async throws -> String {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
         guard !trimmed.isEmpty else { throw CategoryError.emptyName }
         if let existing = try await db.getOptional(
             sql: "SELECT id FROM \(CATEGORIES_TABLE) WHERE name = ? COLLATE NOCASE",
@@ -714,7 +714,7 @@ public final class TaskStore: @unchecked Sendable {
     }
 
     public func renameCategory(id: String, to newName: String) async throws {
-        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = String(newName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
         guard !trimmed.isEmpty else { throw CategoryError.emptyName }
         let now = ISO8601.string(Date())
         let oldName = try await db.getOptional(

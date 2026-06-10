@@ -8,7 +8,7 @@ export function colorForCategory(name: string): string {
 }
 
 export async function createCategory(name: string, color?: string): Promise<string | null> {
-  const trimmed = name.trim();
+  const trimmed = name.trim().slice(0, 80);
   if (!trimmed) return null;
   const existing = await db.getOptional<{ id: string }>(
     `SELECT id FROM categories WHERE name = ? COLLATE NOCASE`,
@@ -34,7 +34,7 @@ export async function recolorCategory(id: string, color: string): Promise<void> 
 }
 
 export async function renameCategory(id: string, newName: string): Promise<void> {
-  const trimmed = newName.trim();
+  const trimmed = newName.trim().slice(0, 80);
   if (!trimmed) return;
   const now = new Date().toISOString();
   const row = await db.getOptional<{ name: string }>(`SELECT name FROM categories WHERE id = ?`, [id]);

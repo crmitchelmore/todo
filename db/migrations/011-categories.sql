@@ -21,12 +21,12 @@ create index if not exists categories_owner_id_idx on public.categories (owner_i
 insert into public.categories (owner_id, name, color)
 select candidate.owner_id, candidate.name, '#9BA1A6'
   from (
-    select distinct owner_id, btrim(category) as name
+    select distinct owner_id, substring(btrim(category) from 1 for 80) as name
       from public.tasks
      where category is not null
        and btrim(category) <> ''
     union
-    select distinct owner_id, btrim(suggested_category) as name
+    select distinct owner_id, substring(btrim(suggested_category) from 1 for 80) as name
       from public.tasks
      where suggested_category is not null
        and btrim(suggested_category) <> ''
@@ -36,7 +36,8 @@ select candidate.owner_id, candidate.name, '#9BA1A6'
          from public.categories c
         where c.owner_id = candidate.owner_id
           and lower(c.name) = lower(candidate.name)
- );
+ )
+on conflict do nothing;
 
 do $$
 begin
