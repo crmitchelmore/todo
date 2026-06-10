@@ -348,6 +348,29 @@ final class CaptureViewModel {
         Task { try? await store.deleteCategorisationRule(id: id) }
     }
 
+    func createUserMemory(content: String, domain: String?, tags: [String], expiresAt: Date?) {
+        Task { try? await store.createUserMemory(content: content, domain: domain, tags: tags, expiresAt: expiresAt) }
+    }
+
+    func updateUserMemory(_ memory: UserMemory, content: String, domain: String?, tags: [String], expiresAt: Date?, status: UserMemoryStatus) {
+        Task {
+            try? await store.updateUserMemory(
+                id: memory.id,
+                content: content,
+                domain: domain,
+                source: memory.source,
+                confidence: memory.confidence,
+                tags: tags,
+                expiresAt: expiresAt,
+                status: status
+            )
+        }
+    }
+
+    func setUserMemoryStatus(_ id: String, status: UserMemoryStatus) {
+        Task { try? await store.setUserMemoryStatus(id: id, status: status) }
+    }
+
     func refreshSyncSummary() {
         syncTask?.cancel()
         syncSummary = .checking

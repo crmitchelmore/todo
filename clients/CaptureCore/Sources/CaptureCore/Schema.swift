@@ -5,6 +5,7 @@ public let TASKS_TABLE = "tasks"
 public let TAGS_TABLE = "tags"
 public let CATEGORIES_TABLE = "categories"
 public let CATEGORISATION_RULES_TABLE = "categorisation_rules"
+public let USER_MEMORIES_TABLE = "user_memories"
 public let TASK_EVENTS_TABLE = "task_events"
 public let TASK_ATTACHMENTS_TABLE = "task_attachments"
 public let AGENT_PROPOSALS_TABLE = "agent_proposals"
@@ -75,6 +76,28 @@ public let AppSchema = Schema(
             .integer("enabled"),
             .text("created_at"),
             .text("updated_at")
+        ]
+    ),
+    Table(
+        name: USER_MEMORIES_TABLE,
+        columns: [
+            .text("owner_id"),
+            .text("content"),
+            .text("domain"),
+            .text("source"),
+            .real("confidence"),
+            .text("tags"),
+            .text("status"),
+            .text("expires_at"),
+            .text("created_at"),
+            .text("updated_at"),
+            .text("deleted_at")
+        ],
+        indexes: [
+            Index(name: "by_status", columns: [
+                IndexedColumn.ascending("status"),
+                IndexedColumn.ascending("updated_at")
+            ])
         ]
     ),
     Table(

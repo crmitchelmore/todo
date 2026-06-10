@@ -849,6 +849,105 @@ public final class TaskStore: @unchecked Sendable {
         return (cleanedTitle, cleanedInstructions, cleanedCategory, TagsCodec.normalize(tags).map { String($0.prefix(80)) })
     }
 
+    // MARK: - User memories
+
+    public func watchUserMemories(includeDeleted: Bool = false) throws -> AsyncThrowingStream<[UserMemory], Error> {
+        try db.watch(
+            sql: """
+            SELECT * FROM \(USER_MEMORIES_TABLE)
+             WHERE (? = 1 OR status <> 'deleted')
+             ORDER BY status ASC, updated_at DESC, content COLLATE NOCASE ASC
+            """,
+            parameters: [includeDeleted ? 1 : 0],
+            mapper: Self.mapUserMemory
+        )
+    }
+
+    @discardableResult
+    public func createUserMemory(
+        content: String,
+        domain: String? = nil,
+        source: UserMemorySource = .manual,
+        confidence: Double = 1,
+        tags: [String] = [],
+        expiresAt: Date? = nil,
+        status: UserMemoryStatus = .active
+    ) async throws -> String {
+        guard let cleaned = Self.cleanMemory(content: content, domain: domain, confidence: confidence, tags: tags, status: status) else {
+            throw UserMemoryError.emptyContent
+        }
+        let id = UUID().uuidString.lowercased()
+        let now = ISO8601.string(Date())
+        let deletedAt = cleaned.status == .deleted ? now : nil
+        try await db.execute(
+            sql: """
+            INSERT INTO \(USER_MEMORIES_TABLE)
+              (id, owner_id, content, domain, source, confidence, tags, status, expires_at, created_at, updated_at, deleted_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            parameters: [
+                id, ownerId, cleaned.content, cleaned.domain, source.rawValue, cleaned.confidence,
+                TagsCodec.encode(cleaned.tags), cleaned.status.rawValue, expiresAt.map(ISO8601.string),
+                now, now, deletedAt
+            ]
+        )
+        return id
+    }
+
+    public func updateUserMemory(
+        id: String,
+        content: String,
+        domain: String?,
+        source: UserMemorySource,
+        confidence: Double,
+        tags: [String],
+        expiresAt: Date?,
+        status: UserMemoryStatus
+    ) async throws {
+        guard let cleaned = Self.cleanMemory(content: content, domain: domain, confidence: confidence, tags: tags, status: status) else {
+            throw UserMemoryError.emptyContent
+        }
+        let deletedAt = cleaned.status == .deleted ? ISO8601.string(Date()) : nil
+        try await db.execute(
+            sql: """
+            UPDATE \(USER_MEMORIES_TABLE)
+               SET content = ?, domain = ?, source = ?, confidence = ?, tags = ?, status = ?,
+                   expires_at = ?, updated_at = ?, deleted_at = ?
+             WHERE id = ?
+            """,
+            parameters: [
+                cleaned.content, cleaned.domain, source.rawValue, cleaned.confidence,
+                TagsCodec.encode(cleaned.tags), cleaned.status.rawValue, expiresAt.map(ISO8601.string),
+                ISO8601.string(Date()), deletedAt, id
+            ]
+        )
+    }
+
+    public func setUserMemoryStatus(id: String, status: UserMemoryStatus) async throws {
+        let now = ISO8601.string(Date())
+        try await db.execute(
+            sql: "UPDATE \(USER_MEMORIES_TABLE) SET status = ?, updated_at = ?, deleted_at = ? WHERE id = ?",
+            parameters: [status.rawValue, now, status == .deleted ? now : nil, id]
+        )
+    }
+
+    public func deleteUserMemory(id: String) async throws {
+        try await setUserMemoryStatus(id: id, status: .deleted)
+    }
+
+    private static func cleanMemory(content: String, domain: String?, confidence: Double, tags: [String], status: UserMemoryStatus) -> (content: String, domain: String?, confidence: Double, tags: [String], status: UserMemoryStatus)? {
+        let cleanedContent = String(content.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1000))
+        guard !cleanedContent.isEmpty else { return nil }
+        let cleanedDomain = domain?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty.map { String($0.prefix(80)) }
+        return (
+            cleanedContent,
+            cleanedDomain,
+            min(1, max(0, confidence)),
+            TagsCodec.normalize(tags).map { String($0.prefix(80)) },
+            status
+        )
+    }
+
     public func watchTags() throws -> AsyncThrowingStream<[Tag], Error> {
         try db.watch(
             sql: "SELECT * FROM \(TAGS_TABLE) ORDER BY name COLLATE NOCASE ASC",
@@ -1004,6 +1103,7 @@ public final class TaskStore: @unchecked Sendable {
     public enum TagError: Error { case emptyName }
     public enum CategoryError: Error { case emptyName }
     public enum CategorisationRuleError: Error { case emptyRule }
+    public enum UserMemoryError: Error { case emptyContent }
 
     static func mapCategory(_ cursor: SqlCursor) throws -> TaskCategory {
         let name = try cursor.getString(name: "name")
@@ -1039,6 +1139,25 @@ public final class TaskStore: @unchecked Sendable {
             enabled: ((try cursor.getIntOptional(name: "enabled")) ?? 1) != 0,
             createdAt: ISO8601.date(try cursor.getStringOptional(name: "created_at")),
             updatedAt: ISO8601.date(try cursor.getStringOptional(name: "updated_at"))
+        )
+    }
+
+    static func mapUserMemory(_ cursor: SqlCursor) throws -> UserMemory {
+        let sourceRaw = (try cursor.getStringOptional(name: "source")) ?? UserMemorySource.manual.rawValue
+        let statusRaw = (try cursor.getStringOptional(name: "status")) ?? UserMemoryStatus.active.rawValue
+        return UserMemory(
+            id: try cursor.getString(name: "id"),
+            ownerId: (try cursor.getStringOptional(name: "owner_id")) ?? "",
+            content: try cursor.getString(name: "content"),
+            domain: try cursor.getStringOptional(name: "domain"),
+            source: UserMemorySource(rawValue: sourceRaw) ?? .manual,
+            confidence: (try cursor.getDoubleOptional(name: "confidence")) ?? 1,
+            tags: TagsCodec.decode(try cursor.getStringOptional(name: "tags")),
+            status: UserMemoryStatus(rawValue: statusRaw) ?? .active,
+            expiresAt: ISO8601.date(try cursor.getStringOptional(name: "expires_at")),
+            createdAt: ISO8601.date(try cursor.getStringOptional(name: "created_at")),
+            updatedAt: ISO8601.date(try cursor.getStringOptional(name: "updated_at")),
+            deletedAt: ISO8601.date(try cursor.getStringOptional(name: "deleted_at"))
         )
     }
 

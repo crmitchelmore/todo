@@ -18,6 +18,7 @@ final class TaxonomySettingsStore: ObservableObject {
     @Published var categories: [TaskCategory] = []
     @Published var tags: [Tag] = []
     @Published var rules: [CategorisationRule] = []
+    @Published var memories: [UserMemory] = []
 
     private let taskStore: TaskStore
     private var watchers: [Task<Void, Never>] = []
@@ -61,6 +62,17 @@ final class TaxonomySettingsStore: ObservableObject {
                 NSLog("[Capture] Categorisation rule settings watch failed: \(error)")
             }
         })
+        watchers.append(Task { [weak self] in
+            guard let store = self?.taskStore else { return }
+            do {
+                for try await rows in try store.watchUserMemories() {
+                    guard let self else { break }
+                    await MainActor.run { self.memories = rows }
+                }
+            } catch {
+                NSLog("[Capture] Memory settings watch failed: \(error)")
+            }
+        })
     }
 
     func createCategory(_ name: String) { Task { try? await taskStore.createCategory(name: name) } }
@@ -78,6 +90,26 @@ final class TaxonomySettingsStore: ObservableObject {
         Task { try? await taskStore.updateCategorisationRule(id: id, title: title, instructions: instructions, category: category, tags: tags, enabled: enabled) }
     }
     func deleteRule(_ id: String) { Task { try? await taskStore.deleteCategorisationRule(id: id) } }
+    func createMemory(content: String, domain: String?, tags: [String], expiresAt: Date?) {
+        Task { try? await taskStore.createUserMemory(content: content, domain: domain, tags: tags, expiresAt: expiresAt) }
+    }
+    func updateMemory(_ memory: UserMemory, content: String, domain: String?, tags: [String], expiresAt: Date?, status: UserMemoryStatus) {
+        Task {
+            try? await taskStore.updateUserMemory(
+                id: memory.id,
+                content: content,
+                domain: domain,
+                source: memory.source,
+                confidence: memory.confidence,
+                tags: tags,
+                expiresAt: expiresAt,
+                status: status
+            )
+        }
+    }
+    func setMemoryStatus(_ id: String, status: UserMemoryStatus) {
+        Task { try? await taskStore.setUserMemoryStatus(id: id, status: status) }
+    }
 
     deinit { watchers.forEach { $0.cancel() } }
 }
@@ -390,6 +422,8 @@ private struct TaxonomyManagerView: View {
                 }
             }
             Divider()
+            MemorySettingsView(taxonomy: taxonomy)
+            Divider()
             CategorisationRulesSettingsView(taxonomy: taxonomy)
             Divider()
             TaxonomySection(
@@ -429,7 +463,132 @@ private struct RuleDraft {
             }
         }
 
-private struct CategorisationRulesSettingsView: View {
+        private struct MemoryDraft {
+            var content = ""
+            var domain = ""
+            var tags = ""
+            var expiresAt = Date()
+            var hasExpiry = false
+            var status: UserMemoryStatus = .active
+
+            static func from(_ memory: UserMemory) -> MemoryDraft {
+                MemoryDraft(
+                    content: memory.content,
+                    domain: memory.domain ?? "",
+                    tags: memory.tags.joined(separator: ", "),
+                    expiresAt: memory.expiresAt ?? Date(),
+                    hasExpiry: memory.expiresAt != nil,
+                    status: memory.status == .disabled ? .disabled : .active
+                )
+            }
+
+            var parsedTags: [String] {
+                tags.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            }
+
+            var parsedExpiry: Date? { hasExpiry ? expiresAt : nil }
+        }
+
+        private struct MemorySettingsView: View {
+            @ObservedObject var taxonomy: TaxonomySettingsStore
+            @State private var draft = MemoryDraft()
+            @State private var editing: UserMemory?
+
+            var body: some View {
+                VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Agent memory")
+                            .font(.system(.body, design: .rounded).weight(.semibold))
+                        Text("Facts and preferences the agent can use for research. Disable or delete anything stale.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    TextEditor(text: $draft.content)
+                        .frame(minHeight: 72)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.22)))
+                    HStack {
+                        TextField("domain, e.g. shopping", text: $draft.domain)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("tags, comma-separated", text: $draft.tags)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    HStack {
+                        Toggle("Expires", isOn: $draft.hasExpiry)
+                        if draft.hasExpiry {
+                            DatePicker("Expiry", selection: $draft.expiresAt, displayedComponents: .date)
+                        }
+                        Picker("Status", selection: $draft.status) {
+                            Text("Active").tag(UserMemoryStatus.active)
+                            Text("Disabled").tag(UserMemoryStatus.disabled)
+                        }
+                    }
+                    HStack {
+                        Button(editing == nil ? "Add memory" : "Save memory", action: save)
+                            .disabled(draft.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        if editing != nil {
+                            Button("Cancel") {
+                                editing = nil
+                                draft = MemoryDraft()
+                            }
+                        }
+                    }
+                    if taxonomy.memories.isEmpty {
+                        Text("No memories yet. Add a preference like “For cookware I prefer buy-it-for-life quality around £80–£150.”")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        VStack(spacing: 6) {
+                            ForEach(taxonomy.memories) { memory in
+                                HStack(alignment: .top, spacing: 8) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(memory.domain ?? "general")
+                                            .font(.system(.caption, design: .monospaced).weight(.semibold))
+                                            .foregroundStyle(.purple)
+                                        Text(memory.content)
+                                            .font(.system(.body, design: .rounded))
+                                        Text(([memory.source.rawValue] + memory.tags.map { "#\($0)" } + [memory.expiresAt.map { "expires \($0.formatted(date: .abbreviated, time: .omitted))" }].compactMap { $0 }).joined(separator: " · "))
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .opacity(memory.status == .active ? 1 : 0.55)
+                                    Spacer()
+                                    Button("Edit") {
+                                        editing = memory
+                                        draft = .from(memory)
+                                    }
+                                    Button(memory.status == .disabled ? "Enable" : "Disable") {
+                                        taxonomy.setMemoryStatus(memory.id, status: memory.status == .disabled ? .active : .disabled)
+                                    }
+                                    Button(role: .destructive) {
+                                        taxonomy.setMemoryStatus(memory.id, status: .deleted)
+                                    } label: {
+                                        Image(systemName: "xmark")
+                                    }
+                                }
+                                .padding(8)
+                                .background(Color(nsColor: Theme.surface))
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            }
+                        }
+                    }
+                }
+            }
+
+            private func save() {
+                let content = draft.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !content.isEmpty else { return }
+                let domain = draft.domain.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                if let editing {
+                    taxonomy.updateMemory(editing, content: content, domain: domain, tags: draft.parsedTags, expiresAt: draft.parsedExpiry, status: draft.status)
+                } else {
+                    taxonomy.createMemory(content: content, domain: domain, tags: draft.parsedTags, expiresAt: draft.parsedExpiry)
+                }
+                editing = nil
+                draft = MemoryDraft()
+            }
+        }
+
+        private struct CategorisationRulesSettingsView: View {
             @ObservedObject var taxonomy: TaxonomySettingsStore
             @State private var draft = RuleDraft()
             @State private var editingId: String?

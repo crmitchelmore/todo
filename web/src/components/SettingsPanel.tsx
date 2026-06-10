@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AuthSecurity } from './AuthSecurity';
+import { UserMemoryManager } from './UserMemoryManager';
 import {
   fetchCombinedSyncDiagnostics,
   syncDiagnosticIssues,
@@ -85,6 +86,12 @@ export function SettingsPanel({ onSignOut }: { onSignOut: () => Promise<void> })
         busy={diagnosticsBusy}
         onRefresh={() => void loadDiagnostics()}
       />
+
+      <div className="settings-card">
+        <h3>Agent memory</h3>
+        <p>Facts and preferences the agent can use for research. Disable or delete anything stale; set an expiry for temporary context.</p>
+        <UserMemoryManager />
+      </div>
 
       <div className="settings-card settings-account">
         <div>

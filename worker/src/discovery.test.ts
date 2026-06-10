@@ -97,3 +97,91 @@ test('explicit handoff forces discovery for ordinary task titles', async () => {
   assert.equal(discovery.web.source, 'not_configured');
   assert.ok(discovery.nextActions[0].includes('Run web search'));
 });
+
+test('agent handoff discovery carries user memory context into shopping research', async () => {
+  const discovery = await discoverTaskContext(
+    { id: 'task-4', ownerId: 'owner-1', title: 'Need to buy a wok' },
+    {
+      env: {},
+      force: true,
+      instructions: 'research options',
+      memories: [
+        {
+          content: 'Prefers buy-it-for-life kitchen tools around £80-£150, fast UK delivery, and avoids non-stick coatings.',
+          domain: 'shopping',
+          source: 'manual',
+          confidence: 0.95,
+          tags: ['shopping', 'kitchen'],
+          expiresAt: null,
+        },
+      ],
+    },
+  );
+
+  assert.ok(discovery);
+  assert.match(discovery.query, /buy a wok/);
+  assert.match(discovery.query, /£80-£150/);
+  assert.equal(discovery.memories.length, 1);
+  assert.ok(discovery.nextActions.some((action) => action.includes('Apply user context')));
+});
+
+test('agent handoff discovery generalises user memory context across task domains', async () => {
+  const cases = [
+    {
+      title: 'Find childcare cover for next Thursday',
+      memory: 'For childcare, prioritise school pickup reliability, safeguarding, and providers near the usual school route.',
+      expected: /school pickup reliability/,
+    },
+    {
+      title: 'Plan the half-term holiday',
+      memory: 'Holiday planning should balance child-friendly activities, low travel friction, and refundable bookings.',
+      expected: /refundable bookings/,
+    },
+    {
+      title: 'Research observability options for the backend',
+      memory: 'For work research, prefer production-stable tools with clear OpenTelemetry support and low operational overhead.',
+      expected: /OpenTelemetry support/,
+    },
+    {
+      title: 'Prepare implementation plan for sync migration',
+      memory: 'Implementation tasks should include rollback, integration tests, and deployment verification before claiming done.',
+      expected: /rollback/,
+    },
+    {
+      title: 'Prepare interview loop for staff engineer candidate',
+      memory: 'Interviewing should test judgement, collaboration, technical depth, and evidence from past delivery.',
+      expected: /technical depth/,
+    },
+    {
+      title: 'Urgently sort broken boiler',
+      memory: 'Urgent home tasks should optimise for speed, safety, availability today, and clear call-out costs.',
+      expected: /availability today/,
+    },
+    {
+      title: 'Build long-term plan for garden renovation',
+      memory: 'Long planning tasks should be broken into phases, budget ranges, dependencies, and decision checkpoints.',
+      expected: /decision checkpoints/,
+    },
+  ];
+
+  for (const item of cases) {
+    const discovery = await discoverTaskContext(
+      { id: `task-${item.title}`, ownerId: 'owner-1', title: item.title },
+      {
+        env: {},
+        force: true,
+        memories: [{
+          content: item.memory,
+          domain: 'test',
+          source: 'manual',
+          confidence: 0.9,
+          tags: [],
+          expiresAt: null,
+        }],
+      },
+    );
+    assert.ok(discovery, item.title);
+    assert.match(discovery.query, item.expected, item.title);
+    assert.ok(discovery.nextActions.some((action) => action.includes('Apply user context')), item.title);
+  }
+});
