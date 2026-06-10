@@ -16,6 +16,7 @@ final class MacViewModel {
     private(set) var active: [TaskItem] = []
     private(set) var rejected: [TaskItem] = []
     private(set) var allTags: [Tag] = []
+    private(set) var allCategories: [TaskCategory] = []
     private(set) var tagColors: [String: String] = [:]   // lowercased name -> hex
     private(set) var tagFilter: Set<String> = []          // lowercased names; AND semantics
     private(set) var selectedTask: TaskItem?
@@ -59,6 +60,7 @@ final class MacViewModel {
         watch("active", { try self.store.watchActive() }, assign: { self.active = $0 })
         watch("rejected", { try self.store.watchRejected() }, assign: { self.rejected = $0 })
         watchTags()
+        watchCategories()
     }
 
     func restartSyncIfNeeded(reason: String) {
@@ -117,6 +119,23 @@ final class MacViewModel {
                 }
             } catch {
                 NSLog("[Capture] Tag watch failed: \(error)")
+            }
+        }
+        tasks.append(t)
+    }
+
+    private func watchCategories() {
+        let t = Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await rows in try self.store.watchCategories() {
+                    await MainActor.run {
+                        self.allCategories = rows
+                        self.notify()
+                    }
+                }
+            } catch {
+                NSLog("[Capture] Category watch failed: \(error)")
             }
         }
         tasks.append(t)

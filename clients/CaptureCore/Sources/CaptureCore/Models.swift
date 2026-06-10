@@ -86,6 +86,26 @@ public let CAPTURE_CATEGORIES = [
     "engineering", "leadership", "home", "errands", "health", "finance", "personal", "inbox"
 ]
 
+/// A user-managed category. Tasks reference categories by name so renames can preserve the stable
+/// metadata row while rewriting task.category values.
+public struct TaskCategory: Identifiable, Sendable, Equatable {
+    public let id: String
+    public var ownerId: String
+    public var name: String
+    public var color: String
+    public var createdAt: Date?
+    public var updatedAt: Date?
+
+    public init(id: String, ownerId: String, name: String, color: String, createdAt: Date? = nil, updatedAt: Date? = nil) {
+        self.id = id
+        self.ownerId = ownerId
+        self.name = name
+        self.color = color
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
 /// Append-only history row for a task. Written by the backend/worker and synced read-only to
 /// clients so detail panes can show user changes and AI/agent work without joining into hot lists.
 public struct TaskEvent: Identifiable, Sendable, Equatable {
@@ -226,6 +246,18 @@ public enum TagPalette {
     /// Canonical comparison key for a tag name (trimmed, case-insensitive).
     public static func key(_ name: String) -> String {
         name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+}
+
+public enum CategoryPalette {
+    public static let colors = TagPalette.colors
+
+    public static func color(for name: String) -> String {
+        TagPalette.color(for: name)
+    }
+
+    public static func key(_ name: String) -> String {
+        TagPalette.key(name)
     }
 }
 

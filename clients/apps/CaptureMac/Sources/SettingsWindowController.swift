@@ -13,12 +13,61 @@ final class MacPreferencesStore: ObservableObject {
     }
 }
 
+@MainActor
+final class TaxonomySettingsStore: ObservableObject {
+    @Published var categories: [TaskCategory] = []
+    @Published var tags: [Tag] = []
+
+    private let taskStore: TaskStore
+    private var watchers: [Task<Void, Never>] = []
+
+    init(taskStore: TaskStore) {
+        self.taskStore = taskStore
+    }
+
+    func start() {
+        guard watchers.isEmpty else { return }
+        watchers.append(Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await rows in try self.taskStore.watchCategories() {
+                    await MainActor.run { self.categories = rows }
+                }
+            } catch {
+                NSLog("[Capture] Category settings watch failed: \(error)")
+            }
+        })
+        watchers.append(Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await rows in try self.taskStore.watchTags() {
+                    await MainActor.run { self.tags = rows }
+                }
+            } catch {
+                NSLog("[Capture] Tag settings watch failed: \(error)")
+            }
+        })
+    }
+
+    func createCategory(_ name: String) { Task { try? await taskStore.createCategory(name: name) } }
+    func renameCategory(_ id: String, to name: String) { Task { try? await taskStore.renameCategory(id: id, to: name) } }
+    func recolorCategory(_ id: String, color: String) { Task { try? await taskStore.recolorCategory(id: id, color: color) } }
+    func deleteCategory(_ id: String) { Task { try? await taskStore.deleteCategory(id: id) } }
+    func createTag(_ name: String) { Task { try? await taskStore.createTag(name: name) } }
+    func renameTag(_ id: String, to name: String) { Task { try? await taskStore.renameTag(id: id, to: name) } }
+    func recolorTag(_ id: String, color: String) { Task { try? await taskStore.recolorTag(id: id, color: color) } }
+    func deleteTag(_ id: String) { Task { try? await taskStore.deleteTag(id: id) } }
+
+    deinit { watchers.forEach { $0.cancel() } }
+}
+
 /// Hosts the Settings UI (hotkey, appearance and account) in an AppKit window
 /// via NSHostingController, since the app is otherwise pure AppKit.
 @MainActor
 final class SettingsWindowController: NSWindowController {
     private let store: HotKeyStore
     private let preferences: MacPreferencesStore
+    private let taxonomy: TaxonomySettingsStore
     private let auth: AuthStore
     private let taskStore: TaskStore
     private let onChange: (HotKey) -> Void
@@ -36,13 +85,14 @@ final class SettingsWindowController: NSWindowController {
     ) {
         self.store = store
         self.preferences = preferences
+        self.taxonomy = TaxonomySettingsStore(taskStore: taskStore)
         self.auth = auth
         self.taskStore = taskStore
         self.onChange = onChange
         self.onAppearanceChange = onAppearanceChange
         self.onSignOut = onSignOut
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 620),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 760),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -53,6 +103,7 @@ final class SettingsWindowController: NSWindowController {
             rootView: SettingsView(
                 store: store,
                 preferences: preferences,
+                taxonomy: taxonomy,
                 auth: auth,
                 taskStore: taskStore,
                 onChange: onChange,
@@ -77,6 +128,7 @@ final class SettingsWindowController: NSWindowController {
 private struct SettingsView: View {
     @ObservedObject var store: HotKeyStore
     @ObservedObject var preferences: MacPreferencesStore
+    @ObservedObject var taxonomy: TaxonomySettingsStore
     let auth: AuthStore
     let taskStore: TaskStore
     let onChange: (HotKey) -> Void
@@ -88,118 +140,126 @@ private struct SettingsView: View {
     @State private var diagnosticsBusy = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Settings")
-                    .font(.system(.title2, design: .rounded).weight(.bold))
-                Text("Keep capture fast, tune the surface, and manage this account.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            GroupBox("Global Hotkey") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Press this combination anywhere to summon quick capture. Click the field, then press your shortcut — it needs at least one modifier (⌘ ⌥ ⌃ ⇧).")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Settings")
+                        .font(.system(.title2, design: .rounded).weight(.bold))
+                    Text("Keep capture fast, tune the surface, and manage this account.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    HotKeyRecorder(hotKey: Binding(
-                        get: { store.hotKey },
-                        set: { newValue in
-                            // Let the app try to register it; it persists store.hotKey only on success,
-                            // so a rejected combo leaves the recorder showing the previous shortcut.
-                            onChange(newValue)
-                        }
-                    ))
                 }
-                .padding(.top, 4)
-            }
 
-            GroupBox("Appearance") {
-                Picker("Mode", selection: Binding(
-                    get: { preferences.preferences.appearance },
-                    set: { mode in
-                        preferences.preferences.appearance = mode
-                        onAppearanceChange(mode)
-                    }
-                )) {
-                    ForEach(CaptureAppearanceMode.allCases) { mode in
-                        Text(mode.label).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding(.top, 4)
-            }
-
-            GroupBox("Sync Diagnostics") {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(diagnosticsHeadline)
-                                .font(.system(.body, design: .rounded).weight(.semibold))
-                            Text(diagnosticsSubhead)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer()
-                        Button(diagnosticsBusy ? "Checking…" : "Refresh") {
-                            Task { await loadDiagnostics() }
-                        }
-                        .disabled(diagnosticsBusy)
-                    }
-
-                    if let diagnosticsError {
-                        Text(diagnosticsError)
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 10) {
-                        DiagnosticMetric(label: "Account", value: serverDiagnostics?.owner.email ?? serverDiagnostics?.owner.id ?? "unknown")
-                        DiagnosticMetric(label: "Session", value: serverDiagnostics?.currentSession?.client ?? "unknown")
-                        DiagnosticMetric(label: "Server total", value: "\(serverDiagnostics?.serverCounts.total ?? 0)")
-                        DiagnosticMetric(label: "Local total", value: "\(localDiagnostics?.counts.total ?? 0)")
-                        DiagnosticMetric(label: "Server updated", value: Self.format(serverDiagnostics?.serverCounts.lastUpdatedAt))
-                        DiagnosticMetric(label: "Local updated", value: Self.format(localDiagnostics?.counts.lastUpdatedAt))
-                    }
-
-                    DisclosureGroup("Endpoint details") {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("Backend: \(localDiagnostics?.endpoints.backendURL ?? "unknown")")
-                            Text("PowerSync: \(localDiagnostics?.endpoints.powersyncURL ?? "unknown")")
-                            Text("Owner ID: \(serverDiagnostics?.owner.id ?? "unknown")")
-                            Text("Local owners: \((localDiagnostics?.ownerIds ?? []).joined(separator: ", ").nilIfEmpty ?? "none")")
-                            Text("Clients: \(clientSummary)")
-                        }
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                    }
-                }
-                .padding(.top, 4)
-            }
-
-            GroupBox("Account") {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Signed in")
-                            .font(.system(.body, design: .rounded).weight(.semibold))
-                        Text("Password changes use the emailed reset flow from the sign-in screen.")
+                GroupBox("Global Hotkey") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Press this combination anywhere to summon quick capture. Click the field, then press your shortcut — it needs at least one modifier (⌘ ⌥ ⌃ ⇧).")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        HotKeyRecorder(hotKey: Binding(
+                            get: { store.hotKey },
+                            set: { newValue in
+                                // Let the app try to register it; it persists store.hotKey only on success,
+                                // so a rejected combo leaves the recorder showing the previous shortcut.
+                                onChange(newValue)
+                            }
+                        ))
                     }
-                    Spacer()
-                    Button("Sign Out", role: .destructive, action: onSignOut)
+                    .padding(.top, 4)
                 }
-                .padding(.top, 4)
-            }
 
-            Spacer(minLength: 0)
+                GroupBox("Appearance") {
+                    Picker("Mode", selection: Binding(
+                        get: { preferences.preferences.appearance },
+                        set: { mode in
+                            preferences.preferences.appearance = mode
+                            onAppearanceChange(mode)
+                        }
+                    )) {
+                        ForEach(CaptureAppearanceMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.top, 4)
+                }
+
+                GroupBox("Categories & Tags") {
+                    TaxonomyManagerView(taxonomy: taxonomy)
+                        .padding(.top, 4)
+                }
+
+                GroupBox("Sync Diagnostics") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(diagnosticsHeadline)
+                                    .font(.system(.body, design: .rounded).weight(.semibold))
+                                Text(diagnosticsSubhead)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer()
+                            Button(diagnosticsBusy ? "Checking…" : "Refresh") {
+                                Task { await loadDiagnostics() }
+                            }
+                            .disabled(diagnosticsBusy)
+                        }
+
+                        if let diagnosticsError {
+                            Text(diagnosticsError)
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 10) {
+                            DiagnosticMetric(label: "Account", value: serverDiagnostics?.owner.email ?? serverDiagnostics?.owner.id ?? "unknown")
+                            DiagnosticMetric(label: "Session", value: serverDiagnostics?.currentSession?.client ?? "unknown")
+                            DiagnosticMetric(label: "Server total", value: "\(serverDiagnostics?.serverCounts.total ?? 0)")
+                            DiagnosticMetric(label: "Local total", value: "\(localDiagnostics?.counts.total ?? 0)")
+                            DiagnosticMetric(label: "Server updated", value: Self.format(serverDiagnostics?.serverCounts.lastUpdatedAt))
+                            DiagnosticMetric(label: "Local updated", value: Self.format(localDiagnostics?.counts.lastUpdatedAt))
+                        }
+
+                        DisclosureGroup("Endpoint details") {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text("Backend: \(localDiagnostics?.endpoints.backendURL ?? "unknown")")
+                                Text("PowerSync: \(localDiagnostics?.endpoints.powersyncURL ?? "unknown")")
+                                Text("Owner ID: \(serverDiagnostics?.owner.id ?? "unknown")")
+                                Text("Local owners: \((localDiagnostics?.ownerIds ?? []).joined(separator: ", ").nilIfEmpty ?? "none")")
+                                Text("Clients: \(clientSummary)")
+                            }
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+
+                GroupBox("Account") {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Signed in")
+                                .font(.system(.body, design: .rounded).weight(.semibold))
+                            Text("Password changes use the emailed reset flow from the sign-in screen.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Sign Out", role: .destructive, action: onSignOut)
+                    }
+                    .padding(.top, 4)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(20)
         }
-        .padding(20)
-        .frame(width: 560, height: 620, alignment: .topLeading)
+        .frame(width: 620, height: 760, alignment: .topLeading)
+        .task { taxonomy.start() }
         .task { await loadDiagnostics() }
     }
 
@@ -273,6 +333,184 @@ private struct DiagnosticMetric: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(nsColor: Theme.surface))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+private struct TaxonomyManagerView: View {
+    @ObservedObject var taxonomy: TaxonomySettingsStore
+    @State private var newCategory = ""
+    @State private var newTag = ""
+
+    private var missingDefaults: [String] {
+        let existing = Set(taxonomy.categories.map { CategoryPalette.key($0.name) })
+        return CAPTURE_CATEGORIES.filter { !existing.contains(CategoryPalette.key($0)) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            TaxonomySection(
+                title: "Categories",
+                subtitle: "Primary lanes for work. Renaming one moves existing tasks with it.",
+                newName: $newCategory,
+                placeholder: "New category",
+                items: taxonomy.categories.map { TaxonomyItem(id: $0.id, name: $0.name, color: $0.color) },
+                onCreate: taxonomy.createCategory,
+                onRename: taxonomy.renameCategory,
+                onRecolor: taxonomy.recolorCategory,
+                onDelete: taxonomy.deleteCategory
+            )
+            if !missingDefaults.isEmpty {
+                FlowLayout(spacing: 6) {
+                    ForEach(missingDefaults, id: \.self) { name in
+                        Button("+ \(name)") { taxonomy.createCategory(name) }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+                }
+            }
+            Divider()
+            TaxonomySection(
+                title: "Tags",
+                subtitle: "Lightweight labels for people, projects and contexts. Renaming updates task chips.",
+                newName: $newTag,
+                placeholder: "New tag",
+                items: taxonomy.tags.map { TaxonomyItem(id: $0.id, name: $0.name, color: $0.color) },
+                onCreate: taxonomy.createTag,
+                onRename: taxonomy.renameTag,
+                onRecolor: taxonomy.recolorTag,
+                onDelete: taxonomy.deleteTag
+            )
+        }
+    }
+}
+
+private struct TaxonomyItem: Identifiable {
+    let id: String
+    let name: String
+    let color: String
+}
+
+private struct TaxonomySection: View {
+    let title: String
+    let subtitle: String
+    @Binding var newName: String
+    let placeholder: String
+    let items: [TaxonomyItem]
+    let onCreate: (String) -> Void
+    let onRename: (String, String) -> Void
+    let onRecolor: (String, String) -> Void
+    let onDelete: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(.body, design: .rounded).weight(.semibold))
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                TextField(placeholder, text: $newName)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { create() }
+                Button("Add", action: create)
+                    .disabled(newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            if items.isEmpty {
+                Text("No \(title.lowercased()) yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 6) {
+                    ForEach(items) { item in
+                        TaxonomyRow(item: item, onRename: onRename, onRecolor: onRecolor, onDelete: onDelete)
+                    }
+                }
+            }
+        }
+    }
+
+    private func create() {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        newName = ""
+        onCreate(trimmed)
+    }
+}
+
+private struct TaxonomyRow: View {
+    let item: TaxonomyItem
+    let onRename: (String, String) -> Void
+    let onRecolor: (String, String) -> Void
+    let onDelete: (String) -> Void
+    @State private var editing = false
+    @State private var draft = ""
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(Color(nsColor: NSColor(hex: item.color) ?? Theme.textSecondary))
+                .frame(width: 10, height: 10)
+
+            if editing {
+                TextField("Name", text: $draft)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { commitRename() }
+                    .onExitCommand { editing = false }
+            } else {
+                Button(item.name) {
+                    draft = item.name
+                    editing = true
+                }
+                .buttonStyle(.plain)
+                .font(.system(.body, design: .rounded).weight(.semibold))
+            }
+
+            Spacer()
+
+            HStack(spacing: 4) {
+                ForEach(TagPalette.colors, id: \.self) { color in
+                    Button {
+                        onRecolor(item.id, color)
+                    } label: {
+                        Circle()
+                            .fill(Color(nsColor: NSColor(hex: color) ?? Theme.textSecondary))
+                            .frame(width: 14, height: 14)
+                            .overlay(Circle().stroke(color == item.color ? Color.primary : Color.clear, lineWidth: 1.5))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Button(role: .destructive) {
+                onDelete(item.id)
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(8)
+        .background(Color(nsColor: Theme.surface))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func commitRename() {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        editing = false
+        guard !trimmed.isEmpty else { return }
+        onRename(item.id, trimmed)
+    }
+}
+
+private struct FlowLayout<Content: View>: View {
+    let spacing: CGFloat
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        HStack(spacing: spacing) { content }
     }
 }
 

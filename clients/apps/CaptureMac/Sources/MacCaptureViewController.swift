@@ -337,6 +337,8 @@ final class MacCaptureViewController: NSViewController {
             events: viewModel.selectedEvents,
             attachments: viewModel.selectedAttachments,
             rollup: viewModel.selectedRollup,
+            categories: viewModel.allCategories,
+            tags: viewModel.allTags,
             colourForTag: color,
             onSave: { [weak self] form in self?.viewModel.saveDetail(form) },
             onConfirm: { [weak self] form in self?.viewModel.confirmDetail(form) },
