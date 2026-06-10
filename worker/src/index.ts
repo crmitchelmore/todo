@@ -1,6 +1,6 @@
 import pg from 'pg';
 import { createHash } from 'crypto';
-import { enrich } from './enrich.js';
+import { enrich, type CategorisationRule } from './enrich.js';
 import { discoverTaskContext, type TaskDiscovery } from './discovery.js';
 import { parseAgentHandoffMetadata, type AgentHandoffRequest } from './handoff.js';
 import { interruptForHumanDecision } from './hitl.js';
@@ -50,6 +50,15 @@ const HISTORY_SQL = `
     AND category IS NOT NULL
   ORDER BY COALESCE(confirmed_at, completed_at, updated_at, created_at) DESC
   LIMIT 500
+`;
+
+const CATEGORISATION_RULES_SQL = `
+  SELECT owner_id, title, instructions, category, tags
+  FROM public.categorisation_rules
+  WHERE owner_id = ANY($1::uuid[])
+    AND enabled = 1
+  ORDER BY updated_at DESC, created_at DESC
+  LIMIT 1000
 `;
 
 const HANDOFF_REQUEST_SQL = `
@@ -137,6 +146,24 @@ interface ApprovedAttemptRow {
   action_payload: string;
   resume_payload: string | null;
   title: string;
+}
+
+interface CategorisationRuleRow {
+  owner_id: string;
+  title: string;
+  instructions: string;
+  category: string | null;
+  tags: string | null;
+}
+
+function decodeTags(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((tag): tag is string => typeof tag === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 function deterministicUuid(input: string): string {
@@ -721,8 +748,12 @@ async function tick(): Promise<number> {
   if (rows.length === 0) return openClawAttempts + handoffs + githubAssociations;
   const ownerIds = [...new Set(rows.map((row) => row.owner_id as string))];
   const historyByOwner = new Map<string, CategoryHints>();
+  const rulesByOwner = new Map<string, CategorisationRule[]>();
   if (ownerIds.length > 0) {
-    const history = await pool.query(HISTORY_SQL, [ownerIds]);
+    const [history, rules] = await Promise.all([
+      pool.query(HISTORY_SQL, [ownerIds]),
+      pool.query<CategorisationRuleRow>(CATEGORISATION_RULES_SQL, [ownerIds]),
+    ]);
     const grouped = new Map<string, HistoricalTask[]>();
     for (const row of history.rows) {
       const ownerId = row.owner_id as string;
@@ -733,12 +764,27 @@ async function tick(): Promise<number> {
     for (const [ownerId, items] of grouped) {
       historyByOwner.set(ownerId, learnCategoryHints(items));
     }
+    for (const row of rules.rows) {
+      const items = rulesByOwner.get(row.owner_id) ?? [];
+      items.push({
+        title: row.title,
+        instructions: row.instructions,
+        category: row.category,
+        tags: decodeTags(row.tags),
+      });
+      rulesByOwner.set(row.owner_id, items);
+    }
   }
 
   let enriched = 0;
   for (const row of rows) {
     try {
-      const e = await enrich(row.title, new Date(), historyByOwner.get(row.owner_id) ?? {});
+      const e = await enrich(
+        row.title,
+        new Date(),
+        historyByOwner.get(row.owner_id) ?? {},
+        rulesByOwner.get(row.owner_id) ?? []
+      );
       const res = await pool.query(UPDATE_SQL, [
         row.id,
         e.suggestedDueAt,

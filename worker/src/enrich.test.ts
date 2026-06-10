@@ -72,3 +72,18 @@ test('learns category hints from confirmed history without overriding stronger b
   assert.equal(enrichDeterministic('sort football boots', NOW, hints).suggestedCategory, 'personal');
   assert.equal(enrichDeterministic('deploy football stats service', NOW, hints).suggestedCategory, 'engineering');
 });
+
+test('applies explicit categorisation rules as suggestion hints', () => {
+  const result = enrichDeterministic('Research carbon steel wok options', NOW, {}, [
+    {
+      title: 'Wok buying research',
+      instructions: 'When a capture mentions a wok, pan, or kitchen buying research, suggest errands and shopping tags.',
+      category: 'errands',
+      tags: ['shopping', 'kitchen'],
+    },
+  ]);
+
+  assert.equal(result.suggestedCategory, 'errands');
+  assert.deepEqual(result.suggestedTags, ['shopping', 'kitchen']);
+  assert.equal('status' in result, false);
+});

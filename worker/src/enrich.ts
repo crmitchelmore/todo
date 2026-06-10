@@ -17,6 +17,13 @@ export interface Enrichment {
   source: 'server' | 'llm';
 }
 
+export interface CategorisationRule {
+  title: string;
+  instructions: string;
+  category: string | null;
+  tags: string[];
+}
+
 // Broader keyword sets than the client; the server can afford a little more work.
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
   engineering: ['pr', 'pull request', 'merge', 'code review', 'review', 'deploy', 'deployment',
@@ -92,6 +99,25 @@ function normalizeTags(tags: unknown): string[] {
   return out;
 }
 
+function titleTokens(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 3)
+  );
+}
+
+function ruleScore(title: string, rule: CategorisationRule): number {
+  const titleSet = titleTokens(title);
+  if (titleSet.size === 0) return 0;
+  const ruleTokens = titleTokens(`${rule.title} ${rule.instructions}`);
+  let matches = 0;
+  for (const token of ruleTokens) if (titleSet.has(token)) matches += 1;
+  return matches;
+}
+
 function recurrenceFor(title: string): string | null {
   for (const { label, patterns } of RECURRENCE_MATCHERS) {
     if (patterns.some((re) => re.test(title))) return label;
@@ -99,7 +125,12 @@ function recurrenceFor(title: string): string | null {
   return null;
 }
 
-export function enrichDeterministic(title: string, now = new Date(), historyHints: CategoryHints = {}): Enrichment {
+export function enrichDeterministic(
+  title: string,
+  now = new Date(),
+  historyHints: CategoryHints = {},
+  rules: readonly CategorisationRule[] = []
+): Enrichment {
   let suggestedDueAt: string | null = null;
   const parsed = chrono.parse(title, now, { forwardDate: true });
   if (parsed.length > 0) suggestedDueAt = parsed[0].date().toISOString();
@@ -117,6 +148,16 @@ export function enrichDeterministic(title: string, now = new Date(), historyHint
       suggestedCategory = category;
     }
   }
+  const ruleTags: string[] = [];
+  for (const rule of rules) {
+    const score = ruleScore(title, rule);
+    if (score <= 0) continue;
+    if (rule.category && score + 0.5 > best) {
+      best = score + 0.5;
+      suggestedCategory = rule.category;
+    }
+    ruleTags.push(...rule.tags);
+  }
 
   const urgent = URGENCY_MATCHERS.some((re) => re.test(title));
   const recurrence = recurrenceFor(title);
@@ -124,6 +165,7 @@ export function enrichDeterministic(title: string, now = new Date(), historyHint
   const suggestedTags = normalizeTags([
     urgent ? 'urgent' : null,
     recurrence,
+    ...ruleTags,
   ].filter(Boolean));
   const confidence = Math.min(
     1,
@@ -145,14 +187,22 @@ export function enrichDeterministic(title: string, now = new Date(), historyHint
  * Optional LLM upgrade. Only used when an API key is configured; otherwise we stay fully
  * deterministic and offline. Falls back to the deterministic result on any error.
  */
-export async function enrich(title: string, now = new Date(), historyHints: CategoryHints = {}): Promise<Enrichment> {
+export async function enrich(
+  title: string,
+  now = new Date(),
+  historyHints: CategoryHints = {},
+  rules: readonly CategorisationRule[] = []
+): Promise<Enrichment> {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey || llmDisabledReason) return enrichDeterministic(title, now, historyHints);
+  if (!apiKey || llmDisabledReason) return enrichDeterministic(title, now, historyHints, rules);
 
   try {
     const model = process.env.ENRICH_LLM_MODEL ?? 'gpt-4o-mini';
     const baseUrl = (process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, '');
-    const categories = Object.keys(CATEGORY_KEYWORDS);
+    const categories = [...new Set([
+      ...Object.keys(CATEGORY_KEYWORDS),
+      ...rules.map((rule) => rule.category).filter((category): category is string => Boolean(category))
+    ])];
     const hintSummary = Object.entries(historyHints)
       .filter(([, hints]) => hints.length > 0)
       .map(([category, hints]) => `${category}: ${hints.slice(0, 12).join(', ')}`)
@@ -165,6 +215,11 @@ export async function enrich(title: string, now = new Date(), historyHints: Cate
       `"daily", "weekly", "monthly" or null, "confidence": 0..1}. ` +
       `Current time is ${now.toISOString()}. Resolve relative dates against it. ` +
       (hintSummary ? `The user's confirmed-history category hints are: ${hintSummary}. ` : '') +
+      (rules.length > 0
+        ? `The user's explicit categorisation rules are: ${rules.slice(0, 20).map((rule) =>
+          `${rule.title}: ${rule.instructions}${rule.category ? ` -> category ${rule.category}` : ''}${rule.tags.length ? `, tags ${rule.tags.join(', ')}` : ''}`
+        ).join(' | ')}. `
+        : '') +
       `Only JSON.`;
 
     const resp = await fetch(`${baseUrl}/chat/completions`, {
@@ -215,6 +270,6 @@ export async function enrich(title: string, now = new Date(), historyHints: Cate
     };
   } catch (err) {
     console.warn('[worker] LLM enrichment failed, falling back to deterministic:', String(err));
-    return enrichDeterministic(title, now, historyHints);
+    return enrichDeterministic(title, now, historyHints, rules);
   }
 }

@@ -767,6 +767,86 @@ public final class TaskStore: @unchecked Sendable {
             """,
             parameters: [newName, ISO8601.string(Date()), oldName]
         )
+        try await db.execute(
+            sql: """
+            UPDATE \(CATEGORISATION_RULES_TABLE)
+               SET category = ?, updated_at = ?
+             WHERE category = ? COLLATE NOCASE
+            """,
+            parameters: [newName, ISO8601.string(Date()), oldName]
+        )
+    }
+
+    // MARK: - Categorisation rules
+
+    public func watchCategorisationRules() throws -> AsyncThrowingStream<[CategorisationRule], Error> {
+        try db.watch(
+            sql: "SELECT * FROM \(CATEGORISATION_RULES_TABLE) ORDER BY enabled DESC, updated_at DESC, title COLLATE NOCASE ASC",
+            parameters: [],
+            mapper: Self.mapCategorisationRule
+        )
+    }
+
+    @discardableResult
+    public func createCategorisationRule(
+        title: String,
+        instructions: String,
+        category: String?,
+        tags: [String],
+        enabled: Bool = true
+    ) async throws -> String {
+        let cleaned = Self.cleanRule(title: title, instructions: instructions, category: category, tags: tags)
+        guard let cleaned else { throw CategorisationRuleError.emptyRule }
+        let id = UUID().uuidString.lowercased()
+        let now = ISO8601.string(Date())
+        try await db.execute(
+            sql: """
+            INSERT INTO \(CATEGORISATION_RULES_TABLE)
+              (id, owner_id, title, instructions, category, tags, enabled, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            parameters: [
+                id, ownerId, cleaned.title, cleaned.instructions, cleaned.category,
+                TagsCodec.encode(cleaned.tags), enabled ? 1 : 0, now, now
+            ]
+        )
+        return id
+    }
+
+    public func updateCategorisationRule(
+        id: String,
+        title: String,
+        instructions: String,
+        category: String?,
+        tags: [String],
+        enabled: Bool
+    ) async throws {
+        guard let cleaned = Self.cleanRule(title: title, instructions: instructions, category: category, tags: tags) else {
+            throw CategorisationRuleError.emptyRule
+        }
+        try await db.execute(
+            sql: """
+            UPDATE \(CATEGORISATION_RULES_TABLE)
+               SET title = ?, instructions = ?, category = ?, tags = ?, enabled = ?, updated_at = ?
+             WHERE id = ?
+            """,
+            parameters: [
+                cleaned.title, cleaned.instructions, cleaned.category, TagsCodec.encode(cleaned.tags),
+                enabled ? 1 : 0, ISO8601.string(Date()), id
+            ]
+        )
+    }
+
+    public func deleteCategorisationRule(id: String) async throws {
+        try await db.execute(sql: "DELETE FROM \(CATEGORISATION_RULES_TABLE) WHERE id = ?", parameters: [id])
+    }
+
+    private static func cleanRule(title: String, instructions: String, category: String?, tags: [String]) -> (title: String, instructions: String, category: String?, tags: [String])? {
+        let cleanedTitle = String(title.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))
+        let cleanedInstructions = String(instructions.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1000))
+        guard !cleanedTitle.isEmpty, !cleanedInstructions.isEmpty else { return nil }
+        let cleanedCategory = category?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty.map { String($0.prefix(80)) }
+        return (cleanedTitle, cleanedInstructions, cleanedCategory, TagsCodec.normalize(tags).map { String($0.prefix(80)) })
     }
 
     public func watchTags() throws -> AsyncThrowingStream<[Tag], Error> {
@@ -898,10 +978,32 @@ public final class TaskStore: @unchecked Sendable {
                 parameters: [TagsCodec.encode(updated), now, taskId]
             )
         }
+        try await rewriteTagOnCategorisationRules(from: oldName, to: newName)
+    }
+
+    private func rewriteTagOnCategorisationRules(from oldName: String, to newName: String?) async throws {
+        let key = TagPalette.key(oldName)
+        let rows = try await db.getAll(
+            sql: "SELECT id, tags FROM \(CATEGORISATION_RULES_TABLE) WHERE tags LIKE ?",
+            parameters: ["%\(oldName)%"],
+            mapper: { (try $0.getString(name: "id"), try $0.getStringOptional(name: "tags")) }
+        )
+        let now = ISO8601.string(Date())
+        for (ruleId, rawTags) in rows {
+            let current = TagsCodec.decode(rawTags)
+            guard current.contains(where: { TagPalette.key($0) == key }) else { continue }
+            var updated = current.filter { TagPalette.key($0) != key }
+            if let newName { updated.append(newName) }
+            try await db.execute(
+                sql: "UPDATE \(CATEGORISATION_RULES_TABLE) SET tags = ?, updated_at = ? WHERE id = ?",
+                parameters: [TagsCodec.encode(updated), now, ruleId]
+            )
+        }
     }
 
     public enum TagError: Error { case emptyName }
     public enum CategoryError: Error { case emptyName }
+    public enum CategorisationRuleError: Error { case emptyRule }
 
     static func mapCategory(_ cursor: SqlCursor) throws -> TaskCategory {
         let name = try cursor.getString(name: "name")
@@ -921,6 +1023,20 @@ public final class TaskStore: @unchecked Sendable {
             ownerId: (try cursor.getStringOptional(name: "owner_id")) ?? "",
             name: try cursor.getString(name: "name"),
             color: (try cursor.getStringOptional(name: "color")) ?? "#9BA1A6",
+            createdAt: ISO8601.date(try cursor.getStringOptional(name: "created_at")),
+            updatedAt: ISO8601.date(try cursor.getStringOptional(name: "updated_at"))
+        )
+    }
+
+    static func mapCategorisationRule(_ cursor: SqlCursor) throws -> CategorisationRule {
+        CategorisationRule(
+            id: try cursor.getString(name: "id"),
+            ownerId: (try cursor.getStringOptional(name: "owner_id")) ?? "",
+            title: try cursor.getString(name: "title"),
+            instructions: try cursor.getString(name: "instructions"),
+            category: try cursor.getStringOptional(name: "category"),
+            tags: TagsCodec.decode(try cursor.getStringOptional(name: "tags")),
+            enabled: ((try cursor.getIntOptional(name: "enabled")) ?? 1) != 0,
             createdAt: ISO8601.date(try cursor.getStringOptional(name: "created_at")),
             updatedAt: ISO8601.date(try cursor.getStringOptional(name: "updated_at"))
         )

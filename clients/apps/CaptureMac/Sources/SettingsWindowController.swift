@@ -17,6 +17,7 @@ final class MacPreferencesStore: ObservableObject {
 final class TaxonomySettingsStore: ObservableObject {
     @Published var categories: [TaskCategory] = []
     @Published var tags: [Tag] = []
+    @Published var rules: [CategorisationRule] = []
 
     private let taskStore: TaskStore
     private var watchers: [Task<Void, Never>] = []
@@ -47,6 +48,16 @@ final class TaxonomySettingsStore: ObservableObject {
                 NSLog("[Capture] Tag settings watch failed: \(error)")
             }
         })
+        watchers.append(Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await rows in try self.taskStore.watchCategorisationRules() {
+                    await MainActor.run { self.rules = rows }
+                }
+            } catch {
+                NSLog("[Capture] Categorisation rule settings watch failed: \(error)")
+            }
+        })
     }
 
     func createCategory(_ name: String) { Task { try? await taskStore.createCategory(name: name) } }
@@ -57,6 +68,13 @@ final class TaxonomySettingsStore: ObservableObject {
     func renameTag(_ id: String, to name: String) { Task { try? await taskStore.renameTag(id: id, to: name) } }
     func recolorTag(_ id: String, color: String) { Task { try? await taskStore.recolorTag(id: id, color: color) } }
     func deleteTag(_ id: String) { Task { try? await taskStore.deleteTag(id: id) } }
+    func createRule(title: String, instructions: String, category: String?, tags: [String], enabled: Bool) {
+        Task { try? await taskStore.createCategorisationRule(title: title, instructions: instructions, category: category, tags: tags, enabled: enabled) }
+    }
+    func updateRule(id: String, title: String, instructions: String, category: String?, tags: [String], enabled: Bool) {
+        Task { try? await taskStore.updateCategorisationRule(id: id, title: title, instructions: instructions, category: category, tags: tags, enabled: enabled) }
+    }
+    func deleteRule(_ id: String) { Task { try? await taskStore.deleteCategorisationRule(id: id) } }
 
     deinit { watchers.forEach { $0.cancel() } }
 }
@@ -369,6 +387,8 @@ private struct TaxonomyManagerView: View {
                 }
             }
             Divider()
+            CategorisationRulesSettingsView(taxonomy: taxonomy)
+            Divider()
             TaxonomySection(
                 title: "Tags",
                 subtitle: "Lightweight labels for people, projects and contexts. Renaming updates task chips.",
@@ -383,6 +403,132 @@ private struct TaxonomyManagerView: View {
         }
     }
 }
+
+private struct RuleDraft {
+            var title = ""
+            var instructions = ""
+            var category = ""
+            var tags = ""
+            var enabled = true
+
+            static func from(_ rule: CategorisationRule) -> RuleDraft {
+                RuleDraft(
+                    title: rule.title,
+                    instructions: rule.instructions,
+                    category: rule.category ?? "",
+                    tags: rule.tags.joined(separator: ", "),
+                    enabled: rule.enabled
+                )
+            }
+
+            var parsedTags: [String] {
+                tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            }
+        }
+
+private struct CategorisationRulesSettingsView: View {
+            @ObservedObject var taxonomy: TaxonomySettingsStore
+            @State private var draft = RuleDraft()
+            @State private var editingId: String?
+
+            private var categoryOptions: [String] {
+                var seen = Set<String>()
+                var out: [String] = []
+                for name in taxonomy.categories.map(\.name) + CAPTURE_CATEGORIES {
+                    let key = CategoryPalette.key(name)
+                    guard !seen.contains(key) else { continue }
+                    seen.insert(key)
+                    out.append(name)
+                }
+                return out.sorted()
+            }
+
+            var body: some View {
+                VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("AI categorisation rules")
+                            .font(.system(.body, design: .rounded).weight(.semibold))
+                        Text("Rules guide worker/LLM suggestions only; confirmation still stays human-gated.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    TextField("Rule title", text: $draft.title)
+                        .textFieldStyle(.roundedBorder)
+                    TextEditor(text: $draft.instructions)
+                        .frame(minHeight: 74)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.22)))
+                    HStack {
+                        Picker("Category", selection: $draft.category) {
+                            Text("No category").tag("")
+                            ForEach(categoryOptions, id: \.self) { name in Text(name).tag(name) }
+                        }
+                        TextField("tags, comma-separated", text: $draft.tags)
+                            .textFieldStyle(.roundedBorder)
+                        Toggle("Enabled", isOn: $draft.enabled)
+                    }
+                    HStack {
+                        Button(editingId == nil ? "Add rule" : "Save rule", action: save)
+                            .disabled(draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                                      draft.instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        if editingId != nil {
+                            Button("Cancel") {
+                                editingId = nil
+                                draft = RuleDraft()
+                            }
+                        }
+                    }
+
+                    if taxonomy.rules.isEmpty {
+                        Text("No rules yet. Add one like “wok research → errands + shopping”.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        VStack(spacing: 6) {
+                            ForEach(taxonomy.rules) { rule in
+                                HStack(alignment: .top, spacing: 8) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(rule.title)
+                                            .font(.system(.body, design: .rounded).weight(.semibold))
+                                        Text(rule.instructions)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Text(([rule.category].compactMap { $0 } + rule.tags.map { "#\($0)" }).joined(separator: " · "))
+                                            .font(.caption2)
+                                            .foregroundStyle(.purple)
+                                    }
+                                    .opacity(rule.enabled ? 1 : 0.55)
+                                    Spacer()
+                                    Button("Edit") {
+                                        editingId = rule.id
+                                        draft = .from(rule)
+                                    }
+                                    Button(role: .destructive) {
+                                        taxonomy.deleteRule(rule.id)
+                                    } label: {
+                                        Image(systemName: "xmark")
+                                    }
+                                }
+                                .padding(8)
+                                .background(Color(nsColor: Theme.surface))
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            }
+                        }
+                    }
+                }
+            }
+
+            private func save() {
+                let category = draft.category.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                if let editingId {
+                    taxonomy.updateRule(id: editingId, title: draft.title, instructions: draft.instructions, category: category, tags: draft.parsedTags, enabled: draft.enabled)
+                } else {
+                    taxonomy.createRule(title: draft.title, instructions: draft.instructions, category: category, tags: draft.parsedTags, enabled: draft.enabled)
+                }
+                editingId = nil
+                draft = RuleDraft()
+            }
+    }
 
 private struct TaxonomyItem: Identifiable {
     let id: String

@@ -174,6 +174,9 @@ const ALLOWED_COLUMNS: Record<string, Set<string>> = {
   categories: new Set([
     'id', 'owner_id', 'name', 'color', 'created_at', 'updated_at'
   ]),
+  categorisation_rules: new Set([
+    'id', 'owner_id', 'title', 'instructions', 'category', 'tags', 'enabled', 'created_at', 'updated_at'
+  ]),
   task_attachments: new Set([
     'id', 'owner_id', 'task_id', 'filename', 'mime_type', 'byte_size', 'preview_data_url', 'created_at'
   ])

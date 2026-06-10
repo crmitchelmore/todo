@@ -1596,6 +1596,26 @@ input[type='checkbox']:checked::after {
   cursor: pointer;
 }
 .category-seeds button:hover { border-color: var(--signal-line); color: var(--text); }
+.rules-manager { display: flex; flex-direction: column; gap: 12px; }
+.rule-editor { display: flex; flex-direction: column; gap: 8px; }
+.rule-editor textarea {
+  min-height: 84px;
+  resize: vertical;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  padding: 9px 10px;
+}
+.rule-editor-grid { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(160px, 1.2fr) auto; gap: 8px; align-items: center; }
+.rule-actions { display: flex; gap: 8px; }
+.rule-list { display: flex; flex-direction: column; gap: 6px; }
+.rule-row { display: flex; align-items: flex-start; gap: 10px; padding: 9px; border-radius: var(--r-sm); background: var(--panel); border: 1px solid var(--hairline); }
+.rule-row.muted { opacity: 0.56; }
+.rule-main { display: flex; flex: 1; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; background: transparent; border: 0; color: var(--text); cursor: pointer; }
+.rule-main strong { font: 700 13px/1.2 var(--font-display); }
+.rule-main span { color: var(--text-muted); font-size: 12px; }
+.rule-main em { color: var(--iris); font-size: 11px; font-style: normal; }
 .tag-manager-row {
   display: flex; align-items: center; gap: 12px;
   padding: 8px 6px; border-radius: var(--r-sm);
