@@ -938,7 +938,7 @@ public final class TaskStore: @unchecked Sendable {
     private static func cleanMemory(content: String, domain: String?, confidence: Double, tags: [String], status: UserMemoryStatus) -> (content: String, domain: String?, confidence: Double, tags: [String], status: UserMemoryStatus)? {
         let cleanedContent = String(content.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1000))
         guard !cleanedContent.isEmpty else { return nil }
-        let cleanedDomain = domain?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty.map { String($0.prefix(80)) }
+        let cleanedDomain = (domain?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty).map { String($0.prefix(80)) }
         return (
             cleanedContent,
             cleanedDomain,

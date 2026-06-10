@@ -143,7 +143,7 @@ interface MemoryRow {
   source: string;
   confidence: number;
   tags: string | null;
-  expires_at: string | null;
+  expires_at: string | Date | null;
 }
 
 interface GitHubAssociationRow {
@@ -163,7 +163,7 @@ async function loadActiveMemories(ownerId: string): Promise<MemoryContext[]> {
     source: row.source,
     confidence: Number(row.confidence),
     tags: decodeTags(row.tags),
-    expiresAt: row.expires_at,
+    expiresAt: row.expires_at instanceof Date ? row.expires_at.toISOString() : row.expires_at,
   }));
 }
 

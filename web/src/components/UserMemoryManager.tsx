@@ -15,7 +15,7 @@ type Draft = {
 const emptyDraft: Draft = { content: '', domain: '', tags: '', expires_at: '', status: 'active' };
 
 export function UserMemoryManager() {
-  const { data: memories } = useQuery<UserMemoryRecord>(
+  const { data: memories = [] } = useQuery<UserMemoryRecord>(
     `SELECT * FROM user_memories WHERE status <> 'deleted' ORDER BY status ASC, updated_at DESC, content COLLATE NOCASE ASC`
   );
   const [draft, setDraft] = useState<Draft>(emptyDraft);
@@ -44,12 +44,18 @@ export function UserMemoryManager() {
       confidence: 1,
       tags: parseTags(draft.tags),
       status: draft.status,
-      expires_at: draft.expires_at ? new Date(`${draft.expires_at}T23:59:59.000Z`).toISOString() : null,
+      expires_at: safeExpiry(draft.expires_at),
     };
     if (editingId) {
       await updateUserMemory(editingId, input);
     } else {
       await createUserMemory(input);
+    }
+
+    function safeExpiry(value: string): string | null {
+      if (!value) return null;
+      const date = new Date(`${value}T23:59:59.000Z`);
+      return Number.isNaN(date.getTime()) ? null : date.toISOString();
     }
     setEditingId(null);
     setDraft(emptyDraft);

@@ -133,7 +133,7 @@ export async function discoverTaskContext(
   const memories = options.memories?.slice(0, 12) ?? [];
   const memoryQuery = memories.map((memory) => memory.content).join(' ');
   const querySeed = [task.title, options.instructions ?? '', memoryQuery].join(' ').replace(/\s+/g, ' ').trim();
-  const query = discoveryQueryFor(querySeed || task.title, location);
+  const query = discoveryQueryFor(querySeed || task.title, location).slice(0, 500);
   const web = await fetchWebContext(query, env, options.fetchImpl ?? fetch);
   const nextActions = nextActionsFor(querySeed || task.title, location, web, memories);
   const confidence = discoveryConfidence(location, web);

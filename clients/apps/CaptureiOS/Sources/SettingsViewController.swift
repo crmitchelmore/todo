@@ -87,8 +87,8 @@ final class SettingsViewController: UIViewController {
             field.text = memory?.tags.joined(separator: ", ")
         }
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self] _ in
-            guard let self else { return }
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self, weak alert] _ in
+            guard let self, let alert else { return }
             let content = (alert.textFields?[0].text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !content.isEmpty else { return }
             let rawDomain = alert.textFields?[1].text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
