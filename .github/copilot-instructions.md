@@ -38,6 +38,7 @@
 
 - Schema changes that sync to clients must be rolled out across every layer together: Postgres migration/publication, PowerSync sync rules, backend upload allow-list, and web/Swift local schemas.
 - Deploy Railway services from the repository root; only use service-specific paths where existing scripts document them.
+- Railway deploy path exception: deploy `backend` and `powersync` from the repository root, but deploy `worker` with `scripts/with-secrets.sh railway up ./worker --path-as-root --ci --service worker` because Railway cannot infer the worker from the monorepo root.
 - Do not ship App Store/TestFlight clients with a schema-writing change until the live Railway backend and PowerSync service have been migrated and redeployed.
 
 ## Apple signing
