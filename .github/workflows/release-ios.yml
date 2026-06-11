@@ -22,14 +22,20 @@ on:
         description: 'Build number (defaults to run number)'
         required: false
 
-# Cloud signing: the App Store Connect API key lets Xcode create/use a cloud-managed
-# distribution certificate + provisioning profiles automatically. No p12/profile secrets.
+# Manual signing: CI installs a reusable Apple Distribution certificate and existing
+# App Store provisioning profiles from secrets. Do not use Xcode automatic provisioning
+# here — it can create new Apple certificates/profiles on ephemeral runners.
 #
 # Required repo secrets:
 #   APP_STORE_CONNECT_API_KEY     base64 of AuthKey_<KEY_ID>.p8
 #   APP_STORE_CONNECT_KEY_ID      e.g. SB8RA7B6WG
 #   APP_STORE_CONNECT_ISSUER_ID   issuer UUID
 #   APPLE_TEAM_ID                 e.g. 8X4ZN58TYH
+#   IOS_DISTRIBUTION_CERTIFICATE          base64 .p12 for an existing Apple Distribution identity
+#   IOS_DISTRIBUTION_CERTIFICATE_PASSWORD password for that .p12
+#   IOS_APP_STORE_PROFILE                 base64 App Store profile for dev.crmitchelmore.capture.ios
+#   IOS_SHARE_APP_STORE_PROFILE           base64 App Store profile for dev.crmitchelmore.capture.ios.share
+#   IOS_WIDGET_APP_STORE_PROFILE          base64 App Store profile for dev.crmitchelmore.capture.ios.widget
 jobs:
   build-and-upload:
     name: Build and upload TestFlight
@@ -45,6 +51,26 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Check reusable iOS signing secrets
+        env:
+          IOS_DISTRIBUTION_CERTIFICATE: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE }}
+          IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+          IOS_APP_STORE_PROFILE: ${{ secrets.IOS_APP_STORE_PROFILE }}
+          IOS_SHARE_APP_STORE_PROFILE: ${{ secrets.IOS_SHARE_APP_STORE_PROFILE }}
+          IOS_WIDGET_APP_STORE_PROFILE: ${{ secrets.IOS_WIDGET_APP_STORE_PROFILE }}
+        run: |
+          missing=()
+          [ -n "$IOS_DISTRIBUTION_CERTIFICATE" ] || missing+=(IOS_DISTRIBUTION_CERTIFICATE)
+          [ -n "$IOS_DISTRIBUTION_CERTIFICATE_PASSWORD" ] || missing+=(IOS_DISTRIBUTION_CERTIFICATE_PASSWORD)
+          [ -n "$IOS_APP_STORE_PROFILE" ] || missing+=(IOS_APP_STORE_PROFILE)
+          [ -n "$IOS_SHARE_APP_STORE_PROFILE" ] || missing+=(IOS_SHARE_APP_STORE_PROFILE)
+          [ -n "$IOS_WIDGET_APP_STORE_PROFILE" ] || missing+=(IOS_WIDGET_APP_STORE_PROFILE)
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing reusable iOS signing secret(s): ${missing[*]}"
+            echo "::error::Export an existing Apple Distribution .p12 and existing App Store provisioning profiles; do not let CI create new signing assets."
+            exit 1
+          fi
+
       - name: Install App Store Connect API Key
         env:
           APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
@@ -52,6 +78,47 @@ jobs:
         run: |
           mkdir -p ~/.private_keys
           echo "$APP_STORE_CONNECT_API_KEY" | base64 --decode > ~/.private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8
+
+      - name: Install reusable iOS signing assets
+        env:
+          IOS_DISTRIBUTION_CERTIFICATE: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE }}
+          IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+          IOS_APP_STORE_PROFILE: ${{ secrets.IOS_APP_STORE_PROFILE }}
+          IOS_SHARE_APP_STORE_PROFILE: ${{ secrets.IOS_SHARE_APP_STORE_PROFILE }}
+          IOS_WIDGET_APP_STORE_PROFILE: ${{ secrets.IOS_WIDGET_APP_STORE_PROFILE }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/ios-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          CERT_PATH="$RUNNER_TEMP/ios-distribution.p12"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          echo "$IOS_DISTRIBUTION_CERTIFICATE" | base64 --decode > "$CERT_PATH"
+          security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$IOS_DISTRIBUTION_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          install_profile() {
+            local secret_value="$1"
+            local output_name="$2"
+            local profile_path="$RUNNER_TEMP/${output_name}.mobileprovision"
+            local plist_path="$RUNNER_TEMP/${output_name}.plist"
+            echo "$secret_value" | base64 --decode > "$profile_path"
+            security cms -D -i "$profile_path" > "$plist_path"
+            local uuid
+            uuid="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$plist_path")"
+            local profile_name
+            profile_name="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$plist_path")"
+            cp "$profile_path" "$HOME/Library/MobileDevice/Provisioning Profiles/${uuid}.mobileprovision"
+            echo "${output_name}=${profile_name}" >> "$GITHUB_ENV"
+          }
+          install_profile "$IOS_APP_STORE_PROFILE" IOS_APP_PROFILE_SPECIFIER
+          install_profile "$IOS_SHARE_APP_STORE_PROFILE" IOS_SHARE_PROFILE_SPECIFIER
+          install_profile "$IOS_WIDGET_APP_STORE_PROFILE" IOS_WIDGET_PROFILE_SPECIFIER
 
       - name: Build & upload to TestFlight
         env:
@@ -65,3 +132,9 @@ jobs:
         run: |
           [ -n "$VERSION" ] || export VERSION="$(cat VERSION)"
           bash scripts/ios-testflight.sh
+
+      - name: Clean up signing assets
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/ios-signing.keychain-db" 2>/dev/null || true
+          rm -f ~/.private_keys/AuthKey_*.p8 2>/dev/null || true

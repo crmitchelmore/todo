@@ -1,8 +1,9 @@
 # iOS / TestFlight release
 
-Capture ships to TestFlight via **cloud signing**: an App Store Connect API key lets
-Xcode create and use a cloud-managed distribution certificate and provisioning profiles
-automatically. There are no `.p12` or provisioning-profile secrets to manage.
+Capture ships to TestFlight with **manual signing**: CI installs a reusable Apple Distribution
+certificate and existing App Store provisioning profiles from GitHub secrets. Do not use Xcode
+automatic provisioning for release uploads; on ephemeral runners it can create new Apple signing
+assets and exhaust the account certificate limit.
 
 ## Credentials (this machine)
 - **Team ID**: `8X4ZN58TYH`
@@ -69,6 +70,11 @@ Run the **Release iOS (TestFlight)** workflow (`workflow_dispatch`). Required re
 - `APP_STORE_CONNECT_KEY_ID` — `Y6C8R5DA75`
 - `APP_STORE_CONNECT_ISSUER_ID` — issuer UUID
 - `APPLE_TEAM_ID` — `8X4ZN58TYH`
+- `IOS_DISTRIBUTION_CERTIFICATE` — base64 of an existing Apple Distribution `.p12`
+- `IOS_DISTRIBUTION_CERTIFICATE_PASSWORD` — password for that `.p12`
+- `IOS_APP_STORE_PROFILE` — base64 of the existing App Store profile for `dev.crmitchelmore.capture.ios`
+- `IOS_SHARE_APP_STORE_PROFILE` — base64 of the existing App Store profile for `dev.crmitchelmore.capture.ios.share`
+- `IOS_WIDGET_APP_STORE_PROFILE` — base64 of the existing App Store profile for `dev.crmitchelmore.capture.ios.widget`
 
 Set the base64 key with:
 ```bash
@@ -76,4 +82,14 @@ gh secret set APP_STORE_CONNECT_API_KEY --body "$(base64 -i ~/.private_keys/Auth
 gh secret set APP_STORE_CONNECT_KEY_ID --body Y6C8R5DA75
 gh secret set APPLE_TEAM_ID --body 8X4ZN58TYH
 gh secret set APP_STORE_CONNECT_ISSUER_ID --body <uuid>
+```
+
+Set reusable signing assets by exporting/downloading **existing** assets, not creating new ones:
+
+```bash
+gh secret set IOS_DISTRIBUTION_CERTIFICATE --body "$(base64 -i AppleDistribution.p12)"
+gh secret set IOS_DISTRIBUTION_CERTIFICATE_PASSWORD --body "<p12-password>"
+gh secret set IOS_APP_STORE_PROFILE --body "$(base64 -i Capture_AppStore.mobileprovision)"
+gh secret set IOS_SHARE_APP_STORE_PROFILE --body "$(base64 -i CaptureShare_AppStore.mobileprovision)"
+gh secret set IOS_WIDGET_APP_STORE_PROFILE --body "$(base64 -i CaptureWidget_AppStore.mobileprovision)"
 ```

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Build, archive and upload the Capture iOS app to TestFlight.
 #
-# Uses Xcode "cloud signing": automatic signing + -allowProvisioningUpdates with an
-# App Store Connect API key. Xcode creates/uses a cloud-managed distribution certificate
-# and provisioning profiles for the bundle IDs automatically — no p12/profile wrangling.
+# Uses manual signing with reusable Apple Distribution certificates and App Store
+# provisioning profiles installed by CI/local setup. Do not pass -allowProvisioningUpdates:
+# that allows Xcode to create/repair Apple signing assets from an ephemeral runner.
 #
 # Prereqsuisites:
 #   - Xcode + an installed iOS platform/runtime.
@@ -12,6 +12,9 @@
 #
 # Required env:
 #   APP_STORE_CONNECT_ISSUER_ID   App Store Connect API issuer UUID.
+#   IOS_APP_PROFILE_SPECIFIER     App Store provisioning profile name for the app.
+#   IOS_SHARE_PROFILE_SPECIFIER   App Store provisioning profile name for the Share extension.
+#   IOS_WIDGET_PROFILE_SPECIFIER  App Store provisioning profile name for the Widget.
 # Optional env (sensible defaults for this machine):
 #   APP_STORE_CONNECT_KEY_ID      Default: Y6C8R5DA75
 #   APP_STORE_CONNECT_KEY_PATH    Default: ~/.private_keys/AuthKey_<KEY_ID>.p8
@@ -33,6 +36,9 @@ BUILD_NUMBER="${BUILD_NUMBER:-$(date +%s)}"
 CAPTURE_API_SECRET="${CAPTURE_API_SECRET:-}"
 
 : "${APP_STORE_CONNECT_ISSUER_ID:?Set APP_STORE_CONNECT_ISSUER_ID (App Store Connect API issuer UUID)}"
+: "${IOS_APP_PROFILE_SPECIFIER:?Set IOS_APP_PROFILE_SPECIFIER (installed App Store profile name)}"
+: "${IOS_SHARE_PROFILE_SPECIFIER:?Set IOS_SHARE_PROFILE_SPECIFIER (installed App Store profile name)}"
+: "${IOS_WIDGET_PROFILE_SPECIFIER:?Set IOS_WIDGET_PROFILE_SPECIFIER (installed App Store profile name)}"
 [ -f "$APP_STORE_CONNECT_KEY_PATH" ] || { echo "API key not found: $APP_STORE_CONNECT_KEY_PATH" >&2; exit 1; }
 
 BUILD_DIR="$ROOT_DIR/build"
@@ -50,11 +56,12 @@ GIT_CONFIG_COUNT=0 xcodebuild archive \
   -configuration Release \
   -destination 'generic/platform=iOS' \
   -archivePath "$ARCHIVE_PATH" \
-  -allowProvisioningUpdates \
-  -authenticationKeyPath "$APP_STORE_CONNECT_KEY_PATH" \
-  -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
-  -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
+  CODE_SIGN_STYLE=Manual \
+  CODE_SIGN_IDENTITY="Apple Distribution" \
   DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+  IOS_APP_PROFILE_SPECIFIER="$IOS_APP_PROFILE_SPECIFIER" \
+  IOS_SHARE_PROFILE_SPECIFIER="$IOS_SHARE_PROFILE_SPECIFIER" \
+  IOS_WIDGET_PROFILE_SPECIFIER="$IOS_WIDGET_PROFILE_SPECIFIER" \
   MARKETING_VERSION="$VERSION" \
   CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
   CAPTURE_API_SECRET="$CAPTURE_API_SECRET"
@@ -67,7 +74,14 @@ cat > "$EXPORT_OPTIONS" <<PLIST
 <dict>
   <key>method</key><string>app-store</string>
   <key>teamID</key><string>${APPLE_TEAM_ID}</string>
-  <key>signingStyle</key><string>automatic</string>
+  <key>signingStyle</key><string>manual</string>
+  <key>signingCertificate</key><string>Apple Distribution</string>
+  <key>provisioningProfiles</key>
+  <dict>
+    <key>dev.crmitchelmore.capture.ios</key><string>${IOS_APP_PROFILE_SPECIFIER}</string>
+    <key>dev.crmitchelmore.capture.ios.share</key><string>${IOS_SHARE_PROFILE_SPECIFIER}</string>
+    <key>dev.crmitchelmore.capture.ios.widget</key><string>${IOS_WIDGET_PROFILE_SPECIFIER}</string>
+  </dict>
   <key>uploadSymbols</key><true/>
   <key>destination</key><string>upload</string>
 </dict>
@@ -80,7 +94,6 @@ GIT_CONFIG_COUNT=0 xcodebuild -exportArchive \
   -archivePath "$ARCHIVE_PATH" \
   -exportOptionsPlist "$EXPORT_OPTIONS" \
   -exportPath "$EXPORT_PATH" \
-  -allowProvisioningUpdates \
   -authenticationKeyPath "$APP_STORE_CONNECT_KEY_PATH" \
   -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
   -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
