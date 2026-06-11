@@ -42,6 +42,9 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: CaptureiOS/Capture.entitlements
+      configs:
+        Release:
+          CODE_SIGN_IDENTITY: Apple Distribution
     info:
       path: CaptureiOS/Info.plist
       properties:
@@ -88,6 +91,9 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: CaptureShare/Info.plist
         CODE_SIGN_ENTITLEMENTS: CaptureShare/CaptureShare.entitlements
+      configs:
+        Release:
+          CODE_SIGN_IDENTITY: Apple Distribution
 
   CaptureWidget:
     type: app-extension
@@ -102,6 +108,9 @@ targets:
         CODE_SIGN_ENTITLEMENTS: CaptureWidget/CaptureWidget.entitlements
         APPLICATION_EXTENSION_API_ONLY: YES
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+      configs:
+        Release:
+          CODE_SIGN_IDENTITY: Apple Distribution
 
   CaptureMac:
     type: application
