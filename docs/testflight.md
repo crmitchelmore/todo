@@ -42,6 +42,9 @@ App Store Connect validation is stricter than local simulator builds:
 - EventKit-linked bundles must include calendar purpose strings (`NSCalendarsUsageDescription` and
   `NSCalendarsFullAccessUsageDescription`) explaining that Capture reads calendar availability to
   suggest realistic due dates and show whether there is time for a task.
+- TestFlight export compliance is automated by setting `ITSAppUsesNonExemptEncryption=false` in the
+  iOS app, Share extension, and Widget Info.plists. Keep that value unless Capture adds custom or
+  non-exempt encryption beyond standard HTTPS/Apple platform security.
 
 ## One-time bootstrap (register IDs + create the app record)
 ```bash

@@ -54,6 +54,7 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CAPTURE_API_SECRET: $(CAPTURE_API_SECRET)
         CAPTURE_KEYCHAIN_ACCESS_GROUP: $(AppIdentifierPrefix)dev.crmitchelmore.capture.session
+        ITSAppUsesNonExemptEncryption: false
         NSCalendarsUsageDescription: Capture reads your calendar availability to suggest realistic due dates and show whether you have time for a task.
         NSCalendarsFullAccessUsageDescription: Capture reads your calendar availability to suggest realistic due dates and show whether you have time for a task.
         UILaunchScreen: {}
