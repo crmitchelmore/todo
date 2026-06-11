@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 import { enrich, type CategorisationRule } from './enrich.js';
 import { discoverTaskContext, type TaskDiscovery } from './discovery.js';
 import { parseAgentHandoffMetadata, type AgentHandoffRequest } from './handoff.js';
+import { runAgentResearch, type AgentResearchBrief } from './handoffResearch.js';
 import { interruptForHumanDecision } from './hitl.js';
 import { learnCategoryHints, type CategoryHints, type HistoricalTask } from './historyLearning.js';
 import { bestMatch, discoverConfiguredGitHubRepositories, shouldAssociateGitHubProject, type GitHubRepository } from './githubProject.js';
@@ -411,7 +412,8 @@ async function processGitHubAssociations(): Promise<number> {
 async function recordHandoffCompletionEvent(
   row: HandoffRequestRow,
   request: AgentHandoffRequest,
-  discovery: TaskDiscovery
+  discovery: TaskDiscovery,
+  brief: AgentResearchBrief
 ): Promise<void> {
   const eventId = deterministicUuid(`${row.owner_id}:${row.task_id}:agent-completed:${request.requestId}`);
   await pool.query(
@@ -424,18 +426,21 @@ async function recordHandoffCompletionEvent(
       row.owner_id,
       row.task_id,
       request.mode === 'attempt' ? 'AI attempt plan ready' : 'AI research ready',
-      discoveryBody(discovery),
+      brief.body,
       metadataJSON({
         request_id: request.requestId,
         mode: request.mode,
         instructions: request.instructions,
         source: 'agent-handoff',
+        research_source: brief.source,
+        model: brief.model,
         query: discovery.query,
         location: discovery.location,
         memories: compactMemories(discovery.memories),
         web: discovery.web,
-        next_actions: discovery.nextActions,
-        confidence: discovery.confidence,
+        next_actions: brief.nextActions,
+        deterministic_next_actions: discovery.nextActions,
+        confidence: brief.confidence,
       }),
     ]
   );
@@ -470,7 +475,8 @@ async function recordHandoffFailureEvent(
 async function recordHandoffResearchProposal(
   row: HandoffRequestRow,
   request: AgentHandoffRequest,
-  discovery: TaskDiscovery
+  discovery: TaskDiscovery,
+  brief: AgentResearchBrief
 ): Promise<void> {
   const proposalId = deterministicUuid(`${row.owner_id}:${row.task_id}:agent-handoff:${request.requestId}:research`);
   await pool.query(
@@ -491,24 +497,29 @@ async function recordHandoffResearchProposal(
       row.owner_id,
       row.task_id,
       request.mode === 'attempt' ? 'AI attempt research brief' : 'AI research brief',
-      discoveryBody(discovery),
+      brief.body,
       boundedJSON({
         task_id: row.task_id,
         request_id: request.requestId,
         action_type: 'task_context_lookup',
         handoff_mode: request.mode,
         instructions: request.instructions,
+        research_source: brief.source,
+        model: brief.model,
         query: discovery.query,
         location: discovery.location,
         web: discovery.web,
-        next_actions: discovery.nextActions,
+        next_actions: brief.nextActions,
+        deterministic_next_actions: discovery.nextActions,
       }, 8192),
       boundedJSON({
         source: 'agent-handoff',
+        research_source: brief.source,
+        model: brief.model,
         request_event_id: row.request_event_id,
         worker: 'capture-enrichment',
       }, 4096),
-      discovery.confidence,
+      brief.confidence,
     ]
   );
 }
@@ -516,7 +527,8 @@ async function recordHandoffResearchProposal(
 async function recordAttemptApprovalGate(
   row: HandoffRequestRow,
   request: AgentHandoffRequest,
-  discovery: TaskDiscovery
+  discovery: TaskDiscovery,
+  brief: AgentResearchBrief
 ): Promise<void> {
   const client = await pool.connect();
   try {
@@ -529,19 +541,22 @@ async function recordAttemptApprovalGate(
       interruptBefore: 'external_action',
       actionType: 'attempt_task',
       title: 'Approve AI attempt plan',
-      body: `${discoveryBody(discovery)}\n\nApproval records consent for the next agent turn; external execution still needs the Mac Mini/OpenClaw executor wired in.`,
+      body: `${brief.body}\n\nApproval records consent for the next agent turn; external execution still needs the Mac Mini/OpenClaw executor wired in.`,
       payload: {
         task_id: row.task_id,
         request_id: request.requestId,
         handoff_mode: request.mode,
         instructions: request.instructions,
         discovery,
+        research: brief,
       },
       provenance: {
         source: 'agent-handoff',
+        research_source: brief.source,
+        model: brief.model,
         request_event_id: row.request_event_id,
       },
-      confidence: discovery.confidence,
+      confidence: brief.confidence,
       source: 'agent-handoff',
       riskLevel: 'medium',
       reversible: false,
@@ -721,11 +736,12 @@ async function processAgentHandoffRequests(): Promise<number> {
         await recordHandoffFailureEvent(row, request, 'handoff discovery returned no result');
         continue;
       }
-      await recordHandoffResearchProposal(row, request, discovery);
+      const brief = await runAgentResearch(row.title, request, discovery);
+      await recordHandoffResearchProposal(row, request, discovery, brief);
       if (request.mode === 'attempt') {
-        await recordAttemptApprovalGate(row, request, discovery);
+        await recordAttemptApprovalGate(row, request, discovery, brief);
       }
-      await recordHandoffCompletionEvent(row, request, discovery);
+      await recordHandoffCompletionEvent(row, request, discovery, brief);
       processed += 1;
       console.log(`[worker] handoff ${request.mode} ${request.requestId} -> task=${row.task_id}`);
     } catch (err) {
