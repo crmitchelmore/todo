@@ -20,8 +20,8 @@ researching or even *doing* the task — while **you** stay in control of what g
    agent activity as a coherent project view.
 4. **Personal-context awareness.** Enrich items from the user's own data: Obsidian vault,
    Gmail, Apple Calendar, the web, and current location.
-5. **Agentic discovery & execution.** An always-on agent on the user's OpenClaw Mac Mini
-   researches items and, for low-risk reversible work, can act — surfacing results as proposals.
+5. **Agentic discovery & execution.** An always-on local harness on the user's selected backend
+   computer researches items and, for low-risk reversible work, can act — surfacing results as proposals.
 6. **Email-driven completion suggestions.** Detect likely-done work from incoming mail and
    propose marking items complete.
 7. **Sync everywhere, own your data.** One account, one set of todos, synced across all

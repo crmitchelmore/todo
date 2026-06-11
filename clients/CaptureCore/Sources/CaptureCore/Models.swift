@@ -201,6 +201,63 @@ public struct UserMemory: Identifiable, Sendable, Equatable {
     }
 }
 
+public enum AgentDeviceStatus: String, Sendable, Equatable {
+    case active
+    case disabled
+}
+
+public enum AgentHarnessKind: String, Sendable, Equatable, CaseIterable {
+    case copilotCLI = "copilot-cli"
+    case hermes
+    case openclaw
+    case custom
+}
+
+/// A synced local-computer registration row. Multiple Macs can install Capture, but at most one
+/// active device should be selected as the backend computer for approved local harness attempts.
+public struct AgentDevice: Identifiable, Sendable, Equatable {
+    public let id: String
+    public var ownerId: String
+    public var deviceName: String
+    public var platform: String
+    public var status: AgentDeviceStatus
+    public var isSelectedBackend: Bool
+    public var harnessKind: AgentHarnessKind?
+    public var harnessLabel: String?
+    public var capabilities: [String]
+    public var lastSeenAt: Date?
+    public var createdAt: Date?
+    public var updatedAt: Date?
+
+    public init(
+        id: String,
+        ownerId: String,
+        deviceName: String,
+        platform: String = "macos",
+        status: AgentDeviceStatus = .active,
+        isSelectedBackend: Bool = false,
+        harnessKind: AgentHarnessKind? = nil,
+        harnessLabel: String? = nil,
+        capabilities: [String] = [],
+        lastSeenAt: Date? = nil,
+        createdAt: Date? = nil,
+        updatedAt: Date? = nil
+    ) {
+        self.id = id
+        self.ownerId = ownerId
+        self.deviceName = deviceName
+        self.platform = platform
+        self.status = status
+        self.isSelectedBackend = isSelectedBackend
+        self.harnessKind = harnessKind
+        self.harnessLabel = harnessLabel
+        self.capabilities = capabilities
+        self.lastSeenAt = lastSeenAt
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
 /// Append-only history row for a task. Written by the backend/worker and synced read-only to
 /// clients so detail panes can show user changes and AI/agent work without joining into hot lists.
 public struct TaskEvent: Identifiable, Sendable, Equatable {

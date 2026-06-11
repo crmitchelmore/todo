@@ -53,10 +53,12 @@ Key environment variables:
 | powersync | `PS_PORT` | `8080` |
 | worker | `WORKER_DATABASE_URI` | `postgres://postgres:<pw>@<pg-private>:5432/postgres` |
 | worker (local/Mac) | `CAPTURE_WORK_ROOT` | optional Git repo root to scan for engineering-task GitHub associations; macOS falls back to `~/work` |
-| worker (local/Mac) | `OPENCLAW_EXECUTOR_ENABLED` | set to `1` only on a host that can SSH to the Mac Mini |
-| worker (local/Mac) | `OPENCLAW_SSH_HOST` / `OPENCLAW_SSH_USER` / `OPENCLAW_SSH_KEY_PATH` | OpenClaw SSH target and private key path; do not store the private key in Git |
-| worker (local/Mac) | `OPENCLAW_WORKDIR` / `OPENCLAW_CLI` / `OPENCLAW_AGENT` | OpenClaw command settings, e.g. `/Users/bravostation/clawd`, `/opt/homebrew/bin/openclaw`, `imessage-agent` |
-| worker (local/Mac) | `OPENCLAW_REMOTE_PATH` | remote PATH for non-interactive SSH; include `/opt/homebrew/bin` so `/usr/bin/env node` can run OpenClaw |
+| worker (local/Mac) | `LOCAL_HARNESS_ENABLED` | set to `1` only on the local computer assigned to execute approved agent attempts |
+| worker (local/Mac) | `LOCAL_HARNESS_KIND` | `copilot-cli`, `hermes`, `openclaw`, or `custom` |
+| worker (local/Mac) | `LOCAL_HARNESS_COMMAND` / `LOCAL_HARNESS_WORKDIR` | local harness binary and working directory on that computer |
+| worker (local/Mac) | `LOCAL_HARNESS_ARGS_JSON` | optional JSON `{ "args": [...] }` template; `{prompt}` and `{timeout}` are substituted as argv values, not shell-interpolated |
+| worker (local/Mac) | `LOCAL_HARNESS_AGENT` / `LOCAL_HARNESS_THINKING` | optional OpenClaw-style adapter settings when `LOCAL_HARNESS_KIND=openclaw` |
+| worker (local/Mac) | `LOCAL_HARNESS_DEVICE_ID` / `LOCAL_HARNESS_DEVICE_NAME` | stable label recorded in task events so multiple Macs are distinguishable |
 
 > **Postgres without TLS on the private network.** `sslmode` is **not** read from the connection
 > URI by PowerSync — it must be set explicitly. `infra/powersync/service.yaml` sets

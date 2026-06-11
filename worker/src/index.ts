@@ -5,15 +5,15 @@ import { discoverTaskContext, type TaskDiscovery } from './discovery.js';
 import { parseAgentHandoffMetadata, type AgentHandoffRequest } from './handoff.js';
 import { runAgentResearch, type AgentResearchBrief } from './handoffResearch.js';
 import { interruptForHumanDecision } from './hitl.js';
+import {
+  localHarnessConfigFromEnv,
+  runLocalHarnessAttempt,
+  type LocalHarnessConfig,
+  type LocalHarnessRunResult,
+} from './localHarnessExecutor.js';
 import { learnCategoryHints, type CategoryHints, type HistoricalTask } from './historyLearning.js';
 import { bestMatch, discoverConfiguredGitHubRepositories, shouldAssociateGitHubProject, type GitHubRepository } from './githubProject.js';
 import { compactMemories, loadActiveMemories } from './memories.js';
-import {
-  openClawConfigFromEnv,
-  runOpenClawAttempt,
-  type OpenClawConfig,
-  type OpenClawRunResult,
-} from './openclawExecutor.js';
 
 /**
  * Capture enrichment worker.
@@ -30,7 +30,7 @@ const DATABASE_URI = process.env.WORKER_DATABASE_URI ?? process.env.BACKEND_DATA
 const POLL_MS = Number(process.env.ENRICH_POLL_MS ?? 2000);
 const BATCH = Number(process.env.ENRICH_BATCH ?? 20);
 const RUN_ONCE = process.env.ENRICH_RUN_ONCE === '1';
-const OPENCLAW_CONFIG = openClawConfigFromEnv();
+const LOCAL_HARNESS_CONFIG = localHarnessConfigFromEnv();
 
 const pool = new pg.Pool({ connectionString: DATABASE_URI });
 
@@ -541,7 +541,7 @@ async function recordAttemptApprovalGate(
       interruptBefore: 'external_action',
       actionType: 'attempt_task',
       title: 'Approve AI attempt plan',
-      body: `${brief.body}\n\nApproval records consent for the next agent turn; external execution still needs the Mac Mini/OpenClaw executor wired in.`,
+      body: `${brief.body}\n\nApproval records consent for the next agent turn; external execution still needs a local harness on the selected backend computer.`,
       payload: {
         task_id: row.task_id,
         request_id: request.requestId,
@@ -606,16 +606,16 @@ async function claimApprovedAttempt(row: ApprovedAttemptRow): Promise<boolean> {
   return (result.rowCount ?? 0) > 0;
 }
 
-async function recordOpenClawCompletionEvent(
+async function recordLocalHarnessCompletionEvent(
   row: ApprovedAttemptRow,
   request: AgentHandoffRequest,
-  result: OpenClawRunResult
+  result: LocalHarnessRunResult
 ): Promise<void> {
-  const eventId = deterministicUuid(`${row.owner_id}:${row.task_id}:openclaw-completed:${row.checkpoint_id}`);
+  const eventId = deterministicUuid(`${row.owner_id}:${row.task_id}:local-harness-completed:${row.checkpoint_id}`);
   await pool.query(
     `INSERT INTO public.task_events
        (id, owner_id, task_id, actor, event_type, title, body, metadata)
-     VALUES ($1, $2, $3, 'agent', 'agent_completed', 'OpenClaw attempt completed', $4, $5)
+     VALUES ($1, $2, $3, 'agent', 'agent_completed', 'Local harness attempt completed', $4, $5)
      ON CONFLICT (id) DO NOTHING`,
     [
       eventId,
@@ -625,30 +625,33 @@ async function recordOpenClawCompletionEvent(
       metadataJSON({
         request_id: request.requestId,
         mode: 'attempt',
-        source: 'openclaw',
+        source: 'local-harness',
         checkpoint_id: row.checkpoint_id,
         proposal_id: row.proposal_id,
         thread_id: row.thread_id,
         checkpoint_key: row.checkpoint_key,
-        openclaw_run_id: result.runId,
-        openclaw_status: result.status,
+        harness_kind: result.harnessKind,
+        harness_device_id: result.deviceId,
+        harness_device_name: result.deviceName,
+        harness_run_id: result.runId,
+        harness_status: result.status,
         stdout_sample: result.stdout.slice(0, 1200),
       }),
     ]
   );
 }
 
-async function recordOpenClawFailureEvent(
+async function recordLocalHarnessFailureEvent(
   row: ApprovedAttemptRow,
   request: AgentHandoffRequest | null,
   error: unknown
 ): Promise<void> {
   const requestId = request?.requestId ?? row.checkpoint_id;
-  const eventId = deterministicUuid(`${row.owner_id}:${row.task_id}:openclaw-failed:${row.checkpoint_id}`);
+  const eventId = deterministicUuid(`${row.owner_id}:${row.task_id}:local-harness-failed:${row.checkpoint_id}`);
   await pool.query(
     `INSERT INTO public.task_events
        (id, owner_id, task_id, actor, event_type, title, body, metadata)
-     VALUES ($1, $2, $3, 'agent', 'agent_failed', 'OpenClaw attempt failed', $4, $5)
+     VALUES ($1, $2, $3, 'agent', 'agent_failed', 'Local harness attempt failed', $4, $5)
      ON CONFLICT (id) DO NOTHING`,
     [
       eventId,
@@ -658,7 +661,7 @@ async function recordOpenClawFailureEvent(
       metadataJSON({
         request_id: requestId,
         mode: 'attempt',
-        source: 'openclaw',
+        source: 'local-harness',
         checkpoint_id: row.checkpoint_id,
         proposal_id: row.proposal_id,
         thread_id: row.thread_id,
@@ -668,7 +671,7 @@ async function recordOpenClawFailureEvent(
   );
 }
 
-async function processApprovedOpenClawAttempts(config: OpenClawConfig | null = OPENCLAW_CONFIG): Promise<number> {
+async function processApprovedLocalHarnessAttempts(config: LocalHarnessConfig | null = LOCAL_HARNESS_CONFIG): Promise<number> {
   if (!config) return 0;
   const { rows } = await pool.query<ApprovedAttemptRow>(APPROVED_ATTEMPT_SQL, [BATCH]);
   let processed = 0;
@@ -679,20 +682,20 @@ async function processApprovedOpenClawAttempts(config: OpenClawConfig | null = O
     const actionPayload = parseJsonRecord(row.action_payload);
     const request = handoffRequestFromActionPayload(actionPayload);
     try {
-      if (!request) throw new Error('approved OpenClaw checkpoint has invalid handoff metadata');
-      const result = await runOpenClawAttempt(config, {
+      if (!request) throw new Error('approved local harness checkpoint has invalid handoff metadata');
+      const result = await runLocalHarnessAttempt(config, {
         taskId: row.task_id,
         title: row.title,
         request,
         actionPayload,
         resumePayload: row.resume_payload ? parseJsonRecord(row.resume_payload) : null,
       });
-      await recordOpenClawCompletionEvent(row, request, result);
+      await recordLocalHarnessCompletionEvent(row, request, result);
       processed += 1;
-      console.log(`[worker] openclaw attempt ${request.requestId} -> task=${row.task_id} status=${result.status}`);
+      console.log(`[worker] local harness ${config.kind} attempt ${request.requestId} -> task=${row.task_id} status=${result.status}`);
     } catch (err) {
-      await recordOpenClawFailureEvent(row, request, err);
-      console.error(`[worker] failed openclaw attempt ${row.checkpoint_id}:`, String(err));
+      await recordLocalHarnessFailureEvent(row, request, err);
+      console.error(`[worker] failed local harness attempt ${row.checkpoint_id}:`, String(err));
     }
   }
   return processed;
@@ -764,11 +767,11 @@ const UPDATE_SQL = `
 `;
 
 async function tick(): Promise<number> {
-  const openClawAttempts = await processApprovedOpenClawAttempts();
+  const localHarnessAttempts = await processApprovedLocalHarnessAttempts();
   const handoffs = await processAgentHandoffRequests();
   const githubAssociations = await processGitHubAssociations();
   const { rows } = await pool.query(SELECT_SQL, [BATCH]);
-  if (rows.length === 0) return openClawAttempts + handoffs + githubAssociations;
+  if (rows.length === 0) return localHarnessAttempts + handoffs + githubAssociations;
   const ownerIds = [...new Set(rows.map((row) => row.owner_id as string))];
   const historyByOwner = new Map<string, CategoryHints>();
   const rulesByOwner = new Map<string, CategorisationRule[]>();
@@ -837,14 +840,14 @@ async function tick(): Promise<number> {
       console.error(`[worker] failed to enrich ${row.id}:`, String(err));
     }
   }
-  return enriched + openClawAttempts + handoffs + githubAssociations;
+  return enriched + localHarnessAttempts + handoffs + githubAssociations;
 }
 
 async function main() {
   console.log(
     `[worker] capture enrichment worker up. poll=${POLL_MS}ms batch=${BATCH} ` +
       `llm=${process.env.OPENAI_API_KEY ? 'on' : 'off'} ` +
-      `openclaw=${OPENCLAW_CONFIG ? `${OPENCLAW_CONFIG.user}@${OPENCLAW_CONFIG.host}` : 'off'} ` +
+      `local_harness=${LOCAL_HARNESS_CONFIG ? `${LOCAL_HARNESS_CONFIG.kind}:${LOCAL_HARNESS_CONFIG.deviceName}` : 'off'} ` +
       `once=${RUN_ONCE}`
   );
 

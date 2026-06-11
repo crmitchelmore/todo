@@ -2,9 +2,9 @@
 
 A speed-of-capture todo system for **iOS + macOS + web** that auto-suggests a due date and
 category on entry, enriches items from your **personal data sources** (Obsidian vault, Gmail,
-Apple Calendar, web, location), and uses an **autonomous agent running on your OpenClaw Mac Mini**
-to research and optionally *do* tasks — with a **mandatory, quick human confirmation** of every
-item's structure before anything is saved.
+Apple Calendar, web, location), and uses an **autonomous agent running through a local harness
+on your selected backend computer** to research and optionally *do* tasks — with a **mandatory,
+quick human confirmation** of every item's structure before anything is saved.
 
 > Status: **M1 (capture→suggest→confirm→sync) and M2 foundation (background enrichment worker)
 > are built and verified** on a PowerSync stack (deployed to Railway), with native UIKit/AppKit clients and a
@@ -18,7 +18,7 @@ Todoist AI, Things 3, Sunsama, Notion AI, ClickUp Brain, Taskade, Shortwave …)
 projects confirmed the gap is **real and structural**. No single product combines:
 
 - **Obsidian live vault integration** — zero native support anywhere
-- **Self-hosted agent on your own hardware** (the Mac Mini) — no commercial support
+- **Self-hosted agent on your own hardware** (a selected local backend computer) — no commercial support
 - The **Gmail-to-completion autonomous loop with personal confirm-before-save**
 
 See [`docs/research-prior-art.md`](docs/research-prior-art.md) for the full landscape and the
@@ -26,13 +26,13 @@ open-source patterns we will copy rather than reinvent.
 
 ## Architecture (summary)
 
-Four planes, bridged across **two Apple accounts** (iPhone/laptop = account A; Mac Mini = account B).
-A **hosted Postgres + PowerSync** core (deployed to Railway) makes sync **account-agnostic**, so the Mini agent
-shares the same database instead of trying to join iCloud.
+Four planes, bridged across **multiple Apple devices/accounts** (iPhone/laptop plus whichever Mac is
+selected as the local backend computer). A **hosted Postgres + PowerSync** core (deployed to Railway)
+makes sync **account-agnostic**, so the local agent shares the same database instead of trying to join iCloud.
 
 1. **Capture & sync** — native UIKit (iOS) + AppKit (macOS), no JS-wrapped frameworks, plus a React web app; one shared data model via PowerSync (native Swift SDK on Apple platforms).
    Native fast-capture: Share Sheet, Siri/Shortcuts, widgets, mac global hotkey.
-2. **Brain** — OpenClaw agent on the Mac Mini: enrichment, research, optional execution.
+2. **Brain** — local harness on the selected backend computer: enrichment, research, optional execution.
 3. **Enrichment** — on-device instant date/category suggestion; richer LLM enrichment on the Mini.
 4. **Confirm UX** — every proposal surfaces as a fast confirm card; nothing saves without it.
 
@@ -57,7 +57,7 @@ Full detail: [`docs/architecture.md`](docs/architecture.md).
 ## Roadmap (thin, shippable slices)
 
 - **M1** Capture → on-device suggest → confirm → save + sync (no Mini yet)
-- **M2** OpenClaw agent backend + richer enrichment + HITL
+- **M2** local harness backend + richer enrichment + HITL
 - **M3** Obsidian context + write-back
 - **M4** Gmail extraction + completion detection
 - **M5** Apple Calendar feasibility
@@ -145,11 +145,11 @@ A reviewer can verify the system end-to-end:
 
 ### Needs your credentials / hardware (not runnable here)
 
-These milestones are scaffolded in beads and the architecture but require your accounts/Mac Mini:
-Mini OpenClaw agent over Tailscale (`cap-myy`, `cap-9ph`), Obsidian Local REST API (`cap-ue0`),
+These milestones are scaffolded in beads and the architecture but require your accounts/local backend Mac:
+local harness runner on the selected backend computer, Obsidian Local REST API (`cap-ue0`),
 Gmail OAuth2 extraction (`cap-nes`, `cap-cmc`), Apple Calendar EventKit (`cap-l20`). The
-enrichment worker is the local stand-in for the Mini's server-side enrichment — point it at the
-same Postgres over Tailscale to run it on the Mini.
+enrichment worker is the local stand-in for server-side enrichment — point it at the
+same Postgres to run it on the selected backend computer.
 
 ## Deploy
 

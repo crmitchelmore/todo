@@ -948,6 +948,85 @@ public final class TaskStore: @unchecked Sendable {
         )
     }
 
+    public func watchAgentDevices() throws -> AsyncThrowingStream<[AgentDevice], Error> {
+        try db.watch(
+            sql: """
+            SELECT * FROM \(AGENT_DEVICES_TABLE)
+             ORDER BY is_selected_backend DESC, status ASC, last_seen_at DESC, updated_at DESC, device_name COLLATE NOCASE ASC
+            """,
+            parameters: [],
+            mapper: Self.mapAgentDevice
+        )
+    }
+
+    @discardableResult
+    public func upsertAgentDevice(
+        id: String = UUID().uuidString.lowercased(),
+        deviceName: String = "Mac",
+        platform: String = "macos",
+        harnessKind: AgentHarnessKind? = nil,
+        harnessLabel: String? = nil,
+        capabilities: [String] = [],
+        selectedBackend: Bool = false
+    ) async throws -> String {
+        let now = ISO8601.string(Date())
+        let cleanedName = deviceName.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Mac"
+        let cleanedPlatform = platform.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "macos"
+        if selectedBackend {
+            try await db.execute(
+                sql: "UPDATE \(AGENT_DEVICES_TABLE) SET is_selected_backend = 0, updated_at = ? WHERE owner_id = ? AND id <> ?",
+                parameters: [now, ownerId, id]
+            )
+        }
+        try await db.execute(
+            sql: """
+            INSERT INTO \(AGENT_DEVICES_TABLE)
+                (id, owner_id, device_name, platform, status, is_selected_backend, harness_kind, harness_label, capabilities, last_seen_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                device_name = excluded.device_name,
+                platform = excluded.platform,
+                status = 'active',
+                is_selected_backend = excluded.is_selected_backend,
+                harness_kind = excluded.harness_kind,
+                harness_label = excluded.harness_label,
+                capabilities = excluded.capabilities,
+                last_seen_at = excluded.last_seen_at,
+                updated_at = excluded.updated_at
+            """,
+            parameters: [
+                id,
+                ownerId,
+                String(cleanedName.prefix(120)),
+                String(cleanedPlatform.prefix(40)),
+                selectedBackend ? 1 : 0,
+                harnessKind?.rawValue,
+                harnessLabel?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty.map { String($0.prefix(120)) },
+                TagsCodec.encode(capabilities),
+                now,
+                now,
+                now
+            ]
+        )
+        return id
+    }
+
+    public func selectAgentBackendDevice(id: String) async throws {
+        let now = ISO8601.string(Date())
+        try await db.execute(sql: "UPDATE \(AGENT_DEVICES_TABLE) SET is_selected_backend = 0, updated_at = ? WHERE owner_id = ?", parameters: [now, ownerId])
+        try await db.execute(
+            sql: "UPDATE \(AGENT_DEVICES_TABLE) SET is_selected_backend = 1, status = 'active', updated_at = ? WHERE id = ? AND owner_id = ?",
+            parameters: [now, id, ownerId]
+        )
+    }
+
+    public func disableAgentDevice(id: String) async throws {
+        try await db.execute(
+            sql: "UPDATE \(AGENT_DEVICES_TABLE) SET status = 'disabled', is_selected_backend = 0, updated_at = ? WHERE id = ? AND owner_id = ?",
+            parameters: [ISO8601.string(Date()), id, ownerId]
+        )
+    }
+
     public func watchTags() throws -> AsyncThrowingStream<[Tag], Error> {
         try db.watch(
             sql: "SELECT * FROM \(TAGS_TABLE) ORDER BY name COLLATE NOCASE ASC",
@@ -1158,6 +1237,25 @@ public final class TaskStore: @unchecked Sendable {
             createdAt: ISO8601.date(try cursor.getStringOptional(name: "created_at")),
             updatedAt: ISO8601.date(try cursor.getStringOptional(name: "updated_at")),
             deletedAt: ISO8601.date(try cursor.getStringOptional(name: "deleted_at"))
+        )
+    }
+
+    static func mapAgentDevice(_ cursor: SqlCursor) throws -> AgentDevice {
+        let statusRaw = (try cursor.getStringOptional(name: "status")) ?? AgentDeviceStatus.active.rawValue
+        let harnessRaw = try cursor.getStringOptional(name: "harness_kind")
+        return AgentDevice(
+            id: try cursor.getString(name: "id"),
+            ownerId: (try cursor.getStringOptional(name: "owner_id")) ?? "",
+            deviceName: try cursor.getString(name: "device_name"),
+            platform: (try cursor.getStringOptional(name: "platform")) ?? "macos",
+            status: AgentDeviceStatus(rawValue: statusRaw) ?? .active,
+            isSelectedBackend: ((try cursor.getIntOptional(name: "is_selected_backend")) ?? 0) == 1,
+            harnessKind: harnessRaw.flatMap(AgentHarnessKind.init(rawValue:)),
+            harnessLabel: try cursor.getStringOptional(name: "harness_label"),
+            capabilities: TagsCodec.decode(try cursor.getStringOptional(name: "capabilities")),
+            lastSeenAt: ISO8601.date(try cursor.getStringOptional(name: "last_seen_at")),
+            createdAt: ISO8601.date(try cursor.getStringOptional(name: "created_at")),
+            updatedAt: ISO8601.date(try cursor.getStringOptional(name: "updated_at"))
         )
     }
 

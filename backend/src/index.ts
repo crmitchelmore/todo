@@ -182,6 +182,10 @@ const ALLOWED_COLUMNS: Record<string, Set<string>> = {
     'id', 'owner_id', 'content', 'domain', 'source', 'confidence', 'tags', 'status',
     'expires_at', 'created_at', 'updated_at', 'deleted_at'
   ]),
+  agent_devices: new Set([
+    'id', 'owner_id', 'device_name', 'platform', 'status', 'is_selected_backend',
+    'harness_kind', 'harness_label', 'capabilities', 'last_seen_at', 'created_at', 'updated_at'
+  ]),
   task_attachments: new Set([
     'id', 'owner_id', 'task_id', 'filename', 'mime_type', 'byte_size', 'preview_data_url', 'created_at'
   ])
@@ -1100,7 +1104,42 @@ function sanitize(table: string, data: Record<string, unknown>): Record<string, 
     if (allowed.has(k)) out[k] = v;
   }
   if (table === 'user_memories') normalizeUserMemoryWrite(out);
+  if (table === 'agent_devices') normalizeAgentDeviceWrite(out);
   return out;
+}
+
+function normalizeAgentDeviceWrite(data: Record<string, unknown>): void {
+  if (Object.hasOwn(data, 'is_selected_backend')) {
+    const selected = Number(data.is_selected_backend);
+    data.is_selected_backend = selected === 1 ? 1 : 0;
+  }
+  if (Object.hasOwn(data, 'status')) {
+    const status = typeof data.status === 'string' ? data.status : 'active';
+    data.status = status === 'disabled' ? 'disabled' : 'active';
+  }
+  if (data.status === 'disabled') data.is_selected_backend = 0;
+  if (Object.hasOwn(data, 'harness_kind') && typeof data.harness_kind === 'string') {
+    const kind = data.harness_kind.trim();
+    data.harness_kind = ['copilot-cli', 'hermes', 'openclaw', 'custom'].includes(kind) ? kind : null;
+  }
+}
+
+async function prepareAgentDeviceSelection(
+  client: pg.PoolClient,
+  ownerId: string,
+  id: string,
+  data: Record<string, unknown>
+): Promise<void> {
+  if (data.is_selected_backend !== 1) return;
+  await client.query(
+    `UPDATE public.agent_devices
+        SET is_selected_backend = 0,
+            updated_at = now()
+      WHERE owner_id = $1
+        AND id <> $2
+        AND is_selected_backend = 1`,
+    [ownerId, id]
+  );
 }
 
 function deterministicUuid(input: string): string {
@@ -1405,6 +1444,17 @@ async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Prom
     if (table === 'user_memories') {
       return softDeleteUserMemory(client, ownerId, op.id);
     }
+    if (table === 'agent_devices') {
+      const result = await client.query(
+        `UPDATE public.agent_devices
+            SET status = 'disabled',
+                is_selected_backend = 0,
+                updated_at = now()
+          WHERE id = $1 AND owner_id = $2`,
+        [op.id, ownerId]
+      );
+      return (result.rowCount ?? 0) > 0;
+    }
     const result = await client.query(`DELETE FROM ${table} WHERE id = $1 AND owner_id = $2`, [op.id, ownerId]);
     return (result.rowCount ?? 0) > 0;
   }
@@ -1413,6 +1463,7 @@ async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Prom
   const data = sanitize(table, { ...(op.data ?? {}), id: op.id, owner_id: ownerId });
 
   if (op.op === 'PUT') {
+    if (table === 'agent_devices') await prepareAgentDeviceSelection(client, ownerId, op.id, data);
     const cols = Object.keys(data);
     const vals = Object.values(data);
     const placeholders = cols.map((_, i) => `$${i + 1}`);
@@ -1432,6 +1483,7 @@ async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Prom
   }
 
   if (op.op === 'PATCH') {
+    if (table === 'agent_devices') await prepareAgentDeviceSelection(client, ownerId, op.id, data);
     const cols = Object.keys(data).filter((c) => c !== 'id' && c !== 'owner_id');
     if (cols.length === 0) return false;
     const setClause = cols.map((c, i) => `${c} = $${i + 1}`).join(', ');

@@ -6,6 +6,7 @@ public let TAGS_TABLE = "tags"
 public let CATEGORIES_TABLE = "categories"
 public let CATEGORISATION_RULES_TABLE = "categorisation_rules"
 public let USER_MEMORIES_TABLE = "user_memories"
+public let AGENT_DEVICES_TABLE = "agent_devices"
 public let TASK_EVENTS_TABLE = "task_events"
 public let TASK_ATTACHMENTS_TABLE = "task_attachments"
 public let AGENT_PROPOSALS_TABLE = "agent_proposals"
@@ -96,6 +97,29 @@ public let AppSchema = Schema(
         indexes: [
             Index(name: "by_status", columns: [
                 IndexedColumn.ascending("status"),
+                IndexedColumn.ascending("updated_at")
+            ])
+        ]
+    ),
+    Table(
+        name: AGENT_DEVICES_TABLE,
+        columns: [
+            .text("owner_id"),
+            .text("device_name"),
+            .text("platform"),
+            .text("status"),
+            .integer("is_selected_backend"),
+            .text("harness_kind"),
+            .text("harness_label"),
+            .text("capabilities"),
+            .text("last_seen_at"),
+            .text("created_at"),
+            .text("updated_at")
+        ],
+        indexes: [
+            Index(name: "by_status_seen", columns: [
+                IndexedColumn.ascending("status"),
+                IndexedColumn.ascending("last_seen_at"),
                 IndexedColumn.ascending("updated_at")
             ])
         ]

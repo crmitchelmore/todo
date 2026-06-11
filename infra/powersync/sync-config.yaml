@@ -29,6 +29,10 @@ streams:
     auto_subscribe: true
     queries:
       - SELECT * FROM user_memories WHERE owner_id = auth.user_id()
+  agent_devices:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM agent_devices WHERE owner_id = auth.user_id()
   task_events:
     auto_subscribe: true
     queries:

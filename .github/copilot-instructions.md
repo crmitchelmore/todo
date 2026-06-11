@@ -46,12 +46,12 @@
 - Reuse existing valid Apple signing certificates and provisioning profiles where possible; do not create new certificates/profiles on every release attempt.
 - If signing fails due certificate capacity, clean up clearly unused/expired Apple Developer certificates and repair profiles, then rerun the release workflow. Never commit certificates, profiles, Apple passwords, or app-specific passwords.
 
-## OpenClaw executor
+## Local harness executor
 
-- Approved AI attempt checkpoints are executed by the worker only when `OPENCLAW_EXECUTOR_ENABLED=1` and SSH settings are configured; keep production/Railway safe-by-default unless the host can actually reach the Mac Mini.
-- The Mac Mini executor target is `bravostation@bravos-mac-mini.taile313a5.ts.net`, workdir `/Users/bravostation/clawd`, CLI `/opt/homebrew/bin/openclaw`, default agent `imessage-agent`, using `openclaw agent --agent imessage-agent --message "$PROMPT" --json --timeout 120`.
-- Use non-interactive SSH (`-o BatchMode=yes`) with the private key outside the repo. The current integration public key to authorise on the Mini is `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAB0tzfbA0+aKXye4HItr3TeUCwol4fg2GrOua8F8/Sa capture-openclaw-executor`.
-- Do not close OpenClaw execution work until SSH/OpenClaw smoke succeeds and a completed or failed attempt is recorded back into `task_events`.
+- Approved AI attempt checkpoints are executed only by the worker running on the selected local backend computer when `LOCAL_HARNESS_ENABLED=1`; keep production/Railway safe-by-default unless a local harness is explicitly configured.
+- Supported harness kinds are `copilot-cli`, `hermes`, `openclaw`, and `custom`; use `LOCAL_HARNESS_COMMAND`, `LOCAL_HARNESS_WORKDIR`, and optional `LOCAL_HARNESS_ARGS_JSON` to point at whatever CLI is installed on that Mac.
+- Pass prompts as argv placeholders (`{prompt}`), not shell-interpolated strings, and keep timeouts bounded with `LOCAL_HARNESS_TIMEOUT_SECONDS`.
+- Do not close local harness execution work until the configured harness smoke succeeds and a completed or failed attempt is recorded back into `task_events` with harness kind/device metadata.
 
 ## Web testing
 

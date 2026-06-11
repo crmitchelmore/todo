@@ -2,9 +2,9 @@
 
 ## Constraints
 
-- **Two Apple accounts.** iPhone + main laptop are on personal iCloud account **A**; the OpenClaw
-  Mac Mini runs a **separate Apple account B**. The Mini cannot join account A's private iCloud
-  sync. → sync must be **account-agnostic**.
+- **Multiple Apple devices/accounts.** iPhone + main laptop may be on personal iCloud account **A**,
+  while the selected local backend Mac may be on another account. The backend computer cannot rely
+  on account A's private iCloud sync. → sync must be **account-agnostic**.
 - **Web client required**, alongside iOS + macOS → the data model and sync must be
   **client-agnostic** (not Apple-only).
 - **Mandatory human confirmation** of item structure before save; confirmation must be effortless.
@@ -18,7 +18,7 @@ Postgres + PowerSync** backend (deployed to Railway) rather than iCloud/CloudKit
 
 - Gives **native Swift + web SDKs** over one shared SQL data model (offline-first).
 - Is **account-agnostic** — removes the cross-Apple-account bridge entirely.
-- Lets the **Mac Mini agent share the same database**, so "the bridge" collapses into the sync layer.
+- Lets the **selected local backend agent share the same database**, so "the bridge" collapses into the sync layer.
 
 Alternative considered: Automerge (CRDT, native Swift). Choose it only if concurrent multi-device
 edits of the *same* task are common; otherwise PowerSync's per-row last-write-wins is simpler.
@@ -37,8 +37,8 @@ Tracked as decision `D-sync`.
                           ┌──────▼───────────────▼──────┐
             Sync core     │  Postgres + PowerSync service │  (hosted on Railway)
                           └──────▲───────────────▲──────┘
-            ┌────────────────────┼───────────────┼──────────── Account B (Mac Mini) ┐
-   Brain    │  OpenClaw agent  ──┘   shares DB    │                                  │
+            ┌────────────────────┼───────────────┼──────────── Selected backend Mac ┐
+   Brain    │  local harness  ───┘   shares DB    │                                  │
             │   • enrichment (LLM, structured output, recurrence)                    │
             │   • Obsidian (Local REST API + embeddings)                             │
             │   • Gmail (extract + completion signals)                               │
@@ -106,23 +106,23 @@ accept, quick inline edit, and reject. Agent proposals carry **confidence + prov
 
 1. **On-device, instant** (offline, no Mini): date via chrono-node (web) / NSDataDetector (Swift);
    lightweight category guess. Gives immediate feedback on capture.
-2. **Server-side, richer** (Mac Mini): structured LLM output (schema with project, priority, tags,
+2. **Server-side, richer** (worker/local backend computer): structured LLM output (schema with project, priority, tags,
    due, recurrence, confidence, provenance); recurrence via Recognizers-Text / Duckling sidecar.
 
 > **Implemented (M2 foundation):** `worker/` is a background enrichment service that polls Postgres
 > for `proposed` rows, computes a richer suggestion (broader categories, urgency hints, full
 > chrono date parsing; LLM-upgradable via `OPENAI_API_KEY`) and patches the `suggested_*` fields
 > only — it never changes `status`. It currently runs as a Railway service against the shared
-> Postgres; running it on the Mini against the same database is exactly the "server-side" step above. The on-device pass writes `suggestion_source='on-device'`;
+> Postgres; running it on the selected backend Mac against the same database is exactly the "server-side" step above. The on-device pass writes `suggestion_source='on-device'`;
 > the worker upgrades it to `'server'` (or `'llm'`), and the patch syncs back to every client live.
 
 ## Agent & HITL
 
-OpenClaw agent on the Mini runs LangGraph flows with `interrupt_before` on risky nodes and a
-durable checkpointer. Flow: agent proposes → state serialised → pushed to a confirm card / approval
-queue → resume or abort on the human decision. An **autonomy policy engine** classifies actions by
-risk/reversibility: low-risk auto-executes; consequential actions require explicit approval. Item
-**structure is always confirmed** regardless of autonomy level.
+The selected backend computer runs a local harness adapter (Copilot CLI, Hermes, OpenClaw, or custom)
+against durable approval checkpoints. Flow: agent proposes → state serialised → pushed to a confirm
+card / approval queue → resume or abort on the human decision. An **autonomy policy engine**
+classifies actions by risk/reversibility: low-risk auto-executes; consequential actions require
+explicit approval. Item **structure is always confirmed** regardless of autonomy level.
 
 ## Integrations
 

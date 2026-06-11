@@ -19,9 +19,11 @@ final class TaxonomySettingsStore: ObservableObject {
     @Published var tags: [Tag] = []
     @Published var rules: [CategorisationRule] = []
     @Published var memories: [UserMemory] = []
+    @Published var agentDevices: [AgentDevice] = []
 
     private let taskStore: TaskStore
     private var watchers: [Task<Void, Never>] = []
+    private static let agentDeviceIdKey = "capture.agentDeviceId"
 
     init(taskStore: TaskStore) {
         self.taskStore = taskStore
@@ -73,6 +75,17 @@ final class TaxonomySettingsStore: ObservableObject {
                 NSLog("[Capture] Memory settings watch failed: \(error)")
             }
         })
+        watchers.append(Task { [weak self] in
+            guard let store = self?.taskStore else { return }
+            do {
+                for try await rows in try store.watchAgentDevices() {
+                    guard let self else { break }
+                    await MainActor.run { self.agentDevices = rows }
+                }
+            } catch {
+                NSLog("[Capture] Agent device settings watch failed: \(error)")
+            }
+        })
     }
 
     func createCategory(_ name: String) { Task { try? await taskStore.createCategory(name: name) } }
@@ -109,6 +122,28 @@ final class TaxonomySettingsStore: ObservableObject {
     }
     func setMemoryStatus(_ id: String, status: UserMemoryStatus) {
         Task { try? await taskStore.setUserMemoryStatus(id: id, status: status) }
+    }
+    func registerCurrentMac(harnessKind: AgentHarnessKind, harnessLabel: String?, capabilities: [String], selectedBackend: Bool) {
+        Task {
+            let deviceName = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
+            try? await taskStore.upsertAgentDevice(
+                id: currentAgentDeviceId(),
+                deviceName: deviceName,
+                harnessKind: harnessKind,
+                harnessLabel: harnessLabel,
+                capabilities: capabilities,
+                selectedBackend: selectedBackend
+            )
+        }
+    }
+    func selectAgentDevice(_ id: String) { Task { try? await taskStore.selectAgentBackendDevice(id: id) } }
+    func disableAgentDevice(_ id: String) { Task { try? await taskStore.disableAgentDevice(id: id) } }
+
+    private func currentAgentDeviceId() -> String {
+        if let id = UserDefaults.standard.string(forKey: Self.agentDeviceIdKey), !id.isEmpty { return id }
+        let id = UUID().uuidString.lowercased()
+        UserDefaults.standard.set(id, forKey: Self.agentDeviceIdKey)
+        return id
     }
 
     deinit { watchers.forEach { $0.cancel() } }
@@ -235,6 +270,11 @@ private struct SettingsView: View {
                     }
                     .pickerStyle(.segmented)
                     .padding(.top, 4)
+                }
+
+                GroupBox("Agent Backend Computer") {
+                    AgentBackendSettingsView(taxonomy: taxonomy)
+                        .padding(.top, 4)
                 }
 
                 GroupBox("Categories & Tags") {
@@ -386,6 +426,119 @@ private struct DiagnosticMetric: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(nsColor: Theme.surface))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+private struct AgentBackendSettingsView: View {
+    @ObservedObject var taxonomy: TaxonomySettingsStore
+    @State private var harnessKind: AgentHarnessKind = .openclaw
+    @State private var harnessLabel = "OpenClaw"
+    @State private var capabilities = "research, attempt"
+    @State private var selectThisMac = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Choose which Mac runs approved local harness work.")
+                    .font(.system(.body, design: .rounded).weight(.semibold))
+                Text("Register every Mac that has Capture installed, then select one backend computer. The actual CLI path and secrets stay local on that machine.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            HStack {
+                Picker("Harness", selection: $harnessKind) {
+                    ForEach(AgentHarnessKind.allCases, id: \.rawValue) { kind in
+                        Text(label(for: kind)).tag(kind)
+                    }
+                }
+                .frame(width: 210)
+                TextField("Harness label", text: $harnessLabel)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Capabilities", text: $capabilities)
+                    .textFieldStyle(.roundedBorder)
+            }
+            HStack {
+                Toggle("Use this Mac as backend", isOn: $selectThisMac)
+                Spacer()
+                Button("Register this Mac") {
+                    taxonomy.registerCurrentMac(
+                        harnessKind: harnessKind,
+                        harnessLabel: harnessLabel.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+                        capabilities: parsedCapabilities,
+                        selectedBackend: selectThisMac
+                    )
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            if taxonomy.agentDevices.isEmpty {
+                Text("No backend devices registered yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 6) {
+                    ForEach(taxonomy.agentDevices) { device in
+                        HStack(alignment: .top, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 6) {
+                                    Text(device.deviceName)
+                                        .font(.system(.body, design: .rounded).weight(.semibold))
+                                    if device.isSelectedBackend {
+                                        Text("backend")
+                                            .font(.system(size: 10, design: .monospaced).weight(.bold))
+                                            .foregroundStyle(.white)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.purple)
+                                            .clipShape(Capsule())
+                                    }
+                                }
+                                Text([
+                                    device.platform,
+                                    device.harnessKind.map(label(for:)),
+                                    device.harnessLabel,
+                                    device.lastSeenAt.map { "seen \($0.formatted(date: .abbreviated, time: .shortened))" }
+                                ].compactMap { $0 }.joined(separator: " · "))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                if !device.capabilities.isEmpty {
+                                    Text(device.capabilities.map { "#\($0)" }.joined(separator: " "))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .opacity(device.status == .active ? 1 : 0.55)
+                            Spacer()
+                            if !device.isSelectedBackend && device.status == .active {
+                                Button("Use as backend") { taxonomy.selectAgentDevice(device.id) }
+                            }
+                            Button(device.status == .disabled ? "Disabled" : "Disable") {
+                                taxonomy.disableAgentDevice(device.id)
+                            }
+                            .disabled(device.status == .disabled)
+                        }
+                        .padding(8)
+                        .background(Color(nsColor: Theme.surface))
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                }
+            }
+        }
+    }
+
+    private var parsedCapabilities: [String] {
+        capabilities
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func label(for kind: AgentHarnessKind) -> String {
+        switch kind {
+        case .copilotCLI: return "Copilot CLI"
+        case .hermes: return "Hermes"
+        case .openclaw: return "OpenClaw"
+        case .custom: return "Custom"
+        }
     }
 }
 
