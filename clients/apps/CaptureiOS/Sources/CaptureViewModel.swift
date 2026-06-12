@@ -67,6 +67,8 @@ final class CaptureViewModel {
     var onChange: (() -> Void)?
     private var tasks: [Task<Void, Never>] = []
     private var syncTask: Task<Void, Never>?
+    private var started = false
+    private var lastSyncRestart: Date?
 
     init(auth: AuthStore, config: CaptureConfig = .fromEnvironment()) {
         self.auth = auth
@@ -74,7 +76,21 @@ final class CaptureViewModel {
     }
 
     func start() {
-        Task { try? await store.connect() }
+        guard !started else {
+            refreshTaskSnapshots(reason: "start requested again")
+            refreshSyncSummary()
+            return
+        }
+        started = true
+        refreshTaskSnapshots(reason: "startup")
+        Task {
+            do {
+                try await store.connect()
+                refreshTaskSnapshots(reason: "connect")
+            } catch {
+                NSLog("[Capture] PowerSync connect failed: \(error)")
+            }
+        }
         watch({ try self.store.watchProposed() }, assign: { self.proposed = $0 })
         watch({ try self.store.watchActive() }, assign: { self.active = $0 })
         watch({ try self.store.watchDone() }, assign: { self.done = $0 })
@@ -82,6 +98,23 @@ final class CaptureViewModel {
         watchTags()
         watchCategories()
         refreshSyncSummary()
+    }
+
+    func restartSyncIfNeeded(reason: String) {
+        guard started, auth.isAuthenticated else { return }
+        let now = Date()
+        if let lastSyncRestart, now.timeIntervalSince(lastSyncRestart) < 15 { return }
+        lastSyncRestart = now
+        Task {
+            do {
+                try await store.reconnect()
+                refreshTaskSnapshots(reason: "reconnect")
+                refreshSyncSummary()
+            } catch {
+                NSLog("[Capture] PowerSync reconnect failed (\(reason)): \(error)")
+                refreshSyncSummary()
+            }
+        }
     }
 
     private func watchTags() {

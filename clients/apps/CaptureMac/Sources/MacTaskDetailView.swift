@@ -250,12 +250,18 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
 
         historyStack.orientation = .vertical
         historyStack.spacing = 10
-        historyStack.alignment = .leading
+        historyStack.alignment = .width
 
         let actionRow = NSStackView(views: [primaryButton, secondaryButton, rejectButton])
         actionRow.orientation = .horizontal
         actionRow.spacing = 8
-        actionRow.distribution = .fillProportionally
+        actionRow.distribution = .fill
+
+        let handoffActions = NSStackView(views: [researchButton, attemptButton, handoffStatusLabel])
+        handoffActions.orientation = .horizontal
+        handoffActions.spacing = 8
+        handoffActions.alignment = .firstBaseline
+        handoffActions.distribution = .fill
 
         formView.addArrangedSubview(card([
             stateLabel,
@@ -278,7 +284,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         formView.addArrangedSubview(card([
             sectionTitle("AI + activity"),
             row(label: "AI loop", views: [handoffField]),
-            NSStackView(views: [researchButton, attemptButton, handoffStatusLabel]),
+            handoffActions,
             historyStack
         ]))
 
@@ -290,8 +296,8 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
             formView.trailingAnchor.constraint(equalTo: trailingAnchor),
             formView.topAnchor.constraint(equalTo: topAnchor),
             formView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            categoryBox.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
-            tagsField.widthAnchor.constraint(greaterThanOrEqualToConstant: 180)
+            categoryBox.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
+            tagsField.widthAnchor.constraint(greaterThanOrEqualToConstant: 240)
         ])
     }
 
@@ -378,11 +384,12 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         text.orientation = .vertical
         text.alignment = .leading
         text.spacing = 6
-        text.widthAnchor.constraint(lessThanOrEqualToConstant: 420).isActive = true
+        text.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let row = NSStackView(views: [icon, text])
         row.orientation = .horizontal
         row.alignment = .top
         row.spacing = 8
+        row.distribution = .fill
         return row
     }
 
@@ -401,22 +408,27 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         let head = NSStackView(views: [title, meta])
         head.orientation = .horizontal
         head.spacing = 8
+        head.distribution = .fill
+        title.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        meta.setContentHuggingPriority(.required, for: .horizontal)
 
         let body = NSTextField(wrappingLabelWithString: event.body ?? "")
         body.font = Theme.display(12, .regular)
         body.textColor = Theme.textSecondary
         body.isHidden = (event.body ?? "").isEmpty
-        body.preferredMaxLayoutWidth = 400
+        body.maximumNumberOfLines = 0
+        body.lineBreakMode = .byWordWrapping
 
         let text = NSStackView(views: [head, body])
         text.orientation = .vertical
-        text.alignment = .leading
+        text.alignment = .width
         text.spacing = 2
-        text.widthAnchor.constraint(lessThanOrEqualToConstant: 420).isActive = true
+        text.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let row = NSStackView(views: [icon, text])
         row.orientation = .horizontal
         row.alignment = .top
         row.spacing = 8
+        row.distribution = .fill
         return row
     }
 
@@ -432,7 +444,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         Theme.card(container, color: color)
         let stack = NSStackView(views: views)
         stack.orientation = .vertical
-        stack.alignment = .leading
+        stack.alignment = .width
         stack.spacing = 10
         stack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -455,11 +467,16 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         controls.orientation = .horizontal
         controls.spacing = 8
         controls.alignment = .firstBaseline
+        controls.distribution = .fill
+        controls.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        for view in views {
+            view.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        }
         let row = NSStackView(views: [label, controls])
         row.orientation = .horizontal
         row.alignment = .firstBaseline
         row.spacing = 10
-        row.widthAnchor.constraint(lessThanOrEqualToConstant: 450).isActive = true
+        row.distribution = .fill
         return row
     }
 
