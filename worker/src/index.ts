@@ -14,6 +14,7 @@ import {
 import { learnCategoryHints, type CategoryHints, type HistoricalTask } from './historyLearning.js';
 import { bestMatch, discoverConfiguredGitHubRepositories, shouldAssociateGitHubProject, type GitHubRepository } from './githubProject.js';
 import { compactMemories, loadActiveMemories } from './memories.js';
+import { captureException, initObservability, startSpan, wideEvent } from './observability.js';
 
 /**
  * Capture enrichment worker.
@@ -31,6 +32,8 @@ const POLL_MS = Number(process.env.ENRICH_POLL_MS ?? 2000);
 const BATCH = Number(process.env.ENRICH_BATCH ?? 20);
 const RUN_ONCE = process.env.ENRICH_RUN_ONCE === '1';
 const LOCAL_HARNESS_CONFIG = localHarnessConfigFromEnv();
+
+initObservability();
 
 const pool = new pg.Pool({ connectionString: DATABASE_URI });
 
@@ -695,6 +698,7 @@ async function processApprovedLocalHarnessAttempts(config: LocalHarnessConfig | 
       console.log(`[worker] local harness ${config.kind} attempt ${request.requestId} -> task=${row.task_id} status=${result.status}`);
     } catch (err) {
       await recordLocalHarnessFailureEvent(row, request, err);
+      captureException(err, { op: 'local_harness_attempt', checkpoint_id: row.checkpoint_id, task_id: row.task_id });
       console.error(`[worker] failed local harness attempt ${row.checkpoint_id}:`, String(err));
     }
   }
@@ -749,6 +753,7 @@ async function processAgentHandoffRequests(): Promise<number> {
       console.log(`[worker] handoff ${request.mode} ${request.requestId} -> task=${row.task_id}`);
     } catch (err) {
       await recordHandoffFailureEvent(row, request, err);
+      captureException(err, { op: 'agent_handoff', request_id: request.requestId, task_id: row.task_id, mode: request.mode });
       console.error(`[worker] failed handoff ${request.requestId}:`, String(err));
     }
   }
@@ -767,11 +772,28 @@ const UPDATE_SQL = `
 `;
 
 async function tick(): Promise<number> {
-  const localHarnessAttempts = await processApprovedLocalHarnessAttempts();
-  const handoffs = await processAgentHandoffRequests();
-  const githubAssociations = await processGitHubAssociations();
-  const { rows } = await pool.query(SELECT_SQL, [BATCH]);
-  if (rows.length === 0) return localHarnessAttempts + handoffs + githubAssociations;
+  const started = performance.now();
+  return startSpan('worker tick', 'worker.tick', async () => {
+    let enriched = 0;
+    let localHarnessAttempts = 0;
+    let handoffs = 0;
+    let githubAssociations = 0;
+    try {
+      localHarnessAttempts = await processApprovedLocalHarnessAttempts();
+      handoffs = await processAgentHandoffRequests();
+      githubAssociations = await processGitHubAssociations();
+      const { rows } = await pool.query(SELECT_SQL, [BATCH]);
+      if (rows.length === 0) {
+        wideEvent('worker.tick', {
+          duration_ms: Math.round(performance.now() - started),
+          local_harness_attempts: localHarnessAttempts,
+          handoffs,
+          github_associations: githubAssociations,
+          enriched,
+          batch_rows: 0,
+        });
+        return localHarnessAttempts + handoffs + githubAssociations;
+      }
   const ownerIds = [...new Set(rows.map((row) => row.owner_id as string))];
   const historyByOwner = new Map<string, CategoryHints>();
   const rulesByOwner = new Map<string, CategorisationRule[]>();
@@ -802,7 +824,6 @@ async function tick(): Promise<number> {
     }
   }
 
-  let enriched = 0;
   for (const row of rows) {
     try {
       const e = await enrich(
@@ -837,10 +858,32 @@ async function tick(): Promise<number> {
         );
       }
     } catch (err) {
+      captureException(err, { op: 'task_enrichment', task_id: row.id });
       console.error(`[worker] failed to enrich ${row.id}:`, String(err));
     }
   }
-  return enriched + localHarnessAttempts + handoffs + githubAssociations;
+      wideEvent('worker.tick', {
+        duration_ms: Math.round(performance.now() - started),
+        local_harness_attempts: localHarnessAttempts,
+        handoffs,
+        github_associations: githubAssociations,
+        enriched,
+        batch_rows: rows.length,
+      });
+      return enriched + localHarnessAttempts + handoffs + githubAssociations;
+    } catch (err) {
+      captureException(err, { op: 'worker_tick', duration_ms: Math.round(performance.now() - started) });
+      wideEvent('worker.tick', {
+        duration_ms: Math.round(performance.now() - started),
+        local_harness_attempts: localHarnessAttempts,
+        handoffs,
+        github_associations: githubAssociations,
+        enriched,
+        error_type: err instanceof Error ? err.name : typeof err,
+      });
+      throw err;
+    }
+  });
 }
 
 async function main() {
@@ -863,6 +906,7 @@ async function main() {
     try {
       await tick();
     } catch (err) {
+      captureException(err, { op: 'worker_loop' });
       console.error('[worker] tick error:', String(err));
     }
     await new Promise((r) => setTimeout(r, POLL_MS));

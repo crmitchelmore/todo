@@ -129,6 +129,8 @@ jobs:
         env:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           CAPTURE_API_SECRET: ${{ secrets.CAPTURE_API_SECRET }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_ENVIRONMENT: production
           KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
@@ -160,6 +162,8 @@ jobs:
             CODE_SIGN_ENTITLEMENTS="$DEVELOPER_ID_ENTITLEMENTS" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
             ENABLE_HARDENED_RUNTIME=YES \
+            SENTRY_DSN="$SENTRY_DSN" \
+            SENTRY_ENVIRONMENT="$SENTRY_ENVIRONMENT" \
             CAPTURE_API_SECRET="$CAPTURE_API_SECRET"
 
       - name: Export Developer ID App

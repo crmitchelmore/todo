@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let passkeys = NativePasskeyAuthorizer()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        CaptureObservability.start()
         NSApp.setActivationPolicy(.regular)
         applyAppearance(preferencesStore.preferences.appearance)
         buildMenu()

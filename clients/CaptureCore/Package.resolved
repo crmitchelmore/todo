@@ -1,5 +1,5 @@
 {
-  "originHash" : "172831d66ee5ffa4dbd05b05b0868a392ecf620587091ca9f9408f9cb5fe9074",
+  "originHash" : "fb51acdca9c6e59a5b762ef97dbaa0aab9aaa65c1f81b4db82f4438723fa9db6",
   "pins" : [
     {
       "identity" : "csqlite",
@@ -35,6 +35,15 @@
       "state" : {
         "revision" : "0b150e0b45dfad88664442b1c8f6acf0ee9d2ca7",
         "version" : "1.14.1"
+      }
+    },
+    {
+      "identity" : "sentry-cocoa",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/getsentry/sentry-cocoa",
+      "state" : {
+        "revision" : "2c420d31d0c31b525fa9e7c552ef0fc9d924befc",
+        "version" : "9.17.1"
       }
     },
     {

@@ -47,6 +47,9 @@ Key environment variables:
 | backend | `MAIL_PROVIDER` | optional: `smtp`, `resend`, `brevo`, `sendgrid`, or `postmark` |
 | backend | `MAIL_FROM` | sender identity, e.g. `Capture <hello@example.com>` |
 | backend | `SMTP_URL` / provider key | one of `SMTP_URL`, `RESEND_API_KEY`, `BREVO_API_KEY`, `SENDGRID_API_KEY`, `POSTMARK_SERVER_TOKEN` |
+| backend/worker | `SENTRY_DSN` / `SENTRY_ENVIRONMENT` / `SENTRY_TRACES_SAMPLE_RATE` | optional Sentry errors/traces/log correlation; services still emit JSON wide events locally when unset |
+| web | `VITE_SENTRY_DSN` / `VITE_SENTRY_ENVIRONMENT` | optional browser Sentry errors/traces/replay |
+| iOS/Mac | `SENTRY_DSN` / `SENTRY_ENVIRONMENT` | optional native Sentry errors/traces baked into release builds; local OSLog wide events still emit when unset |
 | powersync | `PS_DATA_SOURCE_URI` | `postgres://postgres:<pw>@<pg-private>:5432/postgres` |
 | powersync | `PS_STORAGE_URI` | `postgres://postgres:<pw>@<pg-private>:5432/powersync` |
 | powersync | `PS_JWKS_URL` | `http://backend.railway.internal:6060/api/auth/keys` |

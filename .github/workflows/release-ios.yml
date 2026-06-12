@@ -127,6 +127,8 @@ jobs:
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           CAPTURE_API_SECRET: ${{ secrets.CAPTURE_API_SECRET }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_ENVIRONMENT: production
           VERSION: ${{ github.event.inputs.version }}
           BUILD_NUMBER: ${{ github.event.inputs.build_number || github.run_number }}
         run: |

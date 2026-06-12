@@ -21,6 +21,8 @@ jobs:
       RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN || secrets.RAILWAY_TOKEN }}
       RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
       RAILWAY_ENVIRONMENT: production
+      VITE_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+      VITE_SENTRY_ENVIRONMENT: production
     steps:
       - uses: actions/checkout@v4
 

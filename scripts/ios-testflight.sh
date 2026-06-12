@@ -21,6 +21,8 @@
 #   APPLE_TEAM_ID                 Default: 8X4ZN58TYH
 #   VERSION                       Default: contents of ./VERSION
 #   BUILD_NUMBER                  Default: unix timestamp
+  # SENTRY_DSN                    Optional; enables Sentry in release builds when set.
+  # SENTRY_ENVIRONMENT            Optional; defaults to production in CI.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -34,6 +36,8 @@ BUILD_NUMBER="${BUILD_NUMBER:-$(date +%s)}"
 # Baked into Info.plist via the $(CAPTURE_API_SECRET) build setting so the app can
 # authenticate to the gated backend. Empty in local dev builds (talks to a local backend).
 CAPTURE_API_SECRET="${CAPTURE_API_SECRET:-}"
+SENTRY_DSN="${SENTRY_DSN:-}"
+SENTRY_ENVIRONMENT="${SENTRY_ENVIRONMENT:-production}"
 
 : "${APP_STORE_CONNECT_ISSUER_ID:?Set APP_STORE_CONNECT_ISSUER_ID (App Store Connect API issuer UUID)}"
 : "${IOS_APP_PROFILE_SPECIFIER:?Set IOS_APP_PROFILE_SPECIFIER (installed App Store profile name)}"
@@ -64,6 +68,8 @@ GIT_CONFIG_COUNT=0 xcodebuild archive \
   IOS_WIDGET_PROFILE_SPECIFIER="$IOS_WIDGET_PROFILE_SPECIFIER" \
   MARKETING_VERSION="$VERSION" \
   CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+  SENTRY_DSN="$SENTRY_DSN" \
+  SENTRY_ENVIRONMENT="$SENTRY_ENVIRONMENT" \
   CAPTURE_API_SECRET="$CAPTURE_API_SECRET"
 
 EXPORT_OPTIONS="$BUILD_DIR/ExportOptions.plist"

@@ -28,6 +28,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         options connectionOptions: UIScene.ConnectionOptions
     ) {
         guard let windowScene = scene as? UIWindowScene else { return }
+        CaptureObservability.start()
         let window = UIWindow(windowScene: windowScene)
         window.overrideUserInterfaceStyle = CapturePreferences.load().appearance.userInterfaceStyle
         window.tintColor = Theme.signal

@@ -49,6 +49,7 @@ import { agentHandoffRequestId, parseAgentHandoffInput } from './agentHandoff.js
 import { validateAttachmentData } from './attachments.js';
 import { sendEmailBestEffort, loginCodeEmail, resetCodeEmail } from './mailer.js';
 import { normalizeUserMemoryWrite, softDeleteUserMemory } from './userMemoryUpload.js';
+import { captureException, hashId, initObservability, requestWideEventMiddleware, wideEvent } from './observability.js';
 import {
   githubAuthorizeUrl,
   githubOAuthConfig,
@@ -87,12 +88,15 @@ const MFA_CHALLENGE_TTL_MS = 5 * 60_000;
 const MFA_MAX_ATTEMPTS = 5;
 const OAUTH_STATE_TTL_MS = 10 * 60_000;
 
+initObservability();
+
 const pool = new pg.Pool({ connectionString: DATABASE_URI });
 const { privateKey, publicJwk, kid } = await loadSigningKey();
 
 const app = express();
 // Behind Railway's proxy: trust the first hop so req.ip reflects the real client for throttling.
 app.set('trust proxy', 1);
+app.use(requestWideEventMiddleware());
 app.use(cors());
 app.use(express.json({ limit: '5mb' }));
 
@@ -131,6 +135,7 @@ function clearFailures(key: string): void {
 interface AuthedRequest extends Request {
   ownerId?: string;
   sessionToken?: string;
+  requestId?: string;
 }
 
 function bearer(req: Request): string | undefined {
@@ -1763,6 +1768,7 @@ app.post('/api/tasks/:id/agent-handoff', requireAuth, async (req: AuthedRequest,
     return res.status(202).json({ ok: true, request_id: requestId });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
+    captureException(err, { op: 'agent_handoff_request', task_id: taskId, owner_id: ownerId });
     console.error('agent handoff request failed:', err);
     return res.status(500).json({ ok: false, error: 'agent handoff failed' });
   } finally {
@@ -1807,6 +1813,7 @@ app.put('/api/data', requireAuth, async (req: AuthedRequest, res: Response) => {
   const ops: CrudOp[] = req.body?.ops ?? [];
   const ownerId = req.ownerId!;
   const client = await pool.connect();
+  const started = performance.now();
   try {
     await client.query('BEGIN');
     for (const op of ops) {
@@ -1826,9 +1833,21 @@ app.put('/api/data', requireAuth, async (req: AuthedRequest, res: Response) => {
       }
     }
     await client.query('COMMIT');
+    wideEvent('sync.upload', {
+      request_id: req.requestId,
+      owner_hash: hashId(ownerId),
+      op_count: ops.length,
+      duration_ms: Math.round(performance.now() - started),
+    });
     res.json({ ok: true, applied: ops.length });
   } catch (err) {
     await client.query('ROLLBACK');
+    captureException(err, {
+      op: 'sync_upload',
+      owner_id: ownerId,
+      op_count: ops.length,
+      duration_ms: Math.round(performance.now() - started),
+    });
     console.error('upload failed:', err);
     res.status(500).json({ ok: false, error: String(err) });
   } finally {

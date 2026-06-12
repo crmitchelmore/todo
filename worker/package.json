@@ -12,6 +12,7 @@
     "test": "tsx --test src/*.test.ts"
   },
   "dependencies": {
+    "@sentry/node": "^10.57.0",
     "chrono-node": "^2.7.7",
     "pg": "^8.13.1"
   },

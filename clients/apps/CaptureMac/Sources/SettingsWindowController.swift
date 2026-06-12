@@ -20,6 +20,8 @@ final class TaxonomySettingsStore: ObservableObject {
     @Published var rules: [CategorisationRule] = []
     @Published var memories: [UserMemory] = []
     @Published var agentDevices: [AgentDevice] = []
+    @Published var agentDeviceMessage: String?
+    @Published var agentDeviceBusy = false
 
     private let taskStore: TaskStore
     private var watchers: [Task<Void, Never>] = []
@@ -125,19 +127,60 @@ final class TaxonomySettingsStore: ObservableObject {
     }
     func registerCurrentMac(harnessKind: AgentHarnessKind, harnessLabel: String?, capabilities: [String], selectedBackend: Bool) {
         Task {
+            agentDeviceBusy = true
+            agentDeviceMessage = "Registering this Mac…"
             let deviceName = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
-            try? await taskStore.upsertAgentDevice(
-                id: currentAgentDeviceId(),
-                deviceName: deviceName,
-                harnessKind: harnessKind,
-                harnessLabel: harnessLabel,
-                capabilities: capabilities,
-                selectedBackend: selectedBackend
-            )
+            let deviceId = currentAgentDeviceId()
+            do {
+                try await taskStore.upsertAgentDevice(
+                    id: deviceId,
+                    deviceName: deviceName,
+                    harnessKind: harnessKind,
+                    harnessLabel: harnessLabel,
+                    capabilities: capabilities,
+                    selectedBackend: selectedBackend
+                )
+                agentDeviceMessage = selectedBackend ? "Registered \(deviceName) as backend." : "Registered \(deviceName)."
+                CaptureObservability.wideEvent("mac.agent_device.registered", fields: [
+                    "device_id": deviceId,
+                    "harness_kind": harnessKind.rawValue,
+                    "selected_backend": selectedBackend ? "true" : "false"
+                ])
+            } catch {
+                let message = (error as? CaptureError)?.message ?? error.localizedDescription
+                agentDeviceMessage = "Registration failed: \(message)"
+                CaptureObservability.capture(error, operation: "mac_agent_device_register", fields: [
+                    "device_id": deviceId,
+                    "harness_kind": harnessKind.rawValue
+                ])
+            }
+            agentDeviceBusy = false
         }
     }
-    func selectAgentDevice(_ id: String) { Task { try? await taskStore.selectAgentBackendDevice(id: id) } }
-    func disableAgentDevice(_ id: String) { Task { try? await taskStore.disableAgentDevice(id: id) } }
+    func selectAgentDevice(_ id: String) {
+        Task {
+            do {
+                try await taskStore.selectAgentBackendDevice(id: id)
+                agentDeviceMessage = "Backend device selected."
+                CaptureObservability.wideEvent("mac.agent_device.selected", fields: ["device_id": id])
+            } catch {
+                agentDeviceMessage = "Selection failed: \((error as? CaptureError)?.message ?? error.localizedDescription)"
+                CaptureObservability.capture(error, operation: "mac_agent_device_select", fields: ["device_id": id])
+            }
+        }
+    }
+    func disableAgentDevice(_ id: String) {
+        Task {
+            do {
+                try await taskStore.disableAgentDevice(id: id)
+                agentDeviceMessage = "Device disabled."
+                CaptureObservability.wideEvent("mac.agent_device.disabled", fields: ["device_id": id])
+            } catch {
+                agentDeviceMessage = "Disable failed: \((error as? CaptureError)?.message ?? error.localizedDescription)"
+                CaptureObservability.capture(error, operation: "mac_agent_device_disable", fields: ["device_id": id])
+            }
+        }
+    }
 
     private func currentAgentDeviceId() -> String {
         if let id = UserDefaults.standard.string(forKey: Self.agentDeviceIdKey), !id.isEmpty { return id }
@@ -469,6 +512,13 @@ private struct AgentBackendSettingsView: View {
                     )
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(taxonomy.agentDeviceBusy)
+            }
+            if let message = taxonomy.agentDeviceMessage {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(message.localizedCaseInsensitiveContains("failed") ? .orange : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if taxonomy.agentDevices.isEmpty {
                 Text("No backend devices registered yet.")

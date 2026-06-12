@@ -6,8 +6,10 @@ import { consumeOAuthSessionFromUrl, isAuthenticated, onAuthChange } from './lib
 import { applyAppearance, getAppearance } from './lib/preferences';
 import { SignIn } from './components/SignIn';
 import App from './App';
+import { captureException, initObservability, wideEvent } from './observability';
 import './styles.css';
 
+initObservability();
 applyAppearance(getAppearance());
 
 function Root() {
@@ -19,7 +21,10 @@ function Root() {
   useEffect(() => {
     if (authed) {
       // Resets only when the account actually changed, otherwise keeps pending offline writes.
-      void prepareForActiveUser();
+      void prepareForActiveUser().catch((error) => {
+        captureException(error, { op: 'web_prepare_for_active_user' });
+        wideEvent('web.prepare_for_active_user.failed', { error_type: error instanceof Error ? error.name : typeof error });
+      });
     }
   }, [authed]);
 
