@@ -978,36 +978,65 @@ public final class TaskStore: @unchecked Sendable {
                 parameters: [now, ownerId, id]
             )
         }
-        try await db.execute(
-            sql: """
-            INSERT INTO \(AGENT_DEVICES_TABLE)
-                (id, owner_id, device_name, platform, status, is_selected_backend, harness_kind, harness_label, capabilities, last_seen_at, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                device_name = excluded.device_name,
-                platform = excluded.platform,
-                status = 'active',
-                is_selected_backend = excluded.is_selected_backend,
-                harness_kind = excluded.harness_kind,
-                harness_label = excluded.harness_label,
-                capabilities = excluded.capabilities,
-                last_seen_at = excluded.last_seen_at,
-                updated_at = excluded.updated_at
-            """,
-            parameters: [
-                id,
-                ownerId,
-                String(cleanedName.prefix(120)),
-                String(cleanedPlatform.prefix(40)),
-                selectedBackend ? 1 : 0,
-                harnessKind?.rawValue,
-                harnessLabel?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty.map { String($0.prefix(120)) },
-                TagsCodec.encode(capabilities),
-                now,
-                now,
-                now
-            ]
+        let name = String(cleanedName.prefix(120))
+        let platform = String(cleanedPlatform.prefix(40))
+        let label = harnessLabel?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty.map { String($0.prefix(120)) }
+        let encodedCapabilities = TagsCodec.encode(capabilities)
+        let existing = try await db.getOptional(
+            sql: "SELECT id FROM \(AGENT_DEVICES_TABLE) WHERE id = ? AND owner_id = ? LIMIT 1",
+            parameters: [id, ownerId],
+            mapper: { try $0.getString(name: "id") }
         )
+        if existing != nil {
+            try await db.execute(
+                sql: """
+                UPDATE \(AGENT_DEVICES_TABLE)
+                   SET device_name = ?,
+                       platform = ?,
+                       status = 'active',
+                       is_selected_backend = ?,
+                       harness_kind = ?,
+                       harness_label = ?,
+                       capabilities = ?,
+                       last_seen_at = ?,
+                       updated_at = ?
+                 WHERE id = ? AND owner_id = ?
+                """,
+                parameters: [
+                    name,
+                    platform,
+                    selectedBackend ? 1 : 0,
+                    harnessKind?.rawValue,
+                    label,
+                    encodedCapabilities,
+                    now,
+                    now,
+                    id,
+                    ownerId
+                ]
+            )
+        } else {
+            try await db.execute(
+                sql: """
+                INSERT INTO \(AGENT_DEVICES_TABLE)
+                    (id, owner_id, device_name, platform, status, is_selected_backend, harness_kind, harness_label, capabilities, last_seen_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)
+                """,
+                parameters: [
+                    id,
+                    ownerId,
+                    name,
+                    platform,
+                    selectedBackend ? 1 : 0,
+                    harnessKind?.rawValue,
+                    label,
+                    encodedCapabilities,
+                    now,
+                    now,
+                    now
+                ]
+            )
+        }
         return id
     }
 
