@@ -34,6 +34,8 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
     private let attemptButton = NSButton(title: "Attempt", target: nil, action: nil)
     private let handoffStatusLabel = NSTextField(labelWithString: "")
     private let historyStack = NSStackView()
+    private var fullWidthSections: [NSView] = []
+    private var wrappingFields: [NSTextField] = []
 
     private var currentTask: TaskItem?
     private var currentTaskId: String?
@@ -55,6 +57,11 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     deinit { feasibilityTask?.cancel() }
+
+    override func layout() {
+        super.layout()
+        updateWrappingWidths()
+    }
 
     func applyTheme() {
         layer?.backgroundColor = NSColor.clear.cgColor
@@ -231,9 +238,10 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         handoffStatusLabel.font = Theme.display(12, .regular)
         handoffStatusLabel.textColor = Theme.textTertiary
 
+        rollupStack.translatesAutoresizingMaskIntoConstraints = false
         rollupStack.orientation = .vertical
         rollupStack.spacing = 8
-        rollupStack.alignment = .leading
+        rollupStack.alignment = .width
         rollupStack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
         Theme.card(rollupStack, color: Theme.surfaceHi)
         rollupSummary.font = Theme.display(13, .semibold)
@@ -263,30 +271,30 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         handoffActions.alignment = .firstBaseline
         handoffActions.distribution = .fill
 
-        formView.addArrangedSubview(card([
+        formView.addArrangedSubview(fullWidthSection(card([
             stateLabel,
             titleField,
             actionRow
-        ], color: Theme.surfaceRaised))
-        formView.addArrangedSubview(rollupStack)
-        formView.addArrangedSubview(card([
+        ], color: Theme.surfaceRaised)))
+        formView.addArrangedSubview(fullWidthSection(rollupStack))
+        formView.addArrangedSubview(fullWidthSection(card([
             sectionTitle("Structure"),
             row(label: "Due", views: [dueEnabled, duePicker]),
             row(label: "Calendar", views: [feasibilityLabel]),
             row(label: "Category", views: [categoryBox]),
             row(label: "Priority", views: [priorityPopup]),
             row(label: "Tags", views: [tagsField])
-        ]))
-        formView.addArrangedSubview(card([
+        ])))
+        formView.addArrangedSubview(fullWidthSection(card([
             sectionTitle("Expansion"),
             notesScroll
-        ]))
-        formView.addArrangedSubview(card([
+        ])))
+        formView.addArrangedSubview(fullWidthSection(card([
             sectionTitle("AI + activity"),
             row(label: "AI loop", views: [handoffField]),
             handoffActions,
             historyStack
-        ]))
+        ])))
 
         NSLayoutConstraint.activate([
             emptyView.centerXAnchor.constraint(equalTo: centerXAnchor),
@@ -299,6 +307,9 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
             categoryBox.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
             tagsField.widthAnchor.constraint(greaterThanOrEqualToConstant: 240)
         ])
+        for section in fullWidthSections {
+            section.widthAnchor.constraint(equalTo: formView.widthAnchor, constant: -(formView.edgeInsets.left + formView.edgeInsets.right)).isActive = true
+        }
     }
 
     private func populate(_ task: TaskItem) {
@@ -343,10 +354,12 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
 
     private func rebuildHistory(_ events: [TaskEvent], attachments: [TaskAttachment]) {
         historyStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        wrappingFields.removeAll()
         guard !events.isEmpty || !attachments.isEmpty else {
             let empty = NSTextField(wrappingLabelWithString: "No synced history yet. Capture, confirmation, edits and AI updates appear here.")
             empty.font = Theme.display(12, .regular)
             empty.textColor = Theme.textTertiary
+            registerWrappingField(empty)
             historyStack.addArrangedSubview(empty)
             return
         }
@@ -418,6 +431,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         body.isHidden = (event.body ?? "").isEmpty
         body.maximumNumberOfLines = 0
         body.lineBreakMode = .byWordWrapping
+        registerWrappingField(body)
 
         let text = NSStackView(views: [head, body])
         text.orientation = .vertical
@@ -441,6 +455,9 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
 
     private func card(_ views: [NSView], color: NSColor = Theme.surfaceHi) -> NSView {
         let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        container.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         Theme.card(container, color: color)
         let stack = NSStackView(views: views)
         stack.orientation = .vertical
@@ -456,6 +473,14 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
             stack.bottomAnchor.constraint(equalTo: container.bottomAnchor)
         ])
         return container
+    }
+
+    private func fullWidthSection(_ view: NSView) -> NSView {
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        fullWidthSections.append(view)
+        return view
     }
 
     private func row(label text: String, views: [NSView]) -> NSStackView {
@@ -477,7 +502,24 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         row.alignment = .firstBaseline
         row.spacing = 10
         row.distribution = .fill
+        row.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        row.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return row
+    }
+
+    private func registerWrappingField(_ field: NSTextField) {
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        wrappingFields.append(field)
+        updateWrappingWidths()
+    }
+
+    private func updateWrappingWidths() {
+        let labelAndIconSpace: CGFloat = 132
+        let available = max(220, bounds.width - formView.edgeInsets.left - formView.edgeInsets.right - labelAndIconSpace)
+        for field in wrappingFields {
+            field.preferredMaxLayoutWidth = available
+        }
     }
 
     private func form() -> MacTaskDetailForm {
