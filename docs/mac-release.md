@@ -40,7 +40,8 @@ The **Release macOS App** workflow (`.github/workflows/release-mac.yml`) then:
    Development certificates for routine releases.
 3. Exports + signs for **Developer ID** using the App Store Connect API key.
 4. Notarises with `notarytool` (API key) and staples the ticket.
-5. Zips the stapled app, generates a signed `appcast.xml`.
+5. Zips the stapled app, generates a signed `appcast.xml` whose enclosure URL points at the same
+   GitHub release tag that owns the signed ZIP asset.
 6. Publishes `Capture-<version>.zip` + `appcast.xml` as GitHub release assets.
 
 ### Required secrets

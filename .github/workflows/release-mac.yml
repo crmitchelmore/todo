@@ -259,7 +259,8 @@ jobs:
             "${{ steps.version.outputs.version }}" \
             "${{ steps.version.outputs.build }}" \
             "$ZIP_PATH" \
-            "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/appcast.xml"
+            "$SPARKLE_PRIVATE_KEY" \
+            "${{ steps.version.outputs.tag }}" > "$RUNNER_TEMP/appcast.xml"
           echo "APPCAST_PATH=$RUNNER_TEMP/appcast.xml" >> "$GITHUB_ENV"
           cat "$RUNNER_TEMP/appcast.xml"
 
