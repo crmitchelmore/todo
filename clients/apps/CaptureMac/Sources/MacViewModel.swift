@@ -152,12 +152,19 @@ final class MacViewModel {
     func toggleFilter(_ name: String) {
         let key = name.lowercased()
         if tagFilter.contains(key) { tagFilter.remove(key) } else { tagFilter.insert(key) }
+        CaptureDiagnostics.record(
+            category: "ui",
+            name: "task.filter.toggled",
+            message: "Task tag filter toggled",
+            fields: ["tag": name, "enabled": tagFilter.contains(key) ? "true" : "false"]
+        )
         notify()
     }
 
     func clearFilter() {
         guard !tagFilter.isEmpty else { return }
         tagFilter.removeAll()
+        CaptureDiagnostics.record(category: "ui", name: "task.filter.cleared", message: "Task tag filter cleared")
         notify()
     }
 
@@ -215,9 +222,18 @@ final class MacViewModel {
         tasks.append(t)
     }
 
-    func capture(_ text: String, attachments: [TaskAttachmentDraft] = []) {
-        if ingestIfList(text) { return }
+    func capture(_ text: String, attachments: [TaskAttachmentDraft] = [], source: String = "main") {
+        let context = CaptureDiagnostics.actionStarted(
+            "Capture task",
+            fields: ["source": source, "attachment_count": "\(attachments.count)", "text_chars": "\(text.count)"]
+        )
+        let startedAt = Date()
+        if ingestIfList(text) {
+            CaptureDiagnostics.actionCompleted(context, startedAt: startedAt, fields: ["handled_as": "list"])
+            return
+        }
         store.capture(text, attachments: attachments)
+        CaptureDiagnostics.actionCompleted(context, startedAt: startedAt)
     }
 
     /// If `text` is a markdown / checkbox list, ingest each line as its own item (nested lines
@@ -226,26 +242,38 @@ final class MacViewModel {
     @discardableResult
     func ingestIfList(_ text: String) -> Bool {
         guard let items = store.detectList(text) else { return false }
+        let context = CaptureDiagnostics.actionStarted("Capture pasted list", fields: ["item_count": "\(items.count)"])
+        let startedAt = Date()
         store.captureBatch(items)
+        CaptureDiagnostics.actionCompleted(context, startedAt: startedAt)
         return true
     }
 
     func confirm(_ item: TaskItem) {
         // Quick path: accept on-device suggestions as-is.
         Task {
-            try? await store.confirm(
-                id: item.id,
-                title: item.title,
-                dueAt: item.suggestedDueAt,
-                category: item.suggestedCategory,
-                tags: item.tags
-            )
-            self.refreshTaskSnapshots(reason: "confirm")
+            let context = CaptureDiagnostics.actionStarted("Confirm task", fields: taskFields(item))
+            let startedAt = Date()
+            do {
+                try await store.confirm(
+                    id: item.id,
+                    title: item.title,
+                    dueAt: item.suggestedDueAt,
+                    category: item.suggestedCategory,
+                    tags: item.tags
+                )
+                CaptureDiagnostics.actionCompleted(context, startedAt: startedAt)
+                self.refreshTaskSnapshots(reason: "confirm")
+            } catch {
+                CaptureDiagnostics.actionFailed(context, startedAt: startedAt, error: error)
+                NSLog("[Capture] Confirm failed: \(error)")
+            }
         }
     }
 
     func select(_ item: TaskItem) {
         guard selectedTask?.id != item.id else { return }
+        CaptureDiagnostics.record(category: "ui", name: "task.selected", message: "Task selected", fields: taskFields(item))
         detailTasks.forEach { $0.cancel() }
         detailTasks.removeAll()
         selectedTask = item
@@ -340,46 +368,70 @@ final class MacViewModel {
     func saveDetail(_ form: MacTaskDetailForm) {
         guard let item = selectedTask else { return }
         Task {
-            try? await store.updateTask(
-                id: item.id,
-                title: form.title,
-                notes: form.notes,
-                dueAt: form.dueAt,
-                category: form.category,
-                tags: form.tags,
-                priority: form.priority
-            )
+            let context = CaptureDiagnostics.actionStarted("Save task detail", fields: taskFields(item))
+            let startedAt = Date()
+            do {
+                try await store.updateTask(
+                    id: item.id,
+                    title: form.title,
+                    notes: form.notes,
+                    dueAt: form.dueAt,
+                    category: form.category,
+                    tags: form.tags,
+                    priority: form.priority
+                )
+                CaptureDiagnostics.actionCompleted(context, startedAt: startedAt)
+            } catch {
+                CaptureDiagnostics.actionFailed(context, startedAt: startedAt, error: error)
+                NSLog("[Capture] Save detail failed: \(error)")
+            }
         }
     }
 
     func confirmDetail(_ form: MacTaskDetailForm) {
         guard let item = selectedTask else { return }
         Task {
-            try? await store.updateTask(
-                id: item.id,
-                title: form.title,
-                notes: form.notes,
-                dueAt: form.dueAt,
-                category: form.category,
-                tags: form.tags,
-                priority: form.priority
-            )
-            try? await store.confirm(
-                id: item.id,
-                title: form.title,
-                dueAt: form.dueAt,
-                category: form.category,
-                tags: form.tags,
-                notes: form.notes,
-                priority: form.priority
-            )
+            let context = CaptureDiagnostics.actionStarted("Confirm task detail", fields: taskFields(item))
+            let startedAt = Date()
+            do {
+                try await store.updateTask(
+                    id: item.id,
+                    title: form.title,
+                    notes: form.notes,
+                    dueAt: form.dueAt,
+                    category: form.category,
+                    tags: form.tags,
+                    priority: form.priority
+                )
+                try await store.confirm(
+                    id: item.id,
+                    title: form.title,
+                    dueAt: form.dueAt,
+                    category: form.category,
+                    tags: form.tags,
+                    notes: form.notes,
+                    priority: form.priority
+                )
+                CaptureDiagnostics.actionCompleted(context, startedAt: startedAt)
+            } catch {
+                CaptureDiagnostics.actionFailed(context, startedAt: startedAt, error: error)
+                NSLog("[Capture] Confirm detail failed: \(error)")
+            }
         }
     }
 
     func reject(_ item: TaskItem) {
         Task {
-            try? await store.reject(id: item.id)
-            self.refreshTaskSnapshots(reason: "reject")
+            let context = CaptureDiagnostics.actionStarted("Reject task", fields: taskFields(item))
+            let startedAt = Date()
+            do {
+                try await store.reject(id: item.id)
+                CaptureDiagnostics.actionCompleted(context, startedAt: startedAt)
+                self.refreshTaskSnapshots(reason: "reject")
+            } catch {
+                CaptureDiagnostics.actionFailed(context, startedAt: startedAt, error: error)
+                NSLog("[Capture] Reject failed: \(error)")
+            }
         }
     }
 
@@ -390,25 +442,60 @@ final class MacViewModel {
     }
 
     func setDone(_ item: TaskItem, _ done: Bool) {
-        Task { try? await store.setDone(id: item.id, done: done) }
+        Task {
+            let context = CaptureDiagnostics.actionStarted(done ? "Complete task" : "Reopen task", fields: taskFields(item))
+            let startedAt = Date()
+            do {
+                try await store.setDone(id: item.id, done: done)
+                CaptureDiagnostics.actionCompleted(context, startedAt: startedAt)
+            } catch {
+                CaptureDiagnostics.actionFailed(context, startedAt: startedAt, error: error)
+                NSLog("[Capture] Set done failed: \(error)")
+            }
+        }
     }
 
     /// Set or clear a task's due date (inline date editing on an active row).
     func setDue(_ item: TaskItem, _ date: Date?) {
-        Task { try? await store.setDue(id: item.id, dueAt: date) }
+        Task {
+            let fields = taskFields(item).merging(["has_due_at": date == nil ? "false" : "true"]) { first, _ in first }
+            let context = CaptureDiagnostics.actionStarted("Set task due date", fields: fields)
+            let startedAt = Date()
+            do {
+                try await store.setDue(id: item.id, dueAt: date)
+                CaptureDiagnostics.actionCompleted(context, startedAt: startedAt)
+            } catch {
+                CaptureDiagnostics.actionFailed(context, startedAt: startedAt, error: error)
+                NSLog("[Capture] Set due failed: \(error)")
+            }
+        }
     }
 
     func requestAgentHandoff(mode: TaskStore.AgentHandoffMode, instructions: String?) {
         guard let item = selectedTask else { return }
         Task {
+            let fields = taskFields(item).merging(["mode": mode.rawValue, "has_instructions": instructions == nil ? "false" : "true"]) { first, _ in first }
+            let context = CaptureDiagnostics.actionStarted("AI \(mode.rawValue) handoff", fields: fields)
+            let startedAt = Date()
             do {
                 _ = try await store.requestAgentHandoff(taskId: item.id, mode: mode, instructions: instructions)
+                CaptureDiagnostics.actionCompleted(context, startedAt: startedAt)
                 try? await Task.sleep(nanoseconds: 400_000_000)
                 await MainActor.run { self.refreshTaskSnapshots(reason: "agent handoff") }
             } catch {
+                CaptureDiagnostics.actionFailed(context, startedAt: startedAt, error: error)
                 NSLog("[Capture] Failed to request agent handoff: \(error)")
             }
         }
+    }
+
+    private func taskFields(_ item: TaskItem) -> [String: String] {
+        [
+            "task_id": item.id,
+            "status": item.status.rawValue,
+            "has_due_at": item.dueAt == nil ? "false" : "true",
+            "tag_count": "\(item.tags.count)"
+        ]
     }
 
     deinit {

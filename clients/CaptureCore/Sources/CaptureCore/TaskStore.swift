@@ -33,19 +33,58 @@ public final class TaskStore: @unchecked Sendable {
     }
 
     public func connect() async throws {
-        try await db.connect(connector: connector)
+        let startedAt = Date()
+        do {
+            try await db.connect(connector: connector)
+            CaptureDiagnostics.record(
+                category: "sync",
+                name: "sync.connect.succeeded",
+                message: "PowerSync connected",
+                durationMs: Int(Date().timeIntervalSince(startedAt) * 1_000)
+            )
+        } catch {
+            CaptureDiagnostics.record(
+                severity: .error,
+                category: "sync",
+                name: "sync.connect.failed",
+                message: error.localizedDescription,
+                durationMs: Int(Date().timeIntervalSince(startedAt) * 1_000),
+                fields: ["error_type": String(describing: type(of: error))]
+            )
+            throw error
+        }
     }
 
     /// Restart the streaming sync connection while preserving local data and pending uploads.
     /// The PowerSync coordinator safely replaces an existing connection when `connect` is called,
     /// but explicitly disconnecting first clears a stale streaming task after network resets.
     public func reconnect() async throws {
-        try await db.disconnect()
-        try await db.connect(connector: connector)
+        let startedAt = Date()
+        do {
+            try await db.disconnect()
+            try await db.connect(connector: connector)
+            CaptureDiagnostics.record(
+                category: "sync",
+                name: "sync.reconnect.succeeded",
+                message: "PowerSync reconnected",
+                durationMs: Int(Date().timeIntervalSince(startedAt) * 1_000)
+            )
+        } catch {
+            CaptureDiagnostics.record(
+                severity: .error,
+                category: "sync",
+                name: "sync.reconnect.failed",
+                message: error.localizedDescription,
+                durationMs: Int(Date().timeIntervalSince(startedAt) * 1_000),
+                fields: ["error_type": String(describing: type(of: error))]
+            )
+            throw error
+        }
     }
 
     public func disconnect() async throws {
         try await db.disconnect()
+        CaptureDiagnostics.record(category: "sync", name: "sync.disconnect", message: "PowerSync disconnected")
     }
 
     @discardableResult
@@ -67,7 +106,20 @@ public final class TaskStore: @unchecked Sendable {
             "instructions": cleanedInstructions ?? NSNull()
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let startedAt = CaptureDiagnostics.recordHTTPRequestStart(
+            request,
+            operation: "agent.handoff.\(mode.rawValue)",
+            requestBytes: request.httpBody?.count
+        )
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            CaptureDiagnostics.recordHTTPResponse(nil, data: nil, operation: "agent.handoff.\(mode.rawValue)", startedAt: startedAt, error: error)
+            throw error
+        }
+        CaptureDiagnostics.recordHTTPResponse(response, data: data, operation: "agent.handoff.\(mode.rawValue)", startedAt: startedAt)
         guard let http = response as? HTTPURLResponse else { throw CaptureError.upload("agent handoff failed: no response") }
         let decoded = try? JSONDecoder().decode(AgentHandoffResponse.self, from: data)
         guard (200..<300).contains(http.statusCode), decoded?.ok == true, let requestId = decoded?.requestId else {
@@ -81,6 +133,12 @@ public final class TaskStore: @unchecked Sendable {
     /// never replay or leak into another account's synced view.
     public func resetLocalData() async throws {
         try await db.disconnectAndClear()
+        CaptureDiagnostics.record(
+            severity: .warning,
+            category: "local_store",
+            name: "local_store.reset",
+            message: "Local SQLite cache and pending uploads cleared"
+        )
     }
 
     private struct AgentHandoffResponse: Decodable {
@@ -129,6 +187,12 @@ public final class TaskStore: @unchecked Sendable {
     public func clearActiveUser() async {
         try? await resetLocalData()
         UserDefaults.standard.removeObject(forKey: Self.lastOwnerKey)
+        CaptureDiagnostics.record(
+            severity: .warning,
+            category: "auth",
+            name: "auth.local_user_cleared",
+            message: "Local active user marker cleared"
+        )
     }
 
     public func localSyncDiagnostics() async throws -> LocalSyncDiagnostics {
@@ -207,16 +271,38 @@ public final class TaskStore: @unchecked Sendable {
         let effectiveTitle = title.isEmpty ? (attachments.first?.filename ?? "Image attachment") : title
         guard !effectiveTitle.isEmpty else { return id }
         let ownerId = self.ownerId
+        CaptureDiagnostics.record(
+            category: "local_store",
+            name: "task.capture.requested",
+            message: "Capture requested",
+            fields: ["task_id": id, "attachment_count": "\(attachments.count)", "title_chars": "\(effectiveTitle.count)"]
+        )
         Task.detached { [db] in
             let now = ISO8601.string(Date())
-            _ = try? await db.execute(
-                sql: """
-                INSERT INTO \(TASKS_TABLE)
-                    (id, owner_id, title, status, source, created_at, updated_at)
-                VALUES (?, ?, ?, 'proposed', 'capture', ?, ?)
-                """,
-                parameters: [id, ownerId, effectiveTitle, now, now]
-            )
+            do {
+                try await db.execute(
+                    sql: """
+                    INSERT INTO \(TASKS_TABLE)
+                        (id, owner_id, title, status, source, created_at, updated_at)
+                    VALUES (?, ?, ?, 'proposed', 'capture', ?, ?)
+                    """,
+                    parameters: [id, ownerId, effectiveTitle, now, now]
+                )
+                CaptureDiagnostics.record(
+                    category: "local_store",
+                    name: "task.capture.inserted",
+                    message: "Captured task inserted locally",
+                    fields: ["task_id": id, "owner_id": ownerId]
+                )
+            } catch {
+                CaptureDiagnostics.record(
+                    severity: .error,
+                    category: "local_store",
+                    name: "task.capture.failed",
+                    message: error.localizedDescription,
+                    fields: ["task_id": id, "error_type": String(describing: type(of: error))]
+                )
+            }
             await Self.insertAttachments(db: db, ownerId: ownerId, taskId: id, attachments: attachments, createdAt: now)
             await Self.enrich(db: db, id: id, title: effectiveTitle)
         }
@@ -306,6 +392,12 @@ public final class TaskStore: @unchecked Sendable {
         let allTags = TagsCodec.normalize(prepared.flatMap { $0.item.tags })
         let ownerId = self.ownerId
         let idBySourceIndex = Dictionary(uniqueKeysWithValues: prepared.map { ($0.sourceIndex, $0.id) })
+        CaptureDiagnostics.record(
+            category: "local_store",
+            name: "task.capture_batch.requested",
+            message: "Batch capture requested",
+            fields: ["item_count": "\(prepared.count)", "tag_count": "\(allTags.count)"]
+        )
         Task.detached { [db] in
             await Self.ensureTags(db: db, ownerId: ownerId, names: allTags)
             for entry in prepared {
@@ -336,6 +428,12 @@ public final class TaskStore: @unchecked Sendable {
                     await Self.enrich(db: db, id: id, title: item.title)
                 }
             }
+            CaptureDiagnostics.record(
+                category: "local_store",
+                name: "task.capture_batch.completed",
+                message: "Batch capture inserted locally",
+                fields: ["item_count": "\(prepared.count)"]
+            )
         }
         return prepared.map(\.id)
     }
@@ -355,29 +453,35 @@ public final class TaskStore: @unchecked Sendable {
         let now = ISO8601.string(Date())
         if let tags { await Self.ensureTags(db: db, ownerId: ownerId, names: TagsCodec.normalize(tags)) }
         let safePriority = priority.flatMap { (0...4).contains($0) ? $0 : nil }
-        try await db.execute(
-            sql: """
-            UPDATE \(TASKS_TABLE)
-              SET status = 'active',
-                   title = COALESCE(?, title),
-                   notes = COALESCE(?, notes),
-                   due_at = ?, category = ?, tags = COALESCE(?, tags),
-                   priority = ?,
-                   confirmed_at = ?, updated_at = ?
-             WHERE id = ?
-            """,
-            parameters: [
-               title,
-               notes?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
-               dueAt.map(ISO8601.string),
-               category,
-               tags.map { TagsCodec.encode($0) ?? "[]" },
-               safePriority,
-               now,
-               now,
-               id
-            ]
-        )
+        do {
+            try await db.execute(
+                sql: """
+                UPDATE \(TASKS_TABLE)
+                  SET status = 'active',
+                       title = COALESCE(?, title),
+                       notes = COALESCE(?, notes),
+                       due_at = ?, category = ?, tags = COALESCE(?, tags),
+                       priority = ?,
+                       confirmed_at = ?, updated_at = ?
+                 WHERE id = ?
+                """,
+                parameters: [
+                   title,
+                   notes?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+                   dueAt.map(ISO8601.string),
+                   category,
+                   tags.map { TagsCodec.encode($0) ?? "[]" },
+                   safePriority,
+                   now,
+                   now,
+                   id
+                ]
+            )
+            CaptureDiagnostics.record(category: "local_store", name: "task.confirmed", message: "Task confirmed", fields: ["task_id": id])
+        } catch {
+            CaptureDiagnostics.record(severity: .error, category: "local_store", name: "task.confirm.failed", message: error.localizedDescription, fields: ["task_id": id, "error_type": String(describing: type(of: error))])
+            throw error
+        }
     }
 
     /// Replace the tag set on an existing task (used by inline tag editing on a row).
@@ -385,19 +489,31 @@ public final class TaskStore: @unchecked Sendable {
         let normalized = TagsCodec.normalize(tags)
         await Self.ensureTags(db: db, ownerId: ownerId, names: normalized)
         let now = ISO8601.string(Date())
-        try await db.execute(
-            sql: "UPDATE \(TASKS_TABLE) SET tags = ?, updated_at = ? WHERE id = ?",
-            parameters: [TagsCodec.encode(normalized) ?? "[]", now, id]
-        )
+        do {
+            try await db.execute(
+                sql: "UPDATE \(TASKS_TABLE) SET tags = ?, updated_at = ? WHERE id = ?",
+                parameters: [TagsCodec.encode(normalized) ?? "[]", now, id]
+            )
+            CaptureDiagnostics.record(category: "local_store", name: "task.tags.updated", message: "Task tags updated", fields: ["task_id": id, "tag_count": "\(normalized.count)"])
+        } catch {
+            CaptureDiagnostics.record(severity: .error, category: "local_store", name: "task.tags.failed", message: error.localizedDescription, fields: ["task_id": id, "error_type": String(describing: type(of: error))])
+            throw error
+        }
     }
 
     /// Set or clear the due date on any task (used by inline date editing on a row).
     public func setDue(id: String, dueAt: Date?) async throws {
         let now = ISO8601.string(Date())
-        try await db.execute(
-            sql: "UPDATE \(TASKS_TABLE) SET due_at = ?, updated_at = ? WHERE id = ?",
-            parameters: [dueAt.map(ISO8601.string), now, id]
-        )
+        do {
+            try await db.execute(
+                sql: "UPDATE \(TASKS_TABLE) SET due_at = ?, updated_at = ? WHERE id = ?",
+                parameters: [dueAt.map(ISO8601.string), now, id]
+            )
+            CaptureDiagnostics.record(category: "local_store", name: "task.due.updated", message: dueAt == nil ? "Task due date cleared" : "Task due date set", fields: ["task_id": id])
+        } catch {
+            CaptureDiagnostics.record(severity: .error, category: "local_store", name: "task.due.failed", message: error.localizedDescription, fields: ["task_id": id, "error_type": String(describing: type(of: error))])
+            throw error
+        }
     }
 
     /// Consolidated detail-pane save: one write for the editable properties so inspectors do not
@@ -414,45 +530,63 @@ public final class TaskStore: @unchecked Sendable {
         if let tags { await Self.ensureTags(db: db, ownerId: ownerId, names: TagsCodec.normalize(tags)) }
         let safePriority = priority.flatMap { (0...4).contains($0) ? $0 : nil }
         let cleanedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
-        try await db.execute(
-            sql: """
-            UPDATE \(TASKS_TABLE)
-               SET title = COALESCE(?, title),
-                   notes = ?,
-                   due_at = ?,
-                   category = ?,
-                   tags = COALESCE(?, tags),
-                   priority = ?,
-                   updated_at = ?
-             WHERE id = ?
-            """,
-            parameters: [
-                (cleanedTitle?.isEmpty == false) ? cleanedTitle : nil,
-                notes?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
-                dueAt.map(ISO8601.string),
-                category?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
-                tags.map { TagsCodec.encode($0) ?? "[]" },
-                safePriority,
-                ISO8601.string(Date()),
-                id
-            ]
-        )
+        do {
+            try await db.execute(
+                sql: """
+                UPDATE \(TASKS_TABLE)
+                   SET title = COALESCE(?, title),
+                       notes = ?,
+                       due_at = ?,
+                       category = ?,
+                       tags = COALESCE(?, tags),
+                       priority = ?,
+                       updated_at = ?
+                 WHERE id = ?
+                """,
+                parameters: [
+                    (cleanedTitle?.isEmpty == false) ? cleanedTitle : nil,
+                    notes?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+                    dueAt.map(ISO8601.string),
+                    category?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+                    tags.map { TagsCodec.encode($0) ?? "[]" },
+                    safePriority,
+                    ISO8601.string(Date()),
+                    id
+                ]
+            )
+            CaptureDiagnostics.record(category: "local_store", name: "task.updated", message: "Task detail updated", fields: ["task_id": id])
+        } catch {
+            CaptureDiagnostics.record(severity: .error, category: "local_store", name: "task.update.failed", message: error.localizedDescription, fields: ["task_id": id, "error_type": String(describing: type(of: error))])
+            throw error
+        }
     }
 
     public func reject(id: String) async throws {
         let now = ISO8601.string(Date())
-        try await db.execute(
-            sql: "UPDATE \(TASKS_TABLE) SET status = 'cancelled', updated_at = ? WHERE id = ?",
-            parameters: [now, id]
-        )
+        do {
+            try await db.execute(
+                sql: "UPDATE \(TASKS_TABLE) SET status = 'cancelled', updated_at = ? WHERE id = ?",
+                parameters: [now, id]
+            )
+            CaptureDiagnostics.record(category: "local_store", name: "task.rejected", message: "Task rejected", fields: ["task_id": id])
+        } catch {
+            CaptureDiagnostics.record(severity: .error, category: "local_store", name: "task.reject.failed", message: error.localizedDescription, fields: ["task_id": id, "error_type": String(describing: type(of: error))])
+            throw error
+        }
     }
 
     public func setDone(id: String, done: Bool) async throws {
         let now = ISO8601.string(Date())
-        try await db.execute(
-            sql: "UPDATE \(TASKS_TABLE) SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?",
-            parameters: [done ? "done" : "active", done ? now : nil, now, id]
-        )
+        do {
+            try await db.execute(
+                sql: "UPDATE \(TASKS_TABLE) SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?",
+                parameters: [done ? "done" : "active", done ? now : nil, now, id]
+            )
+            CaptureDiagnostics.record(category: "local_store", name: done ? "task.completed" : "task.reopened", message: done ? "Task marked done" : "Task reopened", fields: ["task_id": id])
+        } catch {
+            CaptureDiagnostics.record(severity: .error, category: "local_store", name: "task.done.failed", message: error.localizedDescription, fields: ["task_id": id, "error_type": String(describing: type(of: error))])
+            throw error
+        }
     }
 
     // MARK: - Reactive reads
@@ -982,78 +1116,112 @@ public final class TaskStore: @unchecked Sendable {
         let platform = String(cleanedPlatform.prefix(40))
         let label = harnessLabel?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty.map { String($0.prefix(120)) }
         let encodedCapabilities = TagsCodec.encode(capabilities)
-        let existing = try await db.getOptional(
-            sql: "SELECT id FROM \(AGENT_DEVICES_TABLE) WHERE id = ? AND owner_id = ? LIMIT 1",
-            parameters: [id, ownerId],
-            mapper: { try $0.getString(name: "id") }
-        )
-        if existing != nil {
-            try await db.execute(
-                sql: """
-                UPDATE \(AGENT_DEVICES_TABLE)
-                   SET device_name = ?,
-                       platform = ?,
-                       status = 'active',
-                       is_selected_backend = ?,
-                       harness_kind = ?,
-                       harness_label = ?,
-                       capabilities = ?,
-                       last_seen_at = ?,
-                       updated_at = ?
-                 WHERE id = ? AND owner_id = ?
-                """,
-                parameters: [
-                    name,
-                    platform,
-                    selectedBackend ? 1 : 0,
-                    harnessKind?.rawValue,
-                    label,
-                    encodedCapabilities,
-                    now,
-                    now,
-                    id,
-                    ownerId
+        do {
+            let existing = try await db.getOptional(
+                sql: "SELECT id FROM \(AGENT_DEVICES_TABLE) WHERE id = ? AND owner_id = ? LIMIT 1",
+                parameters: [id, ownerId],
+                mapper: { try $0.getString(name: "id") }
+            )
+            if existing != nil {
+                try await db.execute(
+                    sql: """
+                    UPDATE \(AGENT_DEVICES_TABLE)
+                       SET device_name = ?,
+                           platform = ?,
+                           status = 'active',
+                           is_selected_backend = ?,
+                           harness_kind = ?,
+                           harness_label = ?,
+                           capabilities = ?,
+                           last_seen_at = ?,
+                           updated_at = ?
+                     WHERE id = ? AND owner_id = ?
+                    """,
+                    parameters: [
+                        name,
+                        platform,
+                        selectedBackend ? 1 : 0,
+                        harnessKind?.rawValue,
+                        label,
+                        encodedCapabilities,
+                        now,
+                        now,
+                        id,
+                        ownerId
+                    ]
+                )
+            } else {
+                try await db.execute(
+                    sql: """
+                    INSERT INTO \(AGENT_DEVICES_TABLE)
+                        (id, owner_id, device_name, platform, status, is_selected_backend, harness_kind, harness_label, capabilities, last_seen_at, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    parameters: [
+                        id,
+                        ownerId,
+                        name,
+                        platform,
+                        selectedBackend ? 1 : 0,
+                        harnessKind?.rawValue,
+                        label,
+                        encodedCapabilities,
+                        now,
+                        now,
+                        now
+                    ]
+                )
+            }
+            CaptureDiagnostics.record(
+                category: "local_store",
+                name: "agent_device.upserted",
+                message: existing == nil ? "Agent backend device registered" : "Agent backend device updated",
+                fields: [
+                    "device_id": id,
+                    "selected_backend": selectedBackend ? "true" : "false",
+                    "harness_kind": harnessKind?.rawValue ?? "none",
+                    "capability_count": "\(capabilities.count)"
                 ]
             )
-        } else {
-            try await db.execute(
-                sql: """
-                INSERT INTO \(AGENT_DEVICES_TABLE)
-                    (id, owner_id, device_name, platform, status, is_selected_backend, harness_kind, harness_label, capabilities, last_seen_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)
-                """,
-                parameters: [
-                    id,
-                    ownerId,
-                    name,
-                    platform,
-                    selectedBackend ? 1 : 0,
-                    harnessKind?.rawValue,
-                    label,
-                    encodedCapabilities,
-                    now,
-                    now,
-                    now
-                ]
+        } catch {
+            CaptureDiagnostics.record(
+                severity: .error,
+                category: "local_store",
+                name: "agent_device.upsert.failed",
+                message: error.localizedDescription,
+                fields: ["device_id": id, "error_type": String(describing: type(of: error))]
             )
+            throw error
         }
         return id
     }
 
     public func selectAgentBackendDevice(id: String) async throws {
         let now = ISO8601.string(Date())
-        try await db.execute(sql: "UPDATE \(AGENT_DEVICES_TABLE) SET is_selected_backend = 0, updated_at = ? WHERE owner_id = ?", parameters: [now, ownerId])
-        try await db.execute(
-            sql: "UPDATE \(AGENT_DEVICES_TABLE) SET is_selected_backend = 1, status = 'active', updated_at = ? WHERE id = ? AND owner_id = ?",
-            parameters: [now, id, ownerId]
-        )
+        do {
+            try await db.execute(sql: "UPDATE \(AGENT_DEVICES_TABLE) SET is_selected_backend = 0, updated_at = ? WHERE owner_id = ?", parameters: [now, ownerId])
+            try await db.execute(
+                sql: "UPDATE \(AGENT_DEVICES_TABLE) SET is_selected_backend = 1, status = 'active', updated_at = ? WHERE id = ? AND owner_id = ?",
+                parameters: [now, id, ownerId]
+            )
+            CaptureDiagnostics.record(category: "local_store", name: "agent_device.selected", message: "Agent backend device selected", fields: ["device_id": id])
+        } catch {
+            CaptureDiagnostics.record(severity: .error, category: "local_store", name: "agent_device.select.failed", message: error.localizedDescription, fields: ["device_id": id, "error_type": String(describing: type(of: error))])
+            throw error
+        }
     }
 
     public func disableAgentDevice(id: String) async throws {
-        try await db.execute(
-            sql: "UPDATE \(AGENT_DEVICES_TABLE) SET status = 'disabled', is_selected_backend = 0, updated_at = ? WHERE id = ? AND owner_id = ?",
-            parameters: [ISO8601.string(Date()), id, ownerId]
-        )
+        do {
+            try await db.execute(
+                sql: "UPDATE \(AGENT_DEVICES_TABLE) SET status = 'disabled', is_selected_backend = 0, updated_at = ? WHERE id = ? AND owner_id = ?",
+                parameters: [ISO8601.string(Date()), id, ownerId]
+            )
+            CaptureDiagnostics.record(category: "local_store", name: "agent_device.disabled", message: "Agent backend device disabled", fields: ["device_id": id])
+        } catch {
+            CaptureDiagnostics.record(severity: .error, category: "local_store", name: "agent_device.disable.failed", message: error.localizedDescription, fields: ["device_id": id, "error_type": String(describing: type(of: error))])
+            throw error
+        }
     }
 
     public func watchTags() throws -> AsyncThrowingStream<[Tag], Error> {

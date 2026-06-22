@@ -141,7 +141,7 @@ run_mac() {
   local app_path
   app_path="$(find "$ROOT/clients/apps/DerivedData/UIValidation/Build/Products" -name 'CaptureMac.app' -type d | head -1)"
   [[ -n "$app_path" ]] || { echo "CaptureMac.app not found"; exit 1; }
-  open -n "$app_path"
+  open -n "$app_path" --env CAPTURE_DISABLE_UPDATER=1
   local frontmost="" window_count=0
   for _ in {1..10}; do
     osascript -e "tell application \"System Events\" to set frontmost of (first process whose bundle identifier is \"$MAC_BUNDLE_ID\") to true" >/dev/null 2>&1 || true
@@ -161,7 +161,17 @@ run_mac() {
     echo "CaptureMac launched but no app window was visible." > "$ARTIFACT_ROOT/mac/frontmost.txt"
     exit 1
   fi
-  screencapture -x "$ARTIFACT_ROOT/mac/capture-mac.png" || {
+  local window_id
+  window_id="$(swift -e 'import CoreGraphics; let windows = (CGWindowListCopyWindowInfo(.optionOnScreenOnly, 0) as? [[String: Any]]) ?? []; let ids = windows.compactMap { window -> Int? in let owner = window[kCGWindowOwnerName as String] as? String ?? ""; let name = window[kCGWindowName as String] as? String ?? ""; guard (owner == "Capture" || owner == "CaptureMac"), name == "Capture" else { return nil }; return window[kCGWindowNumber as String] as? Int }; print(ids.max() ?? 0)' 2>/dev/null || echo 0)"
+  if [[ "${window_id:-0}" -gt 0 ]]; then
+    screencapture -x -l "$window_id" "$ARTIFACT_ROOT/mac/capture-mac.png" || {
+      echo "macOS window screenshot failed; falling back to full-screen capture." >&2
+      screencapture -x "$ARTIFACT_ROOT/mac/capture-mac.png"
+    }
+  else
+    screencapture -x "$ARTIFACT_ROOT/mac/capture-mac.png"
+  fi
+  [[ -s "$ARTIFACT_ROOT/mac/capture-mac.png" ]] || {
     echo "macOS screenshot failed; grant Screen Recording to the terminal/agent app and rerun." >&2
     exit 1
   }

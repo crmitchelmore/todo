@@ -165,30 +165,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.mainMenu = mainMenu
     }
 
-    @objc private func quickCapture() { quick.show() }
+    @objc private func quickCapture() {
+        CaptureDiagnostics.record(category: "ui", name: "menu.app.quick_capture", message: "App menu quick capture clicked")
+        quick.show()
+    }
 
-    @objc private func newCapture() { showMainWindow() }
+    @objc private func newCapture() {
+        CaptureDiagnostics.record(category: "ui", name: "menu.app.open_capture", message: "App menu open capture clicked")
+        showMainWindow()
+    }
 
-    @objc private func checkForUpdates() { updater.checkForUpdates(nil) }
+    @objc private func checkForUpdates() {
+        CaptureDiagnostics.record(category: "ui", name: "menu.app.check_updates", message: "Check for updates clicked")
+        updater.checkForUpdates(nil)
+    }
 
     @objc private func signOut() {
+        CaptureDiagnostics.record(category: "ui", name: "menu.app.sign_out", message: "Sign out clicked")
         Task {
+            let context = CaptureDiagnostics.actionStarted("Sign out")
+            let startedAt = Date()
             await auth.signOut()
             await model.store.clearActiveUser()
+            CaptureDiagnostics.actionCompleted(context, startedAt: startedAt)
             refreshAuthUI()
         }
     }
 
     @objc private func addPasskey() {
         guard auth.isAuthenticated else { return }
+        CaptureDiagnostics.record(category: "ui", name: "menu.app.add_passkey", message: "Add passkey clicked")
         showMainWindow()
         Task {
+            let context = CaptureDiagnostics.actionStarted("Add passkey")
+            let startedAt = Date()
             do {
                 let options = try await auth.beginPasskeyRegistration()
                 let registration = try await passkeys.register(options: options, anchor: window)
                 try await auth.finishPasskeyRegistration(registration)
+                CaptureDiagnostics.actionCompleted(context, startedAt: startedAt)
                 showPasskeyAlert(title: "Passkey added", message: "This Mac can now sign in to Capture with a passkey.")
             } catch {
+                CaptureDiagnostics.actionFailed(context, startedAt: startedAt, error: error)
                 showPasskeyAlert(title: "Passkey unavailable",
                                  message: (error as? CaptureError)?.message ?? error.localizedDescription)
             }
@@ -204,6 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func openSettings() {
+        CaptureDiagnostics.record(category: "ui", name: "menu.app.open_settings", message: "Open settings clicked")
         if settingsWindow == nil {
             settingsWindow = SettingsWindowController(
                 store: hotKeyStore,

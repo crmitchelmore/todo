@@ -63,7 +63,20 @@ public struct HTTPCaptureIngress: CaptureIngress {
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (_, resp) = try await session.data(for: req)
+        let startedAt = CaptureDiagnostics.recordHTTPRequestStart(
+            req,
+            operation: "capture.http_ingress",
+            requestBytes: req.httpBody?.count
+        )
+        let data: Data
+        let resp: URLResponse
+        do {
+            (data, resp) = try await session.data(for: req)
+        } catch {
+            CaptureDiagnostics.recordHTTPResponse(nil, data: nil, operation: "capture.http_ingress", startedAt: startedAt, error: error)
+            throw error
+        }
+        CaptureDiagnostics.recordHTTPResponse(resp, data: data, operation: "capture.http_ingress", startedAt: startedAt)
         guard let http = resp as? HTTPURLResponse else { throw CaptureIngressError.badStatus(-1) }
         guard (200..<300).contains(http.statusCode) else {
             throw CaptureIngressError.badStatus(http.statusCode)
@@ -94,6 +107,13 @@ public struct OutboxCaptureIngress: CaptureIngress {
         let url = dir.appendingPathComponent("\(input.id).json")
         let data = try JSONEncoder.captureISO.encode(input)
         try data.write(to: url, options: .atomic)
+        CaptureDiagnostics.record(
+            severity: .warning,
+            category: "outbox",
+            name: "outbox.capture.enqueued",
+            message: "Capture queued locally for retry",
+            fields: ["capture_id": input.id, "source": input.source, "bytes": "\(data.count)"]
+        )
     }
 
     /// Read and remove every pending capture (called by the main app to drain the queue).
@@ -107,6 +127,13 @@ public struct OutboxCaptureIngress: CaptureIngress {
             if let data = try? Data(contentsOf: file),
                let input = try? JSONDecoder.captureISO.decode(CaptureInput.self, from: data) {
                 out.append(input)
+                CaptureDiagnostics.record(
+                    severity: .info,
+                    category: "outbox",
+                    name: "outbox.capture.drained",
+                    message: "Capture loaded from local retry outbox",
+                    fields: ["capture_id": input.id, "source": input.source]
+                )
             }
             try? fileManager.removeItem(at: file)
         }
@@ -129,6 +156,16 @@ public struct ResilientCaptureIngress: CaptureIngress {
         do {
             try await http.capture(input)
         } catch {
+            CaptureDiagnostics.record(
+                severity: .warning,
+                category: "outbox",
+                name: "outbox.capture.fallback",
+                message: "HTTP capture failed; trying local outbox",
+                fields: [
+                    "error_type": String(describing: type(of: error)),
+                    "error_message": error.localizedDescription
+                ]
+            )
             if let outbox { try await outbox.capture(input) } else { throw error }
         }
     }

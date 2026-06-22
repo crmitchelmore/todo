@@ -120,14 +120,22 @@ final class SignInViewController: NSViewController {
 
     @objc private func modeChanged() {
         mode = segmented.selectedSegment == 0 ? .signIn : .register
+        CaptureDiagnostics.record(category: "ui", name: "auth.mode.changed", message: "Auth mode changed", fields: ["mode": mode == .signIn ? "sign_in" : "register"])
         submit.title = mode == .signIn ? "Sign In" : "Create Account"
         Theme.primary(submit, fontSize: 15)
         forgotButton.isHidden = mode != .signIn
         status.isHidden = true
     }
 
-    @objc private func forgotTapped() { present(purpose: .reset) }
-    @objc private func codeTapped() { present(purpose: .login) }
+    @objc private func forgotTapped() {
+        CaptureDiagnostics.record(category: "ui", name: "auth.forgot_password.clicked", message: "Forgot password clicked")
+        present(purpose: .reset)
+    }
+
+    @objc private func codeTapped() {
+        CaptureDiagnostics.record(category: "ui", name: "auth.email_code.clicked", message: "Email code sign-in clicked")
+        present(purpose: .login)
+    }
 
     @objc private func passkeyTapped() {
         guard let window = view.window else {
@@ -135,16 +143,21 @@ final class SignInViewController: NSViewController {
             return
         }
         let email = emailField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        CaptureDiagnostics.record(category: "ui", name: "auth.passkey.clicked", message: "Passkey sign-in clicked", fields: ["has_email": email.isEmpty ? "false" : "true"])
         status.isHidden = true
         setBusy(true)
         Task {
+            let context = CaptureDiagnostics.actionStarted("Passkey sign in", fields: ["has_email": email.isEmpty ? "false" : "true"])
+            let startedAt = Date()
             do {
                 let options = try await auth.beginPasskeySignIn(email: email.isEmpty ? nil : email)
                 let assertion = try await passkeys.signIn(options: options, anchor: window)
                 try await auth.finishPasskeySignIn(assertion, client: "mac")
+                CaptureDiagnostics.actionCompleted(context, startedAt: startedAt)
                 setBusy(false)
                 onSignedIn()
             } catch {
+                CaptureDiagnostics.actionFailed(context, startedAt: startedAt, error: error)
                 let message = (error as? CaptureError)?.message ?? error.localizedDescription
                 show(error: message)
             }
@@ -167,19 +180,29 @@ final class SignInViewController: NSViewController {
             show(error: "Password must be at least 8 characters.")
             return
         }
+        CaptureDiagnostics.record(
+            category: "ui",
+            name: mode == .register ? "auth.register.clicked" : "auth.sign_in.clicked",
+            message: mode == .register ? "Create account clicked" : "Sign in clicked",
+            fields: ["has_email": email.isEmpty ? "false" : "true"]
+        )
         status.isHidden = true
         setBusy(true)
         let currentMode = mode
         Task {
+            let context = CaptureDiagnostics.actionStarted(currentMode == .register ? "Register account" : "Sign in", fields: ["client": "mac"])
+            let startedAt = Date()
             do {
                 if currentMode == .register {
                     try await auth.register(email: email, password: password, client: "mac")
                 } else {
                     try await auth.signIn(email: email, password: password, client: "mac")
                 }
+                CaptureDiagnostics.actionCompleted(context, startedAt: startedAt)
                 setBusy(false)
                 onSignedIn()
             } catch {
+                CaptureDiagnostics.actionFailed(context, startedAt: startedAt, error: error)
                 let message = (error as? CaptureError)?.message ?? error.localizedDescription
                 show(error: message)
             }

@@ -90,27 +90,33 @@ final class TaxonomySettingsStore: ObservableObject {
         })
     }
 
-    func createCategory(_ name: String) { Task { try? await taskStore.createCategory(name: name) } }
-    func renameCategory(_ id: String, to name: String) { Task { try? await taskStore.renameCategory(id: id, to: name) } }
-    func recolorCategory(_ id: String, color: String) { Task { try? await taskStore.recolorCategory(id: id, color: color) } }
-    func deleteCategory(_ id: String) { Task { try? await taskStore.deleteCategory(id: id) } }
-    func createTag(_ name: String) { Task { try? await taskStore.createTag(name: name) } }
-    func renameTag(_ id: String, to name: String) { Task { try? await taskStore.renameTag(id: id, to: name) } }
-    func recolorTag(_ id: String, color: String) { Task { try? await taskStore.recolorTag(id: id, color: color) } }
-    func deleteTag(_ id: String) { Task { try? await taskStore.deleteTag(id: id) } }
+    func createCategory(_ name: String) { runSettingsAction("Create category", fields: ["name_chars": "\(name.count)"]) { try await self.taskStore.createCategory(name: name) } }
+    func renameCategory(_ id: String, to name: String) { runSettingsAction("Rename category", fields: ["category_id": id, "name_chars": "\(name.count)"]) { try await self.taskStore.renameCategory(id: id, to: name) } }
+    func recolorCategory(_ id: String, color: String) { runSettingsAction("Recolour category", fields: ["category_id": id, "color": color]) { try await self.taskStore.recolorCategory(id: id, color: color) } }
+    func deleteCategory(_ id: String) { runSettingsAction("Delete category", fields: ["category_id": id]) { try await self.taskStore.deleteCategory(id: id) } }
+    func createTag(_ name: String) { runSettingsAction("Create tag", fields: ["name_chars": "\(name.count)"]) { try await self.taskStore.createTag(name: name) } }
+    func renameTag(_ id: String, to name: String) { runSettingsAction("Rename tag", fields: ["tag_id": id, "name_chars": "\(name.count)"]) { try await self.taskStore.renameTag(id: id, to: name) } }
+    func recolorTag(_ id: String, color: String) { runSettingsAction("Recolour tag", fields: ["tag_id": id, "color": color]) { try await self.taskStore.recolorTag(id: id, color: color) } }
+    func deleteTag(_ id: String) { runSettingsAction("Delete tag", fields: ["tag_id": id]) { try await self.taskStore.deleteTag(id: id) } }
     func createRule(title: String, instructions: String, category: String?, tags: [String], enabled: Bool) {
-        Task { try? await taskStore.createCategorisationRule(title: title, instructions: instructions, category: category, tags: tags, enabled: enabled) }
+        runSettingsAction("Create categorisation rule", fields: ["title_chars": "\(title.count)", "tag_count": "\(tags.count)", "enabled": enabled ? "true" : "false"]) {
+            try await self.taskStore.createCategorisationRule(title: title, instructions: instructions, category: category, tags: tags, enabled: enabled)
+        }
     }
     func updateRule(id: String, title: String, instructions: String, category: String?, tags: [String], enabled: Bool) {
-        Task { try? await taskStore.updateCategorisationRule(id: id, title: title, instructions: instructions, category: category, tags: tags, enabled: enabled) }
+        runSettingsAction("Update categorisation rule", fields: ["rule_id": id, "title_chars": "\(title.count)", "tag_count": "\(tags.count)", "enabled": enabled ? "true" : "false"]) {
+            try await self.taskStore.updateCategorisationRule(id: id, title: title, instructions: instructions, category: category, tags: tags, enabled: enabled)
+        }
     }
-    func deleteRule(_ id: String) { Task { try? await taskStore.deleteCategorisationRule(id: id) } }
+    func deleteRule(_ id: String) { runSettingsAction("Delete categorisation rule", fields: ["rule_id": id]) { try await self.taskStore.deleteCategorisationRule(id: id) } }
     func createMemory(content: String, domain: String?, tags: [String], expiresAt: Date?) {
-        Task { try? await taskStore.createUserMemory(content: content, domain: domain, tags: tags, expiresAt: expiresAt) }
+        runSettingsAction("Create memory", fields: ["content_chars": "\(content.count)", "tag_count": "\(tags.count)", "has_expiry": expiresAt == nil ? "false" : "true"]) {
+            try await self.taskStore.createUserMemory(content: content, domain: domain, tags: tags, expiresAt: expiresAt)
+        }
     }
     func updateMemory(_ memory: UserMemory, content: String, domain: String?, tags: [String], expiresAt: Date?, status: UserMemoryStatus) {
-        Task {
-            try? await taskStore.updateUserMemory(
+        runSettingsAction("Update memory", fields: ["memory_id": memory.id, "content_chars": "\(content.count)", "tag_count": "\(tags.count)", "status": status.rawValue]) {
+            try await self.taskStore.updateUserMemory(
                 id: memory.id,
                 content: content,
                 domain: domain,
@@ -123,7 +129,7 @@ final class TaxonomySettingsStore: ObservableObject {
         }
     }
     func setMemoryStatus(_ id: String, status: UserMemoryStatus) {
-        Task { try? await taskStore.setUserMemoryStatus(id: id, status: status) }
+        runSettingsAction("Set memory status", fields: ["memory_id": id, "status": status.rawValue]) { try await self.taskStore.setUserMemoryStatus(id: id, status: status) }
     }
     func registerCurrentMac(harnessKind: AgentHarnessKind, harnessLabel: String?, capabilities: [String], selectedBackend: Bool) {
         Task {
@@ -131,6 +137,14 @@ final class TaxonomySettingsStore: ObservableObject {
             agentDeviceMessage = "Registering this Mac…"
             let deviceName = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
             let deviceId = currentAgentDeviceId()
+            let fields = [
+                "device_id": deviceId,
+                "harness_kind": harnessKind.rawValue,
+                "selected_backend": selectedBackend ? "true" : "false",
+                "capability_count": "\(capabilities.count)"
+            ]
+            let context = CaptureDiagnostics.actionStarted("Register this Mac", fields: fields)
+            let startedAt = Date()
             do {
                 try await taskStore.upsertAgentDevice(
                     id: deviceId,
@@ -140,6 +154,7 @@ final class TaxonomySettingsStore: ObservableObject {
                     capabilities: capabilities,
                     selectedBackend: selectedBackend
                 )
+                CaptureDiagnostics.actionCompleted(context, startedAt: startedAt)
                 agentDeviceMessage = selectedBackend ? "Registered \(deviceName) as backend." : "Registered \(deviceName)."
                 CaptureObservability.wideEvent("mac.agent_device.registered", fields: [
                     "device_id": deviceId,
@@ -147,6 +162,7 @@ final class TaxonomySettingsStore: ObservableObject {
                     "selected_backend": selectedBackend ? "true" : "false"
                 ])
             } catch {
+                CaptureDiagnostics.actionFailed(context, startedAt: startedAt, error: error)
                 let message = (error as? CaptureError)?.message ?? error.localizedDescription
                 agentDeviceMessage = "Registration failed: \(message)"
                 CaptureObservability.capture(error, operation: "mac_agent_device_register", fields: [
@@ -159,11 +175,15 @@ final class TaxonomySettingsStore: ObservableObject {
     }
     func selectAgentDevice(_ id: String) {
         Task {
+            let context = CaptureDiagnostics.actionStarted("Select backend Mac", fields: ["device_id": id])
+            let startedAt = Date()
             do {
                 try await taskStore.selectAgentBackendDevice(id: id)
+                CaptureDiagnostics.actionCompleted(context, startedAt: startedAt)
                 agentDeviceMessage = "Backend device selected."
                 CaptureObservability.wideEvent("mac.agent_device.selected", fields: ["device_id": id])
             } catch {
+                CaptureDiagnostics.actionFailed(context, startedAt: startedAt, error: error)
                 agentDeviceMessage = "Selection failed: \((error as? CaptureError)?.message ?? error.localizedDescription)"
                 CaptureObservability.capture(error, operation: "mac_agent_device_select", fields: ["device_id": id])
             }
@@ -171,13 +191,41 @@ final class TaxonomySettingsStore: ObservableObject {
     }
     func disableAgentDevice(_ id: String) {
         Task {
+            let context = CaptureDiagnostics.actionStarted("Disable backend Mac", fields: ["device_id": id])
+            let startedAt = Date()
             do {
                 try await taskStore.disableAgentDevice(id: id)
+                CaptureDiagnostics.actionCompleted(context, startedAt: startedAt)
                 agentDeviceMessage = "Device disabled."
                 CaptureObservability.wideEvent("mac.agent_device.disabled", fields: ["device_id": id])
             } catch {
+                CaptureDiagnostics.actionFailed(context, startedAt: startedAt, error: error)
                 agentDeviceMessage = "Disable failed: \((error as? CaptureError)?.message ?? error.localizedDescription)"
                 CaptureObservability.capture(error, operation: "mac_agent_device_disable", fields: ["device_id": id])
+            }
+        }
+    }
+
+    private func runSettingsAction<T>(
+        _ name: String,
+        fields: [String: String] = [:],
+        operation: @escaping () async throws -> T
+    ) {
+        Task {
+            let context = CaptureDiagnostics.actionStarted(name, fields: fields)
+            let startedAt = Date()
+            do {
+                _ = try await operation()
+                CaptureDiagnostics.actionCompleted(context, startedAt: startedAt)
+            } catch {
+                CaptureDiagnostics.actionFailed(context, startedAt: startedAt, error: error)
+                CaptureDiagnostics.record(
+                    severity: .error,
+                    category: "settings",
+                    name: "settings.action.failed",
+                    message: error.localizedDescription,
+                    fields: fields.merging(["action": name, "error_type": String(describing: type(of: error))]) { first, _ in first }
+                )
             }
         }
     }
@@ -223,7 +271,7 @@ final class SettingsWindowController: NSWindowController {
         self.onAppearanceChange = onAppearanceChange
         self.onSignOut = onSignOut
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 760),
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 920),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -269,6 +317,7 @@ private struct SettingsView: View {
     @State private var localDiagnostics: LocalSyncDiagnostics?
     @State private var diagnosticsError: String?
     @State private var diagnosticsBusy = false
+    @ObservedObject private var appDiagnostics = CaptureDiagnostics.shared
 
     var body: some View {
         ScrollView {
@@ -313,6 +362,11 @@ private struct SettingsView: View {
                     }
                     .pickerStyle(.segmented)
                     .padding(.top, 4)
+                }
+
+                GroupBox("Diagnostics & Debug") {
+                    DiagnosticsDebugView(diagnostics: appDiagnostics)
+                        .padding(.top, 4)
                 }
 
                 GroupBox("Agent Backend Computer") {
@@ -394,7 +448,7 @@ private struct SettingsView: View {
             }
             .padding(20)
         }
-        .frame(width: 620, height: 760, alignment: .topLeading)
+        .frame(width: 760, height: 920, alignment: .topLeading)
         .task { taxonomy.start() }
         .task { await loadDiagnostics() }
     }
@@ -469,6 +523,201 @@ private struct DiagnosticMetric: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(nsColor: Theme.surface))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+private struct DiagnosticsDebugView: View {
+    @ObservedObject var diagnostics: CaptureDiagnostics
+    @State private var errorsOnly = false
+    @State private var expanded: Set<String> = []
+
+    private var filteredGroups: [CaptureDiagnosticActionGroup] {
+        diagnostics.actionGroups.filter { group in
+            !errorsOnly || group.events.contains { $0.severity == .error || $0.severity == .warning }
+        }
+    }
+
+    private var errorCount: Int {
+        diagnostics.events.filter { $0.severity == .error }.count
+    }
+
+    private var warningCount: Int {
+        diagnostics.events.filter { $0.severity == .warning }.count
+    }
+
+    private var networkCount: Int {
+        diagnostics.events.filter { $0.category == "network" }.count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Local event stream with remote-observability shape.")
+                    .font(.system(.body, design: .rounded).weight(.semibold))
+                Text("Captures app actions, button clicks, local SQLite writes, PowerSync activity, outbound requests, inbound responses and errors. Secrets and raw payloads are redacted at source.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 8) {
+                DiagnosticMetric(label: "Events", value: "\(diagnostics.events.count)")
+                DiagnosticMetric(label: "Errors", value: "\(errorCount)")
+                DiagnosticMetric(label: "Warnings", value: "\(warningCount)")
+                DiagnosticMetric(label: "Network", value: "\(networkCount)")
+            }
+
+            HStack {
+                Toggle("Errors and warnings only", isOn: $errorsOnly)
+                    .onChange(of: errorsOnly) { enabled in
+                        CaptureDiagnostics.record(
+                            category: "ui",
+                            name: "settings.diagnostics.filter_toggled",
+                            message: enabled ? "Diagnostics filter enabled" : "Diagnostics filter disabled",
+                            fields: ["errors_only": enabled ? "true" : "false"]
+                        )
+                    }
+                Spacer()
+                Button("Copy JSON") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(diagnostics.exportJSON(), forType: .string)
+                    CaptureDiagnostics.record(category: "ui", name: "settings.diagnostics.copy_json", message: "Diagnostics JSON copied")
+                }
+                Button("Clear") {
+                    diagnostics.clear()
+                    CaptureDiagnostics.record(category: "ui", name: "settings.diagnostics.cleared", message: "Diagnostics stream cleared")
+                }
+            }
+            .font(.caption)
+
+            if filteredGroups.isEmpty {
+                Text("No diagnostic events yet. Use the app, then return here to inspect the action timeline.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(nsColor: Theme.surface))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(filteredGroups) { group in
+                        DisclosureGroup(isExpanded: expansionBinding(for: group.id)) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(group.events) { event in
+                                    DiagnosticEventRow(event: event)
+                                }
+                            }
+                            .padding(.top, 8)
+                        } label: {
+                            DiagnosticActionHeader(group: group)
+                        }
+                        .padding(10)
+                        .background(Color(nsColor: Theme.surface))
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                }
+            }
+        }
+    }
+
+    private func expansionBinding(for id: String) -> Binding<Bool> {
+        Binding(
+            get: { expanded.contains(id) },
+            set: { isOpen in
+                if isOpen {
+                    expanded.insert(id)
+                } else {
+                    expanded.remove(id)
+                }
+                CaptureDiagnostics.record(
+                    category: "ui",
+                    name: "settings.diagnostics.group_toggled",
+                    message: isOpen ? "Diagnostics group expanded" : "Diagnostics group collapsed",
+                    fields: ["group_id": id, "expanded": isOpen ? "true" : "false"]
+                )
+            }
+        )
+    }
+}
+
+private struct DiagnosticActionHeader: View {
+    let group: CaptureDiagnosticActionGroup
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            DiagnosticSeverityPill(severity: group.severity)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(group.name)
+                    .font(.system(.caption, design: .rounded).weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text("\(group.events.count) events · \(group.startedAt.formatted(date: .omitted, time: .standard)) → \(group.updatedAt.formatted(date: .omitted, time: .standard))")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+    }
+}
+
+private struct DiagnosticEventRow: View {
+    let event: CaptureDiagnosticEvent
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                DiagnosticSeverityPill(severity: event.severity)
+                Text("#\(event.sequence)")
+                    .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(event.name)
+                    .font(.system(.caption, design: .monospaced).weight(.semibold))
+                    .lineLimit(1)
+                Spacer()
+                Text(event.timestamp.formatted(date: .omitted, time: .standard))
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            Text(event.message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if !event.fields.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(event.fields.keys.sorted(), id: \.self) { key in
+                        Text("\(key)=\(event.fields[key] ?? "")")
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+        }
+        .padding(8)
+        .background(Color(nsColor: Theme.surfaceHi))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct DiagnosticSeverityPill: View {
+    let severity: CaptureDiagnosticSeverity
+
+    var body: some View {
+        Text(severity.rawValue.uppercased())
+            .font(.system(size: 9, design: .monospaced).weight(.bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(colour)
+            .clipShape(Capsule())
+    }
+
+    private var colour: Color {
+        switch severity {
+        case .debug: return Color.gray
+        case .info: return Color.mint
+        case .warning: return Color.orange
+        case .error: return Color.red
+        }
     }
 }
 

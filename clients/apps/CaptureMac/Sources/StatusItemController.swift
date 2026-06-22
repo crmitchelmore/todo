@@ -1,4 +1,5 @@
 import AppKit
+import CaptureCore
 
 /// Always-present menu bar entry: shows the count of items needing confirmation and is a second
 /// quick-capture entry point (click → open the quick panel). The menu opens the main review window.
@@ -67,6 +68,13 @@ final class StatusItemController: NSObject {
         button.title = count > 0 ? " \(count)" : ""
     }
 
-    @objc private func quickCapture() { onQuickCapture() }
-    @objc private func openMain() { onOpenMain() }
+    @objc private func quickCapture() {
+        CaptureDiagnostics.record(category: "ui", name: "menu.status.quick_capture", message: "Status menu quick capture clicked")
+        onQuickCapture()
+    }
+
+    @objc private func openMain() {
+        CaptureDiagnostics.record(category: "ui", name: "menu.status.open_main", message: "Status menu open main clicked")
+        onOpenMain()
+    }
 }

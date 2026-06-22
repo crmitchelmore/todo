@@ -1,4 +1,5 @@
 import AppKit
+import CaptureCore
 import Sparkle
 
 /// Wraps Sparkle's standard updater for the AppKit Mac app.
@@ -11,10 +12,12 @@ final class UpdaterController: NSObject {
     static let shared = UpdaterController()
 
     private let controller: SPUStandardUpdaterController
+    private let disabled: Bool
 
     private override init() {
+        disabled = ProcessInfo.processInfo.environment["CAPTURE_DISABLE_UPDATER"] == "1"
         controller = SPUStandardUpdaterController(
-            startingUpdater: true,
+            startingUpdater: !disabled,
             updaterDelegate: nil,
             userDriverDelegate: nil
         )
@@ -24,6 +27,10 @@ final class UpdaterController: NSObject {
     var updater: SPUUpdater { controller.updater }
 
     @objc func checkForUpdates(_ sender: Any?) {
+        guard !disabled else {
+            CaptureDiagnostics.record(category: "updates", name: "updates.check.skipped", message: "Updater disabled for this launch")
+            return
+        }
         controller.checkForUpdates(sender)
     }
 }

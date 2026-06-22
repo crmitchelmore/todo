@@ -1,4 +1,5 @@
 import AppKit
+import CaptureCore
 
 /// Borderless, non-activating panel that can still take keyboard focus. This is what makes the
 /// ⌥Space "Spotlight-style" quick capture work without stealing focus/space from the app you're in.
@@ -100,6 +101,7 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSWindowDeleg
 
     /// Toggle: if already visible, hide; otherwise show centered on the screen under the mouse.
     func toggle() {
+        CaptureDiagnostics.record(category: "ui", name: "quick_capture.toggle", message: panel.isVisible ? "Quick capture hide requested" : "Quick capture show requested")
         if panel.isVisible {
             hide()
         } else {
@@ -108,6 +110,7 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSWindowDeleg
     }
 
     func show() {
+        CaptureDiagnostics.record(category: "ui", name: "quick_capture.show", message: "Quick capture panel shown")
         viewModel.start() // ensure the shared store is connected
         positionOnActiveScreen()
         panel.orderFrontRegardless()
@@ -117,6 +120,7 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSWindowDeleg
     }
 
     func hide() {
+        CaptureDiagnostics.record(category: "ui", name: "quick_capture.hide", message: "Quick capture panel hidden")
         field.stringValue = ""
         panel.orderOut(nil)
     }
@@ -136,7 +140,7 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSWindowDeleg
     @objc private func submit() {
         let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return } // never create blank proposals
-        viewModel.capture(text)             // local-first, returns instantly
+        viewModel.capture(text, source: "quick_capture")             // local-first, returns instantly
         hide()
     }
 
@@ -144,13 +148,14 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSWindowDeleg
         let drafts = images.prefix(4).compactMap { MacImageAttachmentEncoder.draft(from: $0) }
         guard !drafts.isEmpty else { return }
         let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        viewModel.capture(text.isEmpty ? (drafts.first?.filename ?? "Image attachment") : text, attachments: drafts)
+        viewModel.capture(text.isEmpty ? (drafts.first?.filename ?? "Image attachment") : text, attachments: drafts, source: "quick_capture_images")
         hide()
     }
 
     // Esc to dismiss; Enter handled by the field's action.
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         if selector == #selector(NSResponder.cancelOperation(_:)) {
+            CaptureDiagnostics.record(category: "ui", name: "quick_capture.dismiss_keyboard", message: "Quick capture dismissed with keyboard")
             hide()
             return true
         }

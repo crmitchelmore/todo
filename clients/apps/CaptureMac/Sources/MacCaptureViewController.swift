@@ -361,13 +361,16 @@ final class MacCaptureViewController: NSViewController {
 
     @objc private func clearFilterTapped() { viewModel.clearFilter() }
 
-    @objc private func settingsTapped() { onOpenSettings?() }
+    @objc private func settingsTapped() {
+        CaptureDiagnostics.record(category: "ui", name: "button.settings.open", message: "Settings button clicked")
+        onOpenSettings?()
+    }
 
     @objc private func captureSubmit() {
         let text = captureField.stringValue
         guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         captureField.stringValue = "" // instant clear
-        viewModel.capture(text)
+        viewModel.capture(text, source: "command_deck")
     }
 
     private func capture(images: [NSImage]) {
@@ -375,7 +378,7 @@ final class MacCaptureViewController: NSViewController {
         guard !drafts.isEmpty else { return }
         let text = captureField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         captureField.stringValue = ""
-        viewModel.capture(text.isEmpty ? (drafts.first?.filename ?? "Image attachment") : text, attachments: drafts)
+        viewModel.capture(text.isEmpty ? (drafts.first?.filename ?? "Image attachment") : text, attachments: drafts, source: "command_deck_images")
     }
 
     private func selectedProposal() -> TaskItem? {

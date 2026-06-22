@@ -206,10 +206,7 @@ public final class BackendConnector: PowerSyncBackendConnectorProtocol, @uncheck
         let url = config.backendURL.appendingPathComponent("api/auth/token")
         var request = URLRequest(url: url)
         request.applyBearer(token.currentToken())
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw CaptureError.auth("token request failed")
-        }
+        let (data, http) = try await performDataRequest(request, operation: "sync.fetch_credentials")
         if http.statusCode == 401 {
             // Only sign the user out after sustained 401s; otherwise keep the session and let
             // PowerSync retry — a transient blip must not nuke a valid login.
@@ -244,6 +241,13 @@ public final class BackendConnector: PowerSyncBackendConnectorProtocol, @uncheck
             }
             ops.append(op)
         }
+        CaptureDiagnostics.record(
+            severity: .info,
+            category: "sync",
+            name: "sync.upload.queue",
+            message: "Uploading local CRUD transaction",
+            fields: ["crud_count": "\(ops.count)"]
+        )
 
         var request = URLRequest(url: config.backendURL.appendingPathComponent("api/data"))
         request.httpMethod = "PUT"
@@ -251,10 +255,7 @@ public final class BackendConnector: PowerSyncBackendConnectorProtocol, @uncheck
         request.applyBearer(token.currentToken())
         request.httpBody = try JSONSerialization.data(withJSONObject: ["ops": ops])
 
-        let (body, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw CaptureError.upload("upload failed: no response")
-        }
+        let (body, http) = try await performDataRequest(request, operation: "sync.upload_data")
         if http.statusCode == 401 {
             if shouldInvalidateAfterUnauthorized() { token.invalidate() }
             throw CaptureError.auth("session expired")
@@ -266,6 +267,25 @@ public final class BackendConnector: PowerSyncBackendConnectorProtocol, @uncheck
 
         recordAuthSuccess()
         try await transaction.complete()
+    }
+
+    private func performDataRequest(_ request: URLRequest, operation: String) async throws -> (Data, HTTPURLResponse) {
+        let startedAt = CaptureDiagnostics.recordHTTPRequestStart(
+            request,
+            operation: operation,
+            requestBytes: request.httpBody?.count
+        )
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            CaptureDiagnostics.recordHTTPResponse(nil, data: nil, operation: operation, startedAt: startedAt, error: error)
+            throw error
+        }
+        CaptureDiagnostics.recordHTTPResponse(response, data: data, operation: operation, startedAt: startedAt)
+        guard let http = response as? HTTPURLResponse else { throw CaptureError.upload("\(operation) failed: no response") }
+        return (data, http)
     }
 }
 
