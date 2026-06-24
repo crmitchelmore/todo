@@ -18,6 +18,9 @@ test('proposalMeta reads action metadata from payload and provenance', () => {
       risk_level: 'high',
       autonomy_reason: 'external state mutation',
       thread_id: 'thread-1',
+      question: 'What should the agent optimise for?',
+      options: [{ id: 'speed', label: 'Speed', value: 'Optimise for speed' }],
+      allow_free_text: true,
     }),
     provenance: JSON.stringify({ risk_level: 'medium' }),
   });
@@ -27,6 +30,9 @@ test('proposalMeta reads action metadata from payload and provenance', () => {
     riskLevel: 'high',
     reason: 'external state mutation',
     threadId: 'thread-1',
+    question: 'What should the agent optimise for?',
+    options: [{ id: 'speed', label: 'Speed', value: 'Optimise for speed' }],
+    allowFreeText: true,
   });
 });
 
@@ -39,7 +45,10 @@ test('decideAgentProposal posts an authenticated decision', async () => {
     return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
 
-  await decideAgentProposal('11111111-1111-4111-8111-111111111111', 'accepted');
+  await decideAgentProposal('11111111-1111-4111-8111-111111111111', 'accepted', {
+    selected_option: { id: 'speed', label: 'Speed', value: 'Optimise for speed' },
+    free_text: '',
+  });
 
   assert.ok(request);
   assert.equal(request.method, 'POST');
@@ -47,5 +56,5 @@ test('decideAgentProposal posts an authenticated decision', async () => {
   assert.equal(request.headers.get('content-type'), 'application/json');
   const body = await request.json();
   assert.equal(body.decision, 'accepted');
-  assert.equal(body.resume_payload.decided_by, 'web');
+  assert.equal(body.resume_payload.selected_option.id, 'speed');
 });

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { AgentProposalRecord, TaskRecord } from '../powersync/schema';
-import { decideAgentProposal, proposalMeta, type ProposalDecision } from '../lib/proposals';
+import { decideAgentProposal, proposalMeta, type ProposalDecision, type ProposalOption } from '../lib/proposals';
 
 function label(value: string | null | undefined): string {
   return (value ?? 'action').replaceAll('_', ' ');
@@ -19,19 +19,33 @@ export function ApprovalQueue({
 }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [freeText, setFreeText] = useState<Record<string, string>>({});
   const pending = useMemo(() => proposals.filter((p) => p.proposal_type === 'action'), [proposals]);
   if (pending.length === 0) return null;
 
-  async function decide(proposal: AgentProposalRecord, decision: ProposalDecision): Promise<void> {
+  async function decide(
+    proposal: AgentProposalRecord,
+    decision: ProposalDecision,
+    resumePayload?: Record<string, unknown>
+  ): Promise<void> {
     setBusyId(proposal.id);
     setError(null);
     try {
-      await decideAgentProposal(proposal.id, decision);
+      await decideAgentProposal(proposal.id, decision, resumePayload);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusyId(null);
     }
+  }
+
+  function interviewResume(option: ProposalOption | null, text: string): Record<string, unknown> {
+    return {
+      decided_by: 'web',
+      decided_at: new Date().toISOString(),
+      selected_option: option,
+      free_text: text.trim() || null,
+    };
   }
 
   return (
@@ -59,6 +73,34 @@ export function ApprovalQueue({
               <h3>{proposal.title}</h3>
               <p>{proposal.body || 'Review the proposed action before the agent continues.'}</p>
               {task && <p className="approval-context">Task: {task.title}</p>}
+              {meta.actionType === 'task_interview' && (
+                <div className="interview-prompt">
+                  <p className="interview-question">{meta.question ?? proposal.body ?? 'What context should the agent use?'}</p>
+                  <div className="interview-options">
+                    {meta.options.map((option) => (
+                      <button
+                        key={option.id}
+                        className="interview-option"
+                        disabled={busy}
+                        onClick={() => void decide(proposal, 'accepted', interviewResume(option, freeText[proposal.id] ?? ''))}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                  {meta.allowFreeText && (
+                    <label className="interview-free-text">
+                      <span>Something else</span>
+                      <textarea
+                        value={freeText[proposal.id] ?? ''}
+                        onChange={(event) => setFreeText((current) => ({ ...current, [proposal.id]: event.target.value }))}
+                        placeholder="Add context only if the options do not fit…"
+                        rows={3}
+                      />
+                    </label>
+                  )}
+                </div>
+              )}
               <dl className="approval-meta">
                 {meta.reason && (
                   <>
@@ -74,7 +116,17 @@ export function ApprovalQueue({
                 )}
               </dl>
               <div className="approval-actions">
-                <button className="primary approval-primary" disabled={busy} onClick={() => void decide(proposal, 'accepted')}>
+                <button
+                  className="primary approval-primary"
+                  disabled={busy || (meta.actionType === 'task_interview' && !(freeText[proposal.id] ?? '').trim())}
+                  onClick={() => void decide(
+                    proposal,
+                    'accepted',
+                    meta.actionType === 'task_interview'
+                      ? interviewResume(null, freeText[proposal.id] ?? '')
+                      : undefined
+                  )}
+                >
                   {busy ? 'Working…' : 'Approve'}
                 </button>
                 <button className="ghost" disabled={busy} onClick={() => void decide(proposal, 'rejected')}>

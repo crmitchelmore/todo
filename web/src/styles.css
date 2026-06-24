@@ -915,6 +915,53 @@ h2::after { content: ''; flex: 1; height: 1px; background: var(--line); }
   margin-top: 9px !important;
   color: var(--text) !important;
 }
+.interview-prompt {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(139, 123, 255, 0.28);
+  border-radius: var(--r-md);
+  background: rgba(139, 123, 255, 0.08);
+}
+.interview-question {
+  color: var(--text) !important;
+  margin-bottom: 10px !important;
+}
+.interview-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.interview-option {
+  border: 1px solid rgba(139, 123, 255, 0.34);
+  background: rgba(139, 123, 255, 0.12);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 7px 11px;
+  font: 600 12px var(--font-ui);
+  cursor: pointer;
+}
+.interview-option:hover {
+  border-color: var(--iris);
+  background: rgba(139, 123, 255, 0.2);
+}
+.interview-free-text {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.interview-free-text textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 72px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text);
+  padding: 8px 10px;
+  font: 13px var(--font-ui);
+}
 .approval-meta {
   display: grid;
   grid-template-columns: 82px minmax(0, 1fr);
