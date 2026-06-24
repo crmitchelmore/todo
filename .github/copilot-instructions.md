@@ -56,3 +56,28 @@
 ## Web testing
 
 - On this macOS environment, bundled Playwright Chromium can crash during launch; use system Chrome for Playwright scripts (`p.chromium.launch(channel="chrome", headless=True)`).
+
+## UI validation
+
+- Never report a UI change as done from code inspection alone. After any UI change, run `scripts/ui-validate.sh <web|ios|mac>` (or `all`) and inspect the screenshots/logs in `.ui-artifacts/<timestamp>/`. See `docs/ui-validation.md` for the build → screenshot/inspect → fix → rerun loop and the MCP stack (Playwright, XcodeBuildMCP, ios-simulator, peekaboo).
+- Explicitly verify the layout is responsive: panels must use the full available width and adapt when the window is resized or goes full-screen — fixed/collapsed panels and wasted right-hand space are recurring regressions on Mac.
+- For the web auth gate, confirm email/password fields are visible, editable, non-collapsed, and console-clean on desktop and mobile widths.
+
+## Cross-platform parity
+
+- Task lifecycle and behaviour changes (accept, reject, category assignment, sync) must be implemented in shared `clients/CaptureCore` and applied to every client surface — Mac, iOS, and web (`web/src`) — not just the one in front of you.
+- After such a change, verify the behaviour on all three surfaces (e.g. an accepted item leaves the confirm list and a rejected item disappears consistently) before closing the work.
+
+## AI action verification
+
+- For AI/LLM actions (e.g. research hand-off), confirm the worker/LLM actually executed and wrote results back to `task_events` via the worker — check worker logs / the database. Do not treat the feature as working because a UI placeholder or prompt template was attached to the item; that is the symptom of a non-wired action, not success.
+
+## Local data & sync resilience
+
+- Unconfirmed and other local items must survive app update and restart; never let an update or relaunch drop locally captured items.
+- Sync must re-establish automatically after an app upgrade with no manual resync step. Treat "had to resync after updating" as a bug.
+
+## Task tracking (beads)
+
+- This project tracks all work with `bd` (beads); `AGENTS.md` and `CLAUDE.md` are the source of truth. Use `bd ready` / `bd show <id>` / `bd update <id> --claim` / `bd close <id>` — do not use markdown TODO lists or other task trackers. Run `bd prime` for full workflow context.
+- Work is not complete until quality gates pass and changes are pushed: `git pull --rebase`, `bd dolt push`, `git push`, and `git status` shows the branch up to date with origin.

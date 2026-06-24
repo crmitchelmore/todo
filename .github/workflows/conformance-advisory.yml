@@ -1,0 +1,44 @@
+name: Conformance Advisory
+
+on:
+  pull_request:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  conformance-advisory:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout conformance catalogue
+        uses: actions/checkout@v4
+        with:
+          repository: crmitchelmore/quality-software
+          path: .conformance-catalogue
+          token: ${{ secrets.CONFORMANCE_CATALOGUE_TOKEN || github.token }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install conformance
+        working-directory: .conformance-catalogue/integration
+        run: npm ci || npm install
+
+      - name: Run advisory conformance check
+        continue-on-error: true
+        env:
+          CONFORMANCE_CATALOGUE_ROOT: ${{ github.workspace }}/.conformance-catalogue
+          BASE_REF: ${{ github.base_ref || 'main' }}
+        run: |
+          node "$CONFORMANCE_CATALOGUE_ROOT/integration/bin/conformance.mjs" \
+            check --event PR_REVIEW --base "origin/$BASE_REF" \
+            | tee "$GITHUB_STEP_SUMMARY"
+
