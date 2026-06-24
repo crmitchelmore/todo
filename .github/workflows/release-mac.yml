@@ -11,10 +11,19 @@ name: Release macOS App
 #   + APPLE_DEVELOPER_ID_APPLICATION_PASSWORD. If absent, the export step relies
 #   on -allowProvisioningUpdates to obtain one via the App Store Connect API.
 #
-# Trigger: push a tag like `mac-v0.1.0`, or run manually (workflow_dispatch).
+# Trigger: push a tag like `mac-v0.1.0`, run manually, or merge Mac/shared native changes to main.
 
 on:
   push:
+    branches:
+      - main
+    paths:
+      - VERSION
+      - clients/CaptureCore/**
+      - clients/apps/project.yml
+      - clients/apps/CaptureMac/**
+      - scripts/generate-appcast.sh
+      - .github/workflows/release-mac.yml
     tags:
       - 'mac-v*'
   workflow_dispatch:
@@ -56,12 +65,18 @@ jobs:
           elif [[ "$GITHUB_REF" == refs/tags/mac-v* ]]; then
             VERSION="${GITHUB_REF#refs/tags/mac-v}"
           else
-            VERSION="0.1.0"
+            VERSION="$(cat VERSION)"
           fi
           BUILD_NUMBER=$(date -u +"%Y%m%d%H%M")
+          if [[ "$GITHUB_REF" == refs/tags/mac-v* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="mac-auto-${BUILD_NUMBER}"
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "build=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
-          echo "Building $VERSION (build $BUILD_NUMBER)"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Building $VERSION (build $BUILD_NUMBER, tag $TAG)"
 
       - name: Generate Xcode Project
         working-directory: clients/apps
@@ -110,16 +125,32 @@ jobs:
           security list-keychain -d user -s "$KEYCHAIN_PATH"
           rm -f "$CERT_PATH"
 
-      - name: Build & Sign Archive (Developer ID, hardened runtime)
+      - name: Build Archive
         env:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           CAPTURE_API_SECRET: ${{ secrets.CAPTURE_API_SECRET }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_ENVIRONMENT: production
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
-          # Sign during archive so Xcode signs the app AND all nested Sparkle
-          # helpers (Autoupdate, Updater.app, XPC services) inside-out with the
-          # hardened runtime — exportArchive does not reliably apply runtime.
           # CAPTURE_API_SECRET is baked into Info.plist via the $(CAPTURE_API_SECRET)
           # build setting so the app can authenticate to the gated backend.
+          # The project entitlements include Associated Domains for passkeys/webcredentials,
+          # which requires a provisioning profile. Developer ID distribution is for Sparkle
+          # updates outside the Mac App Store, so archive with a minimal entitlements file to
+          # avoid provisioning-profile churn and certificate creation during routine releases.
+          DEVELOPER_ID_ENTITLEMENTS="$RUNNER_TEMP/DeveloperID.entitlements"
+          cat > "$DEVELOPER_ID_ENTITLEMENTS" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict/>
+          </plist>
+          PLIST
+          # Archive with the imported Developer ID identity. Automatic development
+          # signing asks Xcode for a Mac Development certificate and can exhaust
+          # Apple account certificate capacity.
           xcodebuild archive \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
@@ -128,16 +159,48 @@ jobs:
             -destination "generic/platform=macOS" \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="Developer ID Application" \
+            CODE_SIGN_ENTITLEMENTS="$DEVELOPER_ID_ENTITLEMENTS" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
             ENABLE_HARDENED_RUNTIME=YES \
-            CAPTURE_API_SECRET="$CAPTURE_API_SECRET" \
-            OTHER_CODE_SIGN_FLAGS="--timestamp"
+            SENTRY_DSN="$SENTRY_DSN" \
+            SENTRY_ENVIRONMENT="$SENTRY_ENVIRONMENT" \
+            CAPTURE_API_SECRET="$CAPTURE_API_SECRET"
+
+      - name: Export Developer ID App
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          EXPORT_OPTIONS="$RUNNER_TEMP/ExportOptions.plist"
+          EXPORT_PATH="$RUNNER_TEMP/export"
+          cat > "$EXPORT_OPTIONS" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>developer-id</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>signingStyle</key><string>automatic</string>
+          </dict>
+          </plist>
+          PLIST
+          rm -rf "$EXPORT_PATH"
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/$PRODUCT_NAME.xcarchive" \
+            -exportOptionsPlist "$EXPORT_OPTIONS" \
+            -exportPath "$EXPORT_PATH" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8 \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID"
+          APP_PATH="$EXPORT_PATH/$PRODUCT_NAME.app"
+          [ -d "$APP_PATH" ] || APP_PATH="$(find "$EXPORT_PATH" -maxdepth 2 -name "$PRODUCT_NAME.app" -print -quit)"
+          [ -d "$APP_PATH" ] || { echo "::error::exported app not found under $EXPORT_PATH"; exit 1; }
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
 
       - name: Locate & Verify Signed App
         run: |
-          APP_PATH="$RUNNER_TEMP/$PRODUCT_NAME.xcarchive/Products/Applications/$PRODUCT_NAME.app"
-          [ -d "$APP_PATH" ] || { echo "::error::archived app not found at $APP_PATH"; exit 1; }
-          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
           codesign --verify --deep --strict --verbose=2 "$APP_PATH"
           codesign -dv --verbose=4 "$APP_PATH" 2>&1 | tee /tmp/cs.txt
           grep -q "flags=.*runtime" /tmp/cs.txt || { echo "::error::hardened runtime missing on main app"; exit 1; }
@@ -200,14 +263,16 @@ jobs:
             "${{ steps.version.outputs.version }}" \
             "${{ steps.version.outputs.build }}" \
             "$ZIP_PATH" \
-            "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/appcast.xml"
+            "$SPARKLE_PRIVATE_KEY" \
+            "${{ steps.version.outputs.tag }}" > "$RUNNER_TEMP/appcast.xml"
           echo "APPCAST_PATH=$RUNNER_TEMP/appcast.xml" >> "$GITHUB_ENV"
           cat "$RUNNER_TEMP/appcast.xml"
 
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/mac-v')
+      - name: Publish Sparkle Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Capture Mac ${{ steps.version.outputs.version }} (${{ steps.version.outputs.build }})
           files: |
             ${{ env.ZIP_PATH }}
             ${{ env.APPCAST_PATH }}
@@ -215,15 +280,6 @@ jobs:
           draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Artifact (manual builds)
-        if: "!startsWith(github.ref, 'refs/tags/mac-v')"
-        uses: actions/upload-artifact@v4
-        with:
-          name: Capture-${{ steps.version.outputs.version }}
-          path: |
-            ${{ env.ZIP_PATH }}
-            ${{ env.APPCAST_PATH }}
 
       - name: Cleanup
         if: always()

@@ -1,10 +1,11 @@
 #!/bin/bash
 # Generate Sparkle appcast.xml for a Capture macOS release.
-# Usage: ./scripts/generate-appcast.sh <version> <build-number> <archive-path> <private-key-base64>
+# Usage: ./scripts/generate-appcast.sh <version> <build-number> <archive-path> <private-key-base64> [release-tag]
 #   version       Marketing version (e.g. 0.1.0), display + download URL.
 #   build-number  CFBundleVersion (e.g. 202606030130); Sparkle compares on this.
 #   archive-path  Path to the notarised Capture-<version>.zip enclosure.
 #   private-key   Sparkle EdDSA private key (base64, the 44-char string from generate_keys -x).
+#   release-tag   GitHub release tag that owns the archive asset; defaults to mac-v<version>.
 #
 # Emits the appcast XML to stdout. The enclosure URL points at the GitHub
 # release asset; SUFeedURL in Info.plist resolves to releases/latest/download/appcast.xml.
@@ -14,6 +15,7 @@ VERSION="${1:?version}"
 BUILD_NUMBER="${2:?build number}"
 ARCHIVE_PATH="${3:?archive path}"
 PRIVATE_KEY_BASE64="${4:?private key (base64)}"
+RELEASE_TAG="${5:-mac-v${VERSION}}"
 
 FILE_SIZE=$(stat -f%z "$ARCHIVE_PATH" 2>/dev/null || stat --format=%s "$ARCHIVE_PATH")
 PUB_DATE=$(date -R 2>/dev/null || date)
@@ -47,7 +49,7 @@ if [ -z "$SIGNATURE" ]; then
   exit 1
 fi
 
-DOWNLOAD_URL="https://github.com/crmitchelmore/todo/releases/download/mac-v${VERSION}/${ARCHIVE_NAME}"
+DOWNLOAD_URL="https://github.com/crmitchelmore/todo/releases/download/${RELEASE_TAG}/${ARCHIVE_NAME}"
 
 LAST_TAG=$(git describe --tags --abbrev=0 --match 'mac-v*' HEAD^ 2>/dev/null || echo "")
 if [ -n "$LAST_TAG" ]; then

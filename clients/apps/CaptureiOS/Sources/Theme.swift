@@ -20,6 +20,10 @@ enum Theme {
     static var ink: UIColor { UIColor(hex: light ? "f3efe5" : "0a0b0d")! }
     static var surface: UIColor { UIColor(hex: light ? "fff8ee" : "16181d")! }
     static var surfaceHi: UIColor { UIColor(hex: light ? "fffdf7" : "20242c")! }
+    static var surfaceRaised: UIColor { UIColor(hex: light ? "ffffff" : "232830")! }
+    static var surfaceSelected: UIColor { light ? UIColor(hex: "fff1dc")! : UIColor(hex: "2a241e")! }
+    static var hairline: UIColor { light ? UIColor(white: 0, alpha: 0.10) : UIColor(white: 1, alpha: 0.08) }
+    static var shadow: UIColor { light ? UIColor(white: 0, alpha: 0.16) : UIColor(white: 0, alpha: 0.42) }
 
     // Signal + semantics
     static var signal: UIColor { UIColor(hex: "ff9f2e")! }
@@ -50,5 +54,41 @@ enum Theme {
         button.backgroundColor = signal
         button.setTitleColor(ink, for: .normal)
         button.layer.cornerRadius = 12
+        button.titleLabel?.font = display(15, .semibold)
+    }
+
+    static func quiet(_ button: UIButton, colour: UIColor? = nil) {
+        button.backgroundColor = surfaceHi
+        button.setTitleColor(colour ?? textSecondary, for: .normal)
+        button.layer.cornerRadius = 12
+        button.layer.borderWidth = 1
+        button.layer.borderColor = hairline.cgColor
+        button.titleLabel?.font = display(14, .semibold)
+    }
+
+    static func panel(_ view: UIView, color: UIColor = Theme.surface, radius: CGFloat = 20, bordered: Bool = true) {
+        view.backgroundColor = color
+        view.layer.cornerRadius = radius
+        view.layer.borderWidth = bordered ? 1 : 0
+        view.layer.borderColor = hairline.cgColor
+        view.layer.masksToBounds = false
+    }
+
+    static func card(_ view: UIView, color: UIColor = Theme.surfaceHi, radius: CGFloat = 18) {
+        panel(view, color: color, radius: radius)
+        view.layer.shadowColor = shadow.cgColor
+        view.layer.shadowOpacity = light ? 0.10 : 0.24
+        view.layer.shadowRadius = 18
+        view.layer.shadowOffset = CGSize(width: 0, height: 8)
+    }
+
+    static func input(_ field: UITextField) {
+        field.textColor = textPrimary
+        field.tintColor = signal
+        field.backgroundColor = surfaceHi
+        field.layer.cornerRadius = 14
+        field.layer.borderWidth = 1
+        field.layer.borderColor = hairline.cgColor
+        field.borderStyle = .none
     }
 }

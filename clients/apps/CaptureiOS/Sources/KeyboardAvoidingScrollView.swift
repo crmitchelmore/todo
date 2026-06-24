@@ -6,6 +6,7 @@ import UIKit
 final class KeyboardAvoidingScrollView: UIView {
     let scrollView = UIScrollView()
     let contentView = UIView()
+    private var contentHeightConstraint: NSLayoutConstraint?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -37,5 +38,8 @@ final class KeyboardAvoidingScrollView: UIView {
             contentView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
             contentView.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor)
         ])
+        contentHeightConstraint = contentView.heightAnchor.constraint(greaterThanOrEqualTo: scrollView.frameLayoutGuide.heightAnchor)
+        contentHeightConstraint?.priority = .defaultHigh
+        contentHeightConstraint?.isActive = true
     }
 }

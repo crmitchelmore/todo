@@ -28,6 +28,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         options connectionOptions: UIScene.ConnectionOptions
     ) {
         guard let windowScene = scene as? UIWindowScene else { return }
+        CaptureObservability.start()
         let window = UIWindow(windowScene: windowScene)
         window.overrideUserInterfaceStyle = CapturePreferences.load().appearance.userInterfaceStyle
         window.tintColor = Theme.signal
@@ -53,6 +54,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
                     await MainActor.run {
                         window.rootViewController = UINavigationController(
                             rootViewController: CaptureViewController(viewModel: viewModel))
+                        self.viewModel.start()
                         self.focusQuickCaptureIfNeeded()
                     }
                     await drainOutbox()
@@ -70,6 +72,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     /// drain is idempotent and re-enqueues anything still unreachable.
     func sceneWillEnterForeground(_ scene: UIScene) {
         guard auth.isAuthenticated else { return }
+        viewModel.restartSyncIfNeeded(reason: "foreground")
         Task { await drainOutbox() }
     }
 

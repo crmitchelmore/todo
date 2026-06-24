@@ -65,7 +65,7 @@ test('consequential actions create idempotent proposal and checkpoint rows', asy
     title: 'Approve sending email',
     body: 'Send a follow-up email only after approval.',
     payload: { to: 'example@example.invalid', subject: 'Follow-up' },
-    source: 'openclaw',
+    source: 'local-harness',
     confidence: 0.8,
   };
 

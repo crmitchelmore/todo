@@ -12,11 +12,13 @@ usage() {
 Usage: scripts/ui-validate.sh [web|ios|mac|all ...]
 
 Runs the AI-facing UI validation loop and writes screenshots/logs under .ui-artifacts/.
+Each run also creates design-review.md with the human-centred quality checklist agents should use
+when inspecting the captured web, simulator, and macOS screenshots.
 
 Environment:
   E2E_BASE_URL       Use an already-running web app instead of local Vite preview.
   UI_ARTIFACT_DIR   Output directory for screenshots and logs.
-  IOS_DESTINATION   xcodebuild simulator destination (default: iPhone 15 Pro, iOS 26.5).
+  IOS_DESTINATION   xcodebuild simulator destination (default: iPhone 17, iOS 26.5).
 USAGE
 }
 
@@ -36,6 +38,33 @@ fi
 mkdir -p "$ARTIFACT_ROOT"
 echo "UI artefacts: $ARTIFACT_ROOT"
 
+cat > "$ARTIFACT_ROOT/design-review.md" <<'REVIEW'
+# Capture UI design review
+
+Use this checklist after `scripts/ui-validate.sh web ios mac` creates screenshots and logs.
+
+## Product grammar
+- [ ] The surface still reads as Capture: command deck, triage queue, active outline, inspector-card stack.
+- [ ] Amber is used for human decisions, iris/purple for AI evidence, mint for completion/sync.
+- [ ] The UI supports capture-first flow: the primary input is obvious, fast, and not visually crowded.
+
+## Cross-platform parity
+- [ ] Web, Mac, and iOS expose the same core capabilities for capture, confirmation, active work, rejected items, taxonomy, AI handoff, and rules.
+- [ ] Differences are platform-native rather than capability gaps.
+- [ ] Keyboard/simulator/mobile layouts do not hide primary auth or capture controls.
+
+## Usability and stability
+- [ ] Primary controls are visible, reachable, and have enough hit area at desktop and mobile sizes.
+- [ ] Inspector/detail panes use available space without collapsing or looking sparse.
+- [ ] No console/runtime/fatal errors appear in the captured logs.
+- [ ] Empty states explain what to do next without sounding generic.
+
+## Evidence to cite before shipping
+- Web: `web/` Playwright screenshot and console-clean run.
+- iOS: `ios/capture-ios.png`, `ios/xcodebuild.log`, `ios/error-log.txt`.
+- Mac: `mac/capture-mac.png`, `mac/xcodebuild.log`.
+REVIEW
+
 run_web() {
   echo "== web =="
   mkdir -p "$ARTIFACT_ROOT/web"
@@ -54,8 +83,8 @@ run_ios() {
   mkdir -p "$ARTIFACT_ROOT/ios"
   (
     cd "$ROOT/clients/apps"
-    xcodegen generate >/dev/null
-    xcodebuild -project Capture.xcodeproj \
+    GIT_CONFIG_COUNT=0 xcodegen generate >/dev/null
+    GIT_CONFIG_COUNT=0 xcodebuild -project Capture.xcodeproj \
       -scheme CaptureiOS \
       -destination "$IOS_DESTINATION" \
       -derivedDataPath DerivedData/UIValidation \
@@ -79,6 +108,13 @@ run_ios() {
   xcrun simctl install "$device" "$app_path"
   xcrun simctl launch --terminate-running-process "$device" "$IOS_BUNDLE_ID" > "$ARTIFACT_ROOT/ios/launch.log"
   sleep 3
+  # Simulator can show system banners (for example Apple Intelligence prompts) over the app after
+  # boot. Dismiss transient overlays so the screenshot proves Capture UI quality, not SpringBoard.
+  if pgrep -x "Simulator" >/dev/null; then
+    osascript -e 'tell application "Simulator" to activate' \
+              -e 'tell application "System Events" to key code 53' >/dev/null 2>&1 || true
+  fi
+  sleep 2
   xcrun simctl io "$device" screenshot "$ARTIFACT_ROOT/ios/capture-ios.png"
   xcrun simctl spawn "$device" log show --last 2m --style compact \
     --predicate 'process == "CaptureiOS" AND (eventMessage CONTAINS[c] "fatal" OR eventMessage CONTAINS[c] "uncaught" OR eventMessage CONTAINS[c] "exception")' \
@@ -94,8 +130,8 @@ run_mac() {
   mkdir -p "$ARTIFACT_ROOT/mac"
   (
     cd "$ROOT/clients/apps"
-    xcodegen generate >/dev/null
-    xcodebuild -project Capture.xcodeproj \
+    GIT_CONFIG_COUNT=0 xcodegen generate >/dev/null
+    GIT_CONFIG_COUNT=0 xcodebuild -project Capture.xcodeproj \
       -scheme CaptureMac \
       -destination 'platform=macOS' \
       -derivedDataPath DerivedData/UIValidation \
@@ -105,9 +141,37 @@ run_mac() {
   local app_path
   app_path="$(find "$ROOT/clients/apps/DerivedData/UIValidation/Build/Products" -name 'CaptureMac.app' -type d | head -1)"
   [[ -n "$app_path" ]] || { echo "CaptureMac.app not found"; exit 1; }
-  open -n "$app_path"
-  sleep 4
-  screencapture -x "$ARTIFACT_ROOT/mac/capture-mac.png" || {
+  open -n "$app_path" --env CAPTURE_DISABLE_UPDATER=1
+  local frontmost="" window_count=0
+  for _ in {1..10}; do
+    osascript -e "tell application \"System Events\" to set frontmost of (first process whose bundle identifier is \"$MAC_BUNDLE_ID\") to true" >/dev/null 2>&1 || true
+    sleep 1
+    frontmost="$(osascript -e 'tell application "System Events" to name of first process whose frontmost is true' 2>/dev/null || true)"
+    window_count="$(osascript -e "tell application \"System Events\" to count windows of (first process whose bundle identifier is \"$MAC_BUNDLE_ID\")" 2>/dev/null || echo 0)"
+    if [[ ( "$frontmost" == "CaptureMac" || "$frontmost" == "Capture" ) && "${window_count:-0}" -ge 1 ]]; then
+      break
+    fi
+  done
+  if [[ "$frontmost" != "CaptureMac" && "$frontmost" != "Capture" ]]; then
+    echo "CaptureMac is not frontmost after launch (frontmost=$frontmost)." > "$ARTIFACT_ROOT/mac/frontmost.txt"
+    echo "The app may be blocked by a keychain/system prompt; screenshot would not prove Capture UI quality." >&2
+    exit 1
+  fi
+  if [[ "${window_count:-0}" -lt 1 ]]; then
+    echo "CaptureMac launched but no app window was visible." > "$ARTIFACT_ROOT/mac/frontmost.txt"
+    exit 1
+  fi
+  local window_id
+  window_id="$(swift -e 'import CoreGraphics; let windows = (CGWindowListCopyWindowInfo(.optionOnScreenOnly, 0) as? [[String: Any]]) ?? []; let ids = windows.compactMap { window -> Int? in let owner = window[kCGWindowOwnerName as String] as? String ?? ""; let name = window[kCGWindowName as String] as? String ?? ""; guard (owner == "Capture" || owner == "CaptureMac"), name == "Capture" else { return nil }; return window[kCGWindowNumber as String] as? Int }; print(ids.max() ?? 0)' 2>/dev/null || echo 0)"
+  if [[ "${window_id:-0}" -gt 0 ]]; then
+    screencapture -x -l "$window_id" "$ARTIFACT_ROOT/mac/capture-mac.png" || {
+      echo "macOS window screenshot failed; falling back to full-screen capture." >&2
+      screencapture -x "$ARTIFACT_ROOT/mac/capture-mac.png"
+    }
+  else
+    screencapture -x "$ARTIFACT_ROOT/mac/capture-mac.png"
+  fi
+  [[ -s "$ARTIFACT_ROOT/mac/capture-mac.png" ]] || {
     echo "macOS screenshot failed; grant Screen Recording to the terminal/agent app and rerun." >&2
     exit 1
   }

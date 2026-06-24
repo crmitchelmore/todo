@@ -39,6 +39,65 @@ const tags = new Table(
   { indexes: {} }
 );
 
+const categories = new Table(
+  {
+    owner_id: column.text,
+    name: column.text,
+    color: column.text,
+    created_at: column.text,
+    updated_at: column.text
+  },
+  { indexes: {} }
+);
+
+const categorisation_rules = new Table(
+  {
+    owner_id: column.text,
+    title: column.text,
+    instructions: column.text,
+    category: column.text,
+    tags: column.text,
+    enabled: column.integer,
+    created_at: column.text,
+    updated_at: column.text
+  },
+  { indexes: {} }
+);
+
+const user_memories = new Table(
+  {
+    owner_id: column.text,
+    content: column.text,
+    domain: column.text,
+    source: column.text,
+    confidence: column.real,
+    tags: column.text,
+    status: column.text,
+    expires_at: column.text,
+    created_at: column.text,
+    updated_at: column.text,
+    deleted_at: column.text
+  },
+  { indexes: { by_status: ['status', 'updated_at'] } }
+);
+
+const agent_devices = new Table(
+  {
+    owner_id: column.text,
+    device_name: column.text,
+    platform: column.text,
+    status: column.text,
+    is_selected_backend: column.integer,
+    harness_kind: column.text,
+    harness_label: column.text,
+    capabilities: column.text,
+    last_seen_at: column.text,
+    created_at: column.text,
+    updated_at: column.text
+  },
+  { indexes: { by_status_seen: ['status', 'last_seen_at', 'updated_at'] } }
+);
+
 const task_events = new Table(
   {
     owner_id: column.text,
@@ -86,11 +145,15 @@ const agent_proposals = new Table(
   { indexes: { by_status: ['status', 'created_at'], by_task_status: ['task_id', 'status'] } }
 );
 
-export const AppSchema = new Schema({ tasks, tags, task_events, task_attachments, agent_proposals });
+export const AppSchema = new Schema({ tasks, tags, categories, categorisation_rules, user_memories, agent_devices, task_events, task_attachments, agent_proposals });
 
 export type Database = (typeof AppSchema)['types'];
 export type TaskRecord = Database['tasks'];
 export type TagRecord = Database['tags'];
+export type CategoryRecord = Database['categories'];
+export type CategorisationRuleRecord = Database['categorisation_rules'];
+export type UserMemoryRecord = Database['user_memories'];
+export type AgentDeviceRecord = Database['agent_devices'];
 export type TaskEventRecord = Database['task_events'];
 export type TaskAttachmentRecord = Database['task_attachments'];
 export type AgentProposalRecord = Database['agent_proposals'];

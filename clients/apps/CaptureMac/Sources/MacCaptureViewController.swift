@@ -2,7 +2,19 @@ import AppKit
 import CaptureCore
 
 final class MacCaptureViewController: NSViewController {
+    private enum Layout {
+        static let minListWidth: CGFloat = 540
+        static let minDetailWidth: CGFloat = 560
+        static let defaultDetailWidth: CGFloat = 680
+        static let maxDefaultDetailWidth: CGFloat = 860
+        static let minProposedHeight: CGFloat = 180
+        static let defaultProposedHeight: CGFloat = 260
+        static let minActiveHeight: CGFloat = 280
+        static let dividerDefaultsKey = "capture.mac.detailPaneWidth"
+    }
+
     private let viewModel: MacViewModel
+    private let splitView = NSSplitView()
     private let captureField = AttachmentCaptureTextField()
     private let settingsButton = NSButton(title: "Settings", target: nil, action: nil)
     private let proposedTable = FastConfirmTableView()
@@ -16,6 +28,8 @@ final class MacCaptureViewController: NSViewController {
     private let activeScroll = NSScrollView()
     private let detailScroll = NSScrollView()
     private let detailView = MacTaskDetailView()
+    private var didRestoreSplitPosition = false
+    private var proposedHeightConstraint: NSLayoutConstraint?
     var onOpenSettings: (() -> Void)?
 
     init(viewModel: MacViewModel) {
@@ -40,6 +54,8 @@ final class MacCaptureViewController: NSViewController {
 
     override func viewDidLayout() {
         super.viewDidLayout()
+        restoreSplitPositionIfNeeded()
+        updateProposedHeight()
         resizeDetailDocument()
     }
 
@@ -85,11 +101,17 @@ final class MacCaptureViewController: NSViewController {
     }
 
     private func buildUI() {
+        splitView.isVertical = true
+        splitView.dividerStyle = .thin
+        splitView.delegate = self
+        splitView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(splitView)
+
         listPane.translatesAutoresizingMaskIntoConstraints = false
         Theme.paintInk(listPane)
-        view.addSubview(listPane)
+        splitView.addArrangedSubview(listPane)
 
-        detailView.frame = NSRect(x: 0, y: 0, width: 410, height: 820)
+        detailView.frame = NSRect(x: 0, y: 0, width: Layout.defaultDetailWidth, height: 820)
         detailView.autoresizingMask = [.width]
         detailScroll.documentView = detailView
         detailScroll.hasVerticalScroller = true
@@ -104,7 +126,7 @@ final class MacCaptureViewController: NSViewController {
             name: NSView.boundsDidChangeNotification,
             object: detailScroll.contentView
         )
-        view.addSubview(detailScroll)
+        splitView.addArrangedSubview(detailScroll)
 
         captureField.placeholderString = "Capture anything…  (⌥Space to summon)"
         captureField.font = Theme.display(18, .medium)
@@ -152,18 +174,16 @@ final class MacCaptureViewController: NSViewController {
             listPane.addSubview($0)
         }
         styleScrollSurfaces()
+        let proposedHeight = proposedScroll.heightAnchor.constraint(equalToConstant: Layout.defaultProposedHeight)
+        proposedHeightConstraint = proposedHeight
 
         NSLayoutConstraint.activate([
-            listPane.topAnchor.constraint(equalTo: view.topAnchor),
-            listPane.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            listPane.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            listPane.widthAnchor.constraint(greaterThanOrEqualToConstant: 540),
-
-            detailScroll.topAnchor.constraint(equalTo: view.topAnchor, constant: 18),
-            detailScroll.leadingAnchor.constraint(equalTo: listPane.trailingAnchor, constant: 14),
-            detailScroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -18),
-            detailScroll.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -18),
-            detailScroll.widthAnchor.constraint(equalToConstant: 520),
+            splitView.topAnchor.constraint(equalTo: view.topAnchor),
+            splitView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            splitView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            splitView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            listPane.widthAnchor.constraint(greaterThanOrEqualToConstant: Layout.minListWidth),
+            detailScroll.widthAnchor.constraint(greaterThanOrEqualToConstant: Layout.minDetailWidth),
 
             commandLabel.topAnchor.constraint(equalTo: listPane.topAnchor, constant: 18),
             commandLabel.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 22),
@@ -182,7 +202,7 @@ final class MacCaptureViewController: NSViewController {
             proposedScroll.topAnchor.constraint(equalTo: proposedHeader.bottomAnchor, constant: 8),
             proposedScroll.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 18),
             proposedScroll.trailingAnchor.constraint(equalTo: listPane.trailingAnchor, constant: -18),
-            proposedScroll.heightAnchor.constraint(equalToConstant: 220),
+            proposedHeight,
 
             activeHeader.topAnchor.constraint(equalTo: proposedScroll.bottomAnchor, constant: 18),
             activeHeader.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 22),
@@ -236,10 +256,38 @@ final class MacCaptureViewController: NSViewController {
 
     private func resizeDetailDocument() {
         guard detailScroll.documentView === detailView else { return }
-        let width = max(480, detailScroll.contentSize.width)
+        let width = max(Layout.minDetailWidth, detailScroll.contentSize.width)
         detailView.frame.size.width = width
         detailView.layoutSubtreeIfNeeded()
         detailView.frame.size.height = max(detailScroll.contentSize.height, detailView.fittingSize.height)
+    }
+
+    private func restoreSplitPositionIfNeeded() {
+        guard !didRestoreSplitPosition, splitView.bounds.width > 0 else { return }
+        let saved = UserDefaults.standard.double(forKey: Layout.dividerDefaultsKey)
+        let dynamicDefault = min(Layout.maxDefaultDetailWidth, max(Layout.defaultDetailWidth, splitView.bounds.width * 0.34))
+        let detailWidth = saved > 0 ? saved : dynamicDefault
+        let dividerPosition = splitView.bounds.width - min(max(detailWidth, Layout.minDetailWidth), splitView.bounds.width - Layout.minListWidth)
+        splitView.setPosition(max(Layout.minListWidth, dividerPosition), ofDividerAt: 0)
+        didRestoreSplitPosition = true
+    }
+
+    private func updateProposedHeight() {
+        guard let proposedHeightConstraint, listPane.bounds.height > 0 else { return }
+        let rowDrivenHeight = viewModel.proposed.isEmpty
+            ? Layout.minProposedHeight
+            : CGFloat(min(viewModel.proposed.count, 8)) * 96 + 18
+        let maxByViewport = max(
+            Layout.minProposedHeight,
+            min(listPane.bounds.height * 0.55, listPane.bounds.height - Layout.minActiveHeight)
+        )
+        let newHeight = max(
+            Layout.minProposedHeight,
+            min(maxByViewport, max(Layout.defaultProposedHeight, rowDrivenHeight))
+        )
+        if abs(proposedHeightConstraint.constant - newHeight) > 0.5 {
+            proposedHeightConstraint.constant = newHeight
+        }
     }
 
     /// Rebuild the tag filter chip row from the synced tags ("slice by tag or multiple tags").
@@ -280,6 +328,7 @@ final class MacCaptureViewController: NSViewController {
             ? "ACTIVE · \(filtered)"
             : "ACTIVE · \(filtered) of \(viewModel.active.count)"
         rebuildFilterBar()
+        updateProposedHeight()
         proposedTable.reloadData()
         activeTable.reloadData()
         let color: (String) -> String = { [weak self] in self?.viewModel.color(forTag: $0) ?? TagPalette.color(for: $0) }
@@ -288,6 +337,8 @@ final class MacCaptureViewController: NSViewController {
             events: viewModel.selectedEvents,
             attachments: viewModel.selectedAttachments,
             rollup: viewModel.selectedRollup,
+            categories: viewModel.allCategories,
+            tags: viewModel.allTags,
             colourForTag: color,
             onSave: { [weak self] form in self?.viewModel.saveDetail(form) },
             onConfirm: { [weak self] form in self?.viewModel.confirmDetail(form) },
@@ -295,6 +346,9 @@ final class MacCaptureViewController: NSViewController {
             onDone: { [weak self] done in
                 guard let item = self?.viewModel.selectedTask else { return }
                 self?.viewModel.setDone(item, done)
+            },
+            onAgentHandoff: { [weak self] mode, instructions in
+                self?.viewModel.requestAgentHandoff(mode: mode, instructions: instructions)
             }
         )
         resizeDetailDocument()
@@ -307,13 +361,16 @@ final class MacCaptureViewController: NSViewController {
 
     @objc private func clearFilterTapped() { viewModel.clearFilter() }
 
-    @objc private func settingsTapped() { onOpenSettings?() }
+    @objc private func settingsTapped() {
+        CaptureDiagnostics.record(category: "ui", name: "button.settings.open", message: "Settings button clicked")
+        onOpenSettings?()
+    }
 
     @objc private func captureSubmit() {
         let text = captureField.stringValue
         guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         captureField.stringValue = "" // instant clear
-        viewModel.capture(text)
+        viewModel.capture(text, source: "command_deck")
     }
 
     private func capture(images: [NSImage]) {
@@ -321,7 +378,7 @@ final class MacCaptureViewController: NSViewController {
         guard !drafts.isEmpty else { return }
         let text = captureField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         captureField.stringValue = ""
-        viewModel.capture(text.isEmpty ? (drafts.first?.filename ?? "Image attachment") : text, attachments: drafts)
+        viewModel.capture(text.isEmpty ? (drafts.first?.filename ?? "Image attachment") : text, attachments: drafts, source: "command_deck_images")
     }
 
     private func selectedProposal() -> TaskItem? {
@@ -378,6 +435,7 @@ extension MacCaptureViewController: NSTableViewDataSource, NSTableViewDelegate {
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
         if tableView == proposedTable { return 92 }
         if case .header = viewModel.activeRows[row] { return 24 }
+        if case .rejected = viewModel.activeRows[row] { return 34 }
         return 44
     }
 
@@ -405,12 +463,15 @@ extension MacCaptureViewController: NSTableViewDataSource, NSTableViewDelegate {
             } onSetDue: { [weak self] date in
                 self?.viewModel.setDue(item, date)
             }
+        case let .rejected(item):
+            return RejectedRowView(item: item)
         }
 
     }
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
         if tableView == activeTable, case .header = viewModel.activeRows[row] { return false }
+        if tableView == activeTable, case .rejected = viewModel.activeRows[row] { return false }
         return true
     }
 
@@ -436,5 +497,21 @@ extension MacCaptureViewController: NSTableViewDataSource, NSTableViewDelegate {
             path.lineWidth = 1
             path.stroke()
         }
+    }
+}
+
+extension MacCaptureViewController: NSSplitViewDelegate {
+    func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+        Layout.minListWidth
+    }
+
+    func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+        max(Layout.minListWidth, splitView.bounds.width - Layout.minDetailWidth)
+    }
+
+    func splitViewDidResizeSubviews(_ notification: Notification) {
+        guard didRestoreSplitPosition, detailScroll.frame.width >= Layout.minDetailWidth else { return }
+        UserDefaults.standard.set(detailScroll.frame.width, forKey: Layout.dividerDefaultsKey)
+        resizeDetailDocument()
     }
 }

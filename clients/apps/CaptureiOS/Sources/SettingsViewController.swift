@@ -10,10 +10,175 @@ final class SettingsViewController: UIViewController {
     private let diagnosticsDetail = UILabel()
     private let diagnosticsMeta = UILabel()
     private let diagnosticsRefresh = UIButton(type: .system)
+    private let categoriesStack = UIStackView()
+    private let tagsStack = UIStackView()
+    private let rulesStack = UIStackView()
+    private let memoriesStack = UIStackView()
+    private var taxonomyWatchTasks: [Task<Void, Never>] = []
+    private var rules: [CategorisationRule] = []
+    private var memories: [UserMemory] = []
 
     init(viewModel: CaptureViewModel) {
         self.viewModel = viewModel
         super.init(nibName: nil, bundle: nil)
+    }
+
+    private func memoryRow(_ memory: UserMemory) -> UIView {
+        let title = UILabel()
+        title.text = memory.domain ?? "general"
+        title.font = Theme.mono(11, .semibold)
+        title.textColor = Theme.iris
+        let body = UILabel()
+        body.text = memory.content
+        body.font = Theme.display(13, .regular)
+        body.textColor = Theme.textPrimary
+        body.numberOfLines = 3
+        let meta = UILabel()
+        let metaText = ([memory.source.rawValue] + memory.tags.map { "#\($0)" } + [memory.expiresAt.map { "expires \($0.formatted(date: .abbreviated, time: .omitted))" }].compactMap { $0 }).joined(separator: " · ")
+        meta.text = metaText.isEmpty ? "agent context" : metaText
+        meta.font = Theme.mono(11)
+        meta.textColor = Theme.textTertiary
+        let text = UIStackView(arrangedSubviews: [title, body, meta])
+        text.axis = .vertical
+        text.spacing = 3
+        let edit = chipButton("Edit", color: Theme.signal) { [weak self] in self?.promptRenameMemory(memory) }
+        let toggle = chipButton(memory.status == .disabled ? "Enable" : "Disable", color: Theme.textSecondary) { [weak self] in
+            self?.viewModel.setUserMemoryStatus(memory.id, status: memory.status == .disabled ? .active : .disabled)
+        }
+        let delete = chipButton("Delete", color: Theme.danger) { [weak self] in
+            self?.viewModel.setUserMemoryStatus(memory.id, status: .deleted)
+        }
+        let row = UIStackView(arrangedSubviews: [text, edit, toggle, delete])
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 8
+        row.layoutMargins = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        row.isLayoutMarginsRelativeArrangement = true
+        row.backgroundColor = Theme.surfaceHi
+        row.layer.cornerRadius = 12
+        row.alpha = memory.status == .active ? 1 : 0.56
+        return row
+    }
+
+    private func promptCreateRule() {
+        promptRule(title: "New rule", rule: nil)
+    }
+
+    private func promptCreateMemory() {
+        promptMemory(title: "New memory", memory: nil)
+    }
+
+    private func promptRenameMemory(_ memory: UserMemory) {
+        promptMemory(title: "Edit memory", memory: memory)
+    }
+
+    private func promptMemory(title: String, memory: UserMemory?) {
+        let alert = UIAlertController(title: title, message: "Facts and preferences guide agent research. Disable or delete stale context.", preferredStyle: .alert)
+        alert.addTextField { field in
+            field.placeholder = "Preference or fact"
+            field.text = memory?.content
+        }
+        alert.addTextField { field in
+            field.placeholder = "Domain, e.g. shopping"
+            field.text = memory?.domain
+        }
+        alert.addTextField { field in
+            field.placeholder = "tags, comma-separated"
+            field.text = memory?.tags.joined(separator: ", ")
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self, weak alert] _ in
+            guard let self, let alert else { return }
+            let content = (alert.textFields?[0].text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !content.isEmpty else { return }
+            let rawDomain = alert.textFields?[1].text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let domain = rawDomain.isEmpty ? nil : rawDomain
+            let tags = (alert.textFields?[2].text ?? "")
+                .split(separator: ",")
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if let memory {
+                self.viewModel.updateUserMemory(memory, content: content, domain: domain, tags: tags, expiresAt: memory.expiresAt, status: memory.status == .disabled ? .disabled : .active)
+            } else {
+                self.viewModel.createUserMemory(content: content, domain: domain, tags: tags, expiresAt: nil)
+            }
+        })
+        present(alert, animated: true)
+    }
+
+    private func promptRenameRule(_ rule: CategorisationRule) {
+        promptRule(title: "Edit rule", rule: rule)
+    }
+
+    private func promptRule(title: String, rule: CategorisationRule?) {
+        let alert = UIAlertController(title: title, message: "Rules guide AI suggestions only; you still confirm the task.", preferredStyle: .alert)
+        alert.addTextField { field in
+            field.placeholder = "Rule title"
+            field.text = rule?.title
+        }
+        alert.addTextField { field in
+            field.placeholder = "When should this apply?"
+            field.text = rule?.instructions
+        }
+        alert.addTextField { field in
+            field.placeholder = "Category (optional)"
+            field.text = rule?.category
+        }
+        alert.addTextField { field in
+            field.placeholder = "tags, comma-separated"
+            field.text = rule?.tags.joined(separator: ", ")
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self] _ in
+            guard let self else { return }
+            let title = (alert.textFields?[0].text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let instructions = (alert.textFields?[1].text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty, !instructions.isEmpty else { return }
+            let rawCategory = alert.textFields?[2].text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let category = rawCategory.isEmpty ? nil : rawCategory
+            let tags = (alert.textFields?[3].text ?? "")
+                .split(separator: ",")
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if let rule {
+                self.viewModel.updateCategorisationRule(id: rule.id, title: title, instructions: instructions, category: category, tags: tags, enabled: rule.enabled)
+            } else {
+                self.viewModel.createCategorisationRule(title: title, instructions: instructions, category: category, tags: tags, enabled: true)
+            }
+        })
+        present(alert, animated: true)
+    }
+
+    private func ruleRow(_ rule: CategorisationRule) -> UIView {
+        let title = UILabel()
+        title.text = rule.title
+        title.font = Theme.display(14, .semibold)
+        title.textColor = Theme.textPrimary
+        let body = UILabel()
+        body.text = rule.instructions
+        body.font = Theme.display(12, .regular)
+        body.textColor = Theme.textSecondary
+        body.numberOfLines = 2
+        let meta = UILabel()
+        let metaText = ([rule.category].compactMap { $0 } + rule.tags.map { "#\($0)" }).joined(separator: " · ")
+        meta.text = metaText.isEmpty ? "suggestion context only" : metaText
+        meta.font = Theme.mono(11)
+        meta.textColor = Theme.iris
+        let text = UIStackView(arrangedSubviews: [title, body, meta])
+        text.axis = .vertical
+        text.spacing = 3
+        let edit = chipButton("Edit", color: Theme.signal) { [weak self] in self?.promptRenameRule(rule) }
+        let delete = chipButton("Delete", color: Theme.danger) { [weak self] in self?.viewModel.deleteCategorisationRule(rule.id) }
+        let row = UIStackView(arrangedSubviews: [text, edit, delete])
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 8
+        row.layoutMargins = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        row.isLayoutMarginsRelativeArrangement = true
+        row.backgroundColor = Theme.surfaceHi
+        row.layer.cornerRadius = 12
+        row.alpha = rule.enabled ? 1 : 0.56
+        return row
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -30,6 +195,10 @@ final class SettingsViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         applyTheme()
+    }
+
+    deinit {
+        taxonomyWatchTasks.forEach { $0.cancel() }
     }
 
     private func build() {
@@ -52,7 +221,7 @@ final class SettingsViewController: UIViewController {
         appearanceControl.addTarget(self, action: #selector(appearanceChanged), for: .valueChanged)
 
         let accountNote = UILabel()
-        accountNote.text = "Password changes use the emailed reset flow from the sign-in screen."
+        accountNote.text = "Password changes use the emailed reset flow from the sign-in screen.\nBuild \(Self.appVersion)."
         accountNote.font = Theme.display(13, .regular)
         accountNote.textColor = Theme.textTertiary
         accountNote.numberOfLines = 0
@@ -81,8 +250,21 @@ final class SettingsViewController: UIViewController {
 
         stack.addArrangedSubview(header)
         stack.addArrangedSubview(section(title: "Appearance", controls: [appearanceControl]))
+        stack.addArrangedSubview(section(title: "Categories", controls: [makeAddButton(title: "Add category", action: { [weak self] in self?.promptCreateCategory() }), categoriesStack]))
+        stack.addArrangedSubview(section(title: "Agent Memory", controls: [makeAddButton(title: "Add memory", action: { [weak self] in self?.promptCreateMemory() }), memoriesStack]))
+        stack.addArrangedSubview(section(title: "AI Categorisation Rules", controls: [makeAddButton(title: "Add rule", action: { [weak self] in self?.promptCreateRule() }), rulesStack]))
+        stack.addArrangedSubview(section(title: "Tags", controls: [makeAddButton(title: "Add tag", action: { [weak self] in self?.promptCreateTag() }), tagsStack]))
         stack.addArrangedSubview(section(title: "Sync Diagnostics", controls: [diagnosticsStatus, diagnosticsDetail, diagnosticsMeta, diagnosticsRefresh]))
         stack.addArrangedSubview(section(title: "Account", controls: [accountNote, signOutButton]))
+        categoriesStack.axis = .vertical
+        categoriesStack.spacing = 8
+        tagsStack.axis = .vertical
+        tagsStack.spacing = 8
+        rulesStack.axis = .vertical
+        rulesStack.spacing = 8
+        memoriesStack.axis = .vertical
+        memoriesStack.spacing = 8
+        rebuildTaxonomy()
 
         NSLayoutConstraint.activate([
             scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
@@ -120,6 +302,7 @@ final class SettingsViewController: UIViewController {
         view.window?.tintColor = Theme.signal
         scrollView.backgroundColor = Theme.ink
         stack.backgroundColor = Theme.ink
+        rebuildTaxonomy()
     }
 
     private func loadDiagnostics() {
@@ -176,6 +359,252 @@ final class SettingsViewController: UIViewController {
             await viewModel.auth.signOut()
             await viewModel.store.clearActiveUser()
         }
+    }
+
+    private func rebuildTaxonomy() {
+        startTaxonomyWatchersIfNeeded()
+        categoriesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        tagsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        rulesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        memoriesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let existingCategories = Set(viewModel.allCategories.map { CategoryPalette.key($0.name) })
+        let missingDefaults = CAPTURE_CATEGORIES.filter { !existingCategories.contains(CategoryPalette.key($0)) }
+        if !missingDefaults.isEmpty {
+            let defaults = UIStackView()
+            defaults.axis = .horizontal
+            defaults.spacing = 6
+            defaults.alignment = .leading
+            for name in missingDefaults {
+                defaults.addArrangedSubview(chipButton("+ \(name)", color: Theme.textSecondary) { [weak self] in
+                    self?.viewModel.createCategory(name)
+                    self?.reloadTaxonomySoon()
+                })
+            }
+            categoriesStack.addArrangedSubview(defaults)
+        }
+        for category in viewModel.allCategories {
+            categoriesStack.addArrangedSubview(taxonomyRow(
+                name: category.name,
+                color: category.color,
+                onRename: { [weak self] in self?.promptRenameCategory(category) },
+                onRecolor: { [weak self] in self?.presentColorPicker(current: category.color) { color in
+                    self?.viewModel.recolorCategory(category.id, color: color)
+                    self?.reloadTaxonomySoon()
+                }},
+                onDelete: { [weak self] in
+                    self?.viewModel.deleteCategory(category.id)
+                    self?.reloadTaxonomySoon()
+                }
+            ))
+        }
+        if viewModel.allCategories.isEmpty {
+            categoriesStack.addArrangedSubview(emptyLabel("No categories yet. Add defaults or create your own."))
+        }
+        for memory in memories {
+            memoriesStack.addArrangedSubview(memoryRow(memory))
+        }
+        if memories.isEmpty {
+            memoriesStack.addArrangedSubview(emptyLabel("No memories yet. Add preferences the agent should use for research."))
+        }
+        for rule in rules {
+            rulesStack.addArrangedSubview(ruleRow(rule))
+        }
+        if rules.isEmpty {
+            rulesStack.addArrangedSubview(emptyLabel("No rules yet. Add one like “wok research → errands + shopping”."))
+        }
+        for tag in viewModel.allTags {
+            tagsStack.addArrangedSubview(taxonomyRow(
+                name: tag.name,
+                color: tag.color,
+                onRename: { [weak self] in self?.promptRenameTag(tag) },
+                onRecolor: { [weak self] in self?.presentColorPicker(current: tag.color) { color in
+                    self?.viewModel.recolorTag(tag.id, color: color)
+                    self?.reloadTaxonomySoon()
+                }},
+                onDelete: { [weak self] in
+                    self?.viewModel.deleteTag(tag.id)
+                    self?.reloadTaxonomySoon()
+                }
+            ))
+        }
+        if viewModel.allTags.isEmpty {
+            tagsStack.addArrangedSubview(emptyLabel("No tags yet. Create tags here, then apply them from task details."))
+        }
+    }
+
+    private func reloadTaxonomySoon() {
+    }
+
+    private func startTaxonomyWatchersIfNeeded() {
+        guard taxonomyWatchTasks.isEmpty else { return }
+        taxonomyWatchTasks.append(Task { [weak self] in
+            guard let store = self?.viewModel.store else { return }
+            do {
+                for try await _ in try store.watchCategories() {
+                    guard let self else { break }
+                    await MainActor.run { self.rebuildTaxonomy() }
+                }
+            } catch {}
+        })
+        taxonomyWatchTasks.append(Task { [weak self] in
+            guard let store = self?.viewModel.store else { return }
+            do {
+                for try await _ in try store.watchTags() {
+                    guard let self else { break }
+                    await MainActor.run { self.rebuildTaxonomy() }
+                }
+            } catch {}
+        })
+        taxonomyWatchTasks.append(Task { [weak self] in
+            guard let store = self?.viewModel.store else { return }
+            do {
+                for try await rules in try store.watchCategorisationRules() {
+                    guard let self else { break }
+                    await MainActor.run {
+                        self.rules = rules
+                        self.rebuildTaxonomy()
+                    }
+                }
+            } catch {}
+        })
+        taxonomyWatchTasks.append(Task { [weak self] in
+            guard let store = self?.viewModel.store else { return }
+            do {
+                for try await memories in try store.watchUserMemories() {
+                    guard let self else { break }
+                    await MainActor.run {
+                        self.memories = memories
+                        self.rebuildTaxonomy()
+                    }
+                }
+            } catch {}
+        })
+    }
+
+    private func makeAddButton(title: String, action: @escaping () -> Void) -> UIButton {
+        let button = UIButton(type: .system)
+        button.setTitle(title, for: .normal)
+        button.setTitleColor(Theme.signal, for: .normal)
+        button.backgroundColor = Theme.surfaceHi
+        button.layer.cornerRadius = 12
+        button.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        button.addAction(UIAction { _ in action() }, for: .touchUpInside)
+        return button
+    }
+
+    private func taxonomyRow(
+        name: String,
+        color: String,
+        onRename: @escaping () -> Void,
+        onRecolor: @escaping () -> Void,
+        onDelete: @escaping () -> Void
+    ) -> UIView {
+        let dot = UIView()
+        dot.backgroundColor = UIColor(hex: color) ?? Theme.textSecondary
+        dot.layer.cornerRadius = 5
+        dot.widthAnchor.constraint(equalToConstant: 10).isActive = true
+        dot.heightAnchor.constraint(equalToConstant: 10).isActive = true
+
+        let nameButton = UIButton(type: .system)
+        nameButton.setTitle(name, for: .normal)
+        nameButton.setTitleColor(Theme.textPrimary, for: .normal)
+        nameButton.titleLabel?.font = Theme.display(14, .semibold)
+        nameButton.contentHorizontalAlignment = .leading
+        nameButton.addAction(UIAction { _ in onRename() }, for: .touchUpInside)
+
+        let colorButton = chipButton("Colour", color: UIColor(hex: color) ?? Theme.iris, action: onRecolor)
+        let deleteButton = chipButton("Delete", color: Theme.danger, action: onDelete)
+        let row = UIStackView(arrangedSubviews: [dot, nameButton, colorButton, deleteButton])
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 8
+        row.layoutMargins = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        row.isLayoutMarginsRelativeArrangement = true
+        row.backgroundColor = Theme.surfaceHi
+        row.layer.cornerRadius = 12
+        return row
+    }
+
+    private func chipButton(_ title: String, color: UIColor, action: @escaping () -> Void) -> UIButton {
+        let button = UIButton(type: .system)
+        button.setTitle(title, for: .normal)
+        button.setTitleColor(color, for: .normal)
+        button.backgroundColor = color.withAlphaComponent(0.12)
+        button.layer.cornerRadius = 10
+        button.titleLabel?.font = Theme.mono(11, .semibold)
+        button.contentEdgeInsets = UIEdgeInsets(top: 5, left: 8, bottom: 5, right: 8)
+        button.addAction(UIAction { _ in action() }, for: .touchUpInside)
+        return button
+    }
+
+    private func emptyLabel(_ text: String) -> UILabel {
+        let label = UILabel()
+        label.text = text
+        label.font = Theme.display(13, .regular)
+        label.textColor = Theme.textTertiary
+        label.numberOfLines = 0
+        return label
+    }
+
+    private func promptCreateCategory() {
+        promptText(title: "New category", placeholder: "engineering") { [weak self] value in
+            self?.viewModel.createCategory(value)
+            self?.reloadTaxonomySoon()
+        }
+    }
+
+    private func promptCreateTag() {
+        promptText(title: "New tag", placeholder: "project-name") { [weak self] value in
+            self?.viewModel.createTag(value)
+            self?.reloadTaxonomySoon()
+        }
+    }
+
+    private func promptRenameCategory(_ category: TaskCategory) {
+        promptText(title: "Rename category", placeholder: category.name, defaultValue: category.name) { [weak self] value in
+            self?.viewModel.renameCategory(category.id, to: value)
+            self?.reloadTaxonomySoon()
+        }
+    }
+
+    private func promptRenameTag(_ tag: Tag) {
+        promptText(title: "Rename tag", placeholder: tag.name, defaultValue: tag.name) { [weak self] value in
+            self?.viewModel.renameTag(tag.id, to: value)
+            self?.reloadTaxonomySoon()
+        }
+    }
+
+    private func promptText(title: String, placeholder: String, defaultValue: String = "", onSave: @escaping (String) -> Void) {
+        let alert = UIAlertController(title: title, message: nil, preferredStyle: .alert)
+        alert.addTextField { field in
+            field.placeholder = placeholder
+            field.text = defaultValue
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { _ in
+            let value = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !value.isEmpty else { return }
+            onSave(value)
+        })
+        present(alert, animated: true)
+    }
+
+    private func presentColorPicker(current: String, onPick: @escaping (String) -> Void) {
+        let sheet = UIAlertController(title: "Colour", message: nil, preferredStyle: .actionSheet)
+        for color in TagPalette.colors {
+            sheet.addAction(UIAlertAction(title: color == current ? "✓ \(color)" : color, style: .default) { _ in onPick(color) })
+        }
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        sheet.popoverPresentationController?.sourceView = view
+        sheet.popoverPresentationController?.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
+        present(sheet, animated: true)
+    }
+
+    private static var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "unknown"
+        let build = info?["CFBundleVersion"] as? String ?? "unknown"
+        return "\(version) (\(build))"
     }
 
     private func section(title: String, controls: [UIView]) -> UIView {

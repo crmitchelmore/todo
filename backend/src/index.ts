@@ -48,6 +48,8 @@ import {
 import { agentHandoffRequestId, parseAgentHandoffInput } from './agentHandoff.js';
 import { validateAttachmentData } from './attachments.js';
 import { sendEmailBestEffort, loginCodeEmail, resetCodeEmail } from './mailer.js';
+import { normalizeUserMemoryWrite, softDeleteUserMemory } from './userMemoryUpload.js';
+import { captureException, hashId, initObservability, requestWideEventMiddleware, wideEvent } from './observability.js';
 import {
   githubAuthorizeUrl,
   githubOAuthConfig,
@@ -86,12 +88,15 @@ const MFA_CHALLENGE_TTL_MS = 5 * 60_000;
 const MFA_MAX_ATTEMPTS = 5;
 const OAUTH_STATE_TTL_MS = 10 * 60_000;
 
+initObservability();
+
 const pool = new pg.Pool({ connectionString: DATABASE_URI });
 const { privateKey, publicJwk, kid } = await loadSigningKey();
 
 const app = express();
 // Behind Railway's proxy: trust the first hop so req.ip reflects the real client for throttling.
 app.set('trust proxy', 1);
+app.use(requestWideEventMiddleware());
 app.use(cors());
 app.use(express.json({ limit: '5mb' }));
 
@@ -130,6 +135,7 @@ function clearFailures(key: string): void {
 interface AuthedRequest extends Request {
   ownerId?: string;
   sessionToken?: string;
+  requestId?: string;
 }
 
 function bearer(req: Request): string | undefined {
@@ -170,6 +176,20 @@ const ALLOWED_COLUMNS: Record<string, Set<string>> = {
   ]),
   tags: new Set([
     'id', 'owner_id', 'name', 'color', 'created_at', 'updated_at'
+  ]),
+  categories: new Set([
+    'id', 'owner_id', 'name', 'color', 'created_at', 'updated_at'
+  ]),
+  categorisation_rules: new Set([
+    'id', 'owner_id', 'title', 'instructions', 'category', 'tags', 'enabled', 'created_at', 'updated_at'
+  ]),
+  user_memories: new Set([
+    'id', 'owner_id', 'content', 'domain', 'source', 'confidence', 'tags', 'status',
+    'expires_at', 'created_at', 'updated_at', 'deleted_at'
+  ]),
+  agent_devices: new Set([
+    'id', 'owner_id', 'device_name', 'platform', 'status', 'is_selected_backend',
+    'harness_kind', 'harness_label', 'capabilities', 'last_seen_at', 'created_at', 'updated_at'
   ]),
   task_attachments: new Set([
     'id', 'owner_id', 'task_id', 'filename', 'mime_type', 'byte_size', 'preview_data_url', 'created_at'
@@ -1088,7 +1108,43 @@ function sanitize(table: string, data: Record<string, unknown>): Record<string, 
   for (const [k, v] of Object.entries(data)) {
     if (allowed.has(k)) out[k] = v;
   }
+  if (table === 'user_memories') normalizeUserMemoryWrite(out);
+  if (table === 'agent_devices') normalizeAgentDeviceWrite(out);
   return out;
+}
+
+function normalizeAgentDeviceWrite(data: Record<string, unknown>): void {
+  if (Object.hasOwn(data, 'is_selected_backend')) {
+    const selected = Number(data.is_selected_backend);
+    data.is_selected_backend = selected === 1 ? 1 : 0;
+  }
+  if (Object.hasOwn(data, 'status')) {
+    const status = typeof data.status === 'string' ? data.status : 'active';
+    data.status = status === 'disabled' ? 'disabled' : 'active';
+  }
+  if (data.status === 'disabled') data.is_selected_backend = 0;
+  if (Object.hasOwn(data, 'harness_kind') && typeof data.harness_kind === 'string') {
+    const kind = data.harness_kind.trim();
+    data.harness_kind = ['copilot-cli', 'hermes', 'openclaw', 'custom'].includes(kind) ? kind : null;
+  }
+}
+
+async function prepareAgentDeviceSelection(
+  client: pg.PoolClient,
+  ownerId: string,
+  id: string,
+  data: Record<string, unknown>
+): Promise<void> {
+  if (data.is_selected_backend !== 1) return;
+  await client.query(
+    `UPDATE public.agent_devices
+        SET is_selected_backend = 0,
+            updated_at = now()
+      WHERE owner_id = $1
+        AND id <> $2
+        AND is_selected_backend = 1`,
+    [ownerId, id]
+  );
 }
 
 function deterministicUuid(input: string): string {
@@ -1311,7 +1367,8 @@ function taskEventForOp(
   applied: boolean,
   before: TaskEventState | null
 ): Omit<TaskEventInput, 'ownerId' | 'actor' | 'taskId' | 'idempotencyKey'> | null {
-  if (!applied || op.type !== 'tasks' || op.op === 'DELETE') return null;
+  if (!applied || op.type !== 'tasks') return null;
+  if (op.op === 'DELETE') return { eventType: 'deleted', title: 'Rejected', body: 'Moved to rejected items.' };
   const data = op.data ?? {};
   const status = typeof data.status === 'string' ? data.status : null;
   if (!before && status === 'proposed') {
@@ -1334,6 +1391,9 @@ function taskEventForOp(
   }
   if (status === 'proposed') {
     return { eventType: 'reopened', title: 'Reopened', body: 'Moved back to the capture inbox.' };
+  }
+  if (status === 'cancelled') {
+    return { eventType: 'deleted', title: 'Rejected', body: 'Moved to rejected items.' };
   }
   const changes = semanticTaskChanges(before, data);
   const changed = changes.map((change) => change.field);
@@ -1375,7 +1435,31 @@ async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Prom
   }
 
   if (op.op === 'DELETE') {
-    if (table === 'tasks') await markLinkedAgentProposals(client, ownerId, op.id, 'rejected', false);
+    if (table === 'tasks') {
+      await markLinkedAgentProposals(client, ownerId, op.id, 'rejected', false);
+      const result = await client.query(
+        `UPDATE public.tasks
+            SET status = 'cancelled',
+                updated_at = now()
+          WHERE id = $1 AND owner_id = $2`,
+        [op.id, ownerId]
+      );
+      return (result.rowCount ?? 0) > 0;
+    }
+    if (table === 'user_memories') {
+      return softDeleteUserMemory(client, ownerId, op.id);
+    }
+    if (table === 'agent_devices') {
+      const result = await client.query(
+        `UPDATE public.agent_devices
+            SET status = 'disabled',
+                is_selected_backend = 0,
+                updated_at = now()
+          WHERE id = $1 AND owner_id = $2`,
+        [op.id, ownerId]
+      );
+      return (result.rowCount ?? 0) > 0;
+    }
     const result = await client.query(`DELETE FROM ${table} WHERE id = $1 AND owner_id = $2`, [op.id, ownerId]);
     return (result.rowCount ?? 0) > 0;
   }
@@ -1384,6 +1468,7 @@ async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Prom
   const data = sanitize(table, { ...(op.data ?? {}), id: op.id, owner_id: ownerId });
 
   if (op.op === 'PUT') {
+    if (table === 'agent_devices') await prepareAgentDeviceSelection(client, ownerId, op.id, data);
     const cols = Object.keys(data);
     const vals = Object.values(data);
     const placeholders = cols.map((_, i) => `$${i + 1}`);
@@ -1403,6 +1488,7 @@ async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Prom
   }
 
   if (op.op === 'PATCH') {
+    if (table === 'agent_devices') await prepareAgentDeviceSelection(client, ownerId, op.id, data);
     const cols = Object.keys(data).filter((c) => c !== 'id' && c !== 'owner_id');
     if (cols.length === 0) return false;
     const setClause = cols.map((c, i) => `${c} = $${i + 1}`).join(', ');
@@ -1682,6 +1768,7 @@ app.post('/api/tasks/:id/agent-handoff', requireAuth, async (req: AuthedRequest,
     return res.status(202).json({ ok: true, request_id: requestId });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
+    captureException(err, { op: 'agent_handoff_request', task_id: taskId, owner_id: ownerId });
     console.error('agent handoff request failed:', err);
     return res.status(500).json({ ok: false, error: 'agent handoff failed' });
   } finally {
@@ -1726,6 +1813,7 @@ app.put('/api/data', requireAuth, async (req: AuthedRequest, res: Response) => {
   const ops: CrudOp[] = req.body?.ops ?? [];
   const ownerId = req.ownerId!;
   const client = await pool.connect();
+  const started = performance.now();
   try {
     await client.query('BEGIN');
     for (const op of ops) {
@@ -1745,9 +1833,21 @@ app.put('/api/data', requireAuth, async (req: AuthedRequest, res: Response) => {
       }
     }
     await client.query('COMMIT');
+    wideEvent('sync.upload', {
+      request_id: req.requestId,
+      owner_hash: hashId(ownerId),
+      op_count: ops.length,
+      duration_ms: Math.round(performance.now() - started),
+    });
     res.json({ ok: true, applied: ops.length });
   } catch (err) {
     await client.query('ROLLBACK');
+    captureException(err, {
+      op: 'sync_upload',
+      owner_id: ownerId,
+      op_count: ops.length,
+      duration_ms: Math.round(performance.now() - started),
+    });
     console.error('upload failed:', err);
     res.status(500).json({ ok: false, error: String(err) });
   } finally {

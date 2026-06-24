@@ -140,148 +140,150 @@ export function SignIn({ initialError, onSignedIn }: { initialError?: string | n
 
   return (
     <div className="signin">
-      <h1>Capture</h1>
-      <p className="signin-sub">Sign in to sync your todos across your devices.</p>
+      <div className="signin-card">
+        <h1>Capture</h1>
+        <p className="signin-sub">Sign in to sync your todos across your devices.</p>
 
-      {mfaChallenge && (
-        <form className="signin-form" onSubmit={handleMfa}>
-          <input
-            type="text"
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            placeholder="Authenticator or recovery code"
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            disabled={busy}
-          />
-          <button className="signin-submit" type="submit" disabled={busy}>
-            {busy ? 'Verifying…' : 'Verify & Sign In'}
-          </button>
-          <button
-            type="button"
-            className="signin-link"
-            onClick={() => { setMfaChallenge(null); setCode(''); setNote(null); }}
-          >
-            Back to sign-in
-          </button>
-        </form>
-      )}
-
-      {!mfaChallenge && (
-        <>
-      {view === 'password' && (
-        <>
-          <div className="signin-tabs" role="tablist">
-            <button
-              type="button" role="tab" aria-selected={mode === 'signIn'}
-              className={mode === 'signIn' ? 'active' : ''}
-              onClick={() => { setMode('signIn'); setError(null); }}
-            >Sign In</button>
-            <button
-              type="button" role="tab" aria-selected={mode === 'register'}
-              className={mode === 'register' ? 'active' : ''}
-              onClick={() => { setMode('register'); setError(null); }}
-            >Create Account</button>
-          </div>
-
-          <form className="signin-form" onSubmit={handlePassword}>
-            {emailInput}
+        {mfaChallenge && (
+          <form className="signin-form" onSubmit={handleMfa}>
             <input
-              type="password"
-              placeholder="Password"
-              autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              placeholder="Authenticator or recovery code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
               disabled={busy}
             />
             <button className="signin-submit" type="submit" disabled={busy}>
-              {busy ? 'Please wait…' : mode === 'register' ? 'Create Account' : 'Sign In'}
+              {busy ? 'Verifying…' : 'Verify & Sign In'}
+            </button>
+            <button
+              type="button"
+              className="signin-link"
+              onClick={() => { setMfaChallenge(null); setCode(''); setNote(null); }}
+            >
+              Back to sign-in
             </button>
           </form>
+        )}
 
-          {mode === 'signIn' && (
-            <button type="button" className="signin-link" onClick={() => go('forgot')}>
-              Forgot password?
-            </button>
-          )}
-          <div className="signin-divider"><span>or</span></div>
-          {mode === 'signIn' && (
-            <button type="button" className="signin-alt" onClick={handlePasskey} disabled={busy}>
-              Sign in with a passkey
-            </button>
-          )}
-          {mode === 'signIn' && githubAvailable && (
-            <button type="button" className="signin-alt" onClick={signInWithGitHub} disabled={busy}>
-              Sign in with GitHub
-            </button>
-          )}
-          <button type="button" className="signin-alt" onClick={() => go('code')}>
-            Email me a sign-in code
-          </button>
-        </>
-      )}
+        {!mfaChallenge && (
+          <>
+        {view === 'password' && (
+          <>
+            <div className="signin-tabs" role="tablist">
+              <button
+                type="button" role="tab" aria-selected={mode === 'signIn'}
+                className={mode === 'signIn' ? 'active' : ''}
+                onClick={() => { setMode('signIn'); setError(null); }}
+              >Sign In</button>
+              <button
+                type="button" role="tab" aria-selected={mode === 'register'}
+                className={mode === 'register' ? 'active' : ''}
+                onClick={() => { setMode('register'); setError(null); }}
+              >Create Account</button>
+            </div>
 
-      {view === 'code' && (
-        <>
-          {!sent ? (
-            <form className="signin-form" onSubmit={handleSendCode}>
+            <form className="signin-form" onSubmit={handlePassword}>
               {emailInput}
-              <button className="signin-submit" type="submit" disabled={busy}>
-                {busy ? 'Sending…' : 'Send me a code'}
-              </button>
-            </form>
-          ) : (
-            <form className="signin-form" onSubmit={handleVerifyCode}>
-              {codeInput}
-              <button className="signin-submit" type="submit" disabled={busy}>
-                {busy ? 'Verifying…' : 'Sign In'}
-              </button>
-              <button type="button" className="signin-link" onClick={() => { setSent(false); setNote(null); }}>
-                Use a different email
-              </button>
-            </form>
-          )}
-          <button type="button" className="signin-alt" onClick={() => go('password')}>
-            Back to password sign-in
-          </button>
-        </>
-      )}
-
-      {view === 'forgot' && (
-        <>
-          {!sent ? (
-            <form className="signin-form" onSubmit={handleSendReset}>
-              {emailInput}
-              <button className="signin-submit" type="submit" disabled={busy}>
-                {busy ? 'Sending…' : 'Send reset code'}
-              </button>
-            </form>
-          ) : (
-            <form className="signin-form" onSubmit={handleReset}>
-              {codeInput}
               <input
                 type="password"
-                placeholder="New password"
-                autoComplete="new-password"
+                placeholder="Password"
+                autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={busy}
               />
               <button className="signin-submit" type="submit" disabled={busy}>
-                {busy ? 'Resetting…' : 'Reset & Sign In'}
+                {busy ? 'Please wait…' : mode === 'register' ? 'Create Account' : 'Sign In'}
               </button>
             </form>
-          )}
-          <button type="button" className="signin-alt" onClick={() => go('password')}>
-            Back to password sign-in
-          </button>
-        </>
-      )}
-        </>
-      )}
 
-      {note && <p className="signin-note">{note}</p>}
-      {error && <p className="signin-error">{error}</p>}
+            {mode === 'signIn' && (
+              <button type="button" className="signin-link" onClick={() => go('forgot')}>
+                Forgot password?
+              </button>
+            )}
+            <div className="signin-divider"><span>or</span></div>
+            {mode === 'signIn' && (
+              <button type="button" className="signin-alt" onClick={handlePasskey} disabled={busy}>
+                Sign in with a passkey
+              </button>
+            )}
+            {mode === 'signIn' && githubAvailable && (
+              <button type="button" className="signin-alt" onClick={signInWithGitHub} disabled={busy}>
+                Sign in with GitHub
+              </button>
+            )}
+            <button type="button" className="signin-alt" onClick={() => go('code')}>
+              Email me a sign-in code
+            </button>
+          </>
+        )}
+
+        {view === 'code' && (
+          <>
+            {!sent ? (
+              <form className="signin-form" onSubmit={handleSendCode}>
+                {emailInput}
+                <button className="signin-submit" type="submit" disabled={busy}>
+                  {busy ? 'Sending…' : 'Send me a code'}
+                </button>
+              </form>
+            ) : (
+              <form className="signin-form" onSubmit={handleVerifyCode}>
+                {codeInput}
+                <button className="signin-submit" type="submit" disabled={busy}>
+                  {busy ? 'Verifying…' : 'Sign In'}
+                </button>
+                <button type="button" className="signin-link" onClick={() => { setSent(false); setNote(null); }}>
+                  Use a different email
+                </button>
+              </form>
+            )}
+            <button type="button" className="signin-alt" onClick={() => go('password')}>
+              Back to password sign-in
+            </button>
+          </>
+        )}
+
+        {view === 'forgot' && (
+          <>
+            {!sent ? (
+              <form className="signin-form" onSubmit={handleSendReset}>
+                {emailInput}
+                <button className="signin-submit" type="submit" disabled={busy}>
+                  {busy ? 'Sending…' : 'Send reset code'}
+                </button>
+              </form>
+            ) : (
+              <form className="signin-form" onSubmit={handleReset}>
+                {codeInput}
+                <input
+                  type="password"
+                  placeholder="New password"
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={busy}
+                />
+                <button className="signin-submit" type="submit" disabled={busy}>
+                  {busy ? 'Resetting…' : 'Reset & Sign In'}
+                </button>
+              </form>
+            )}
+            <button type="button" className="signin-alt" onClick={() => go('password')}>
+              Back to password sign-in
+            </button>
+          </>
+        )}
+          </>
+        )}
+
+        {note && <p className="signin-note">{note}</p>}
+        {error && <p className="signin-error">{error}</p>}
+      </div>
     </div>
   );
 }

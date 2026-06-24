@@ -25,12 +25,22 @@ export interface WebContext {
   error?: string;
 }
 
+export interface MemoryContext {
+  content: string;
+  domain: string | null;
+  source: string;
+  confidence: number;
+  tags: string[];
+  expiresAt: string | null;
+}
+
 export interface TaskDiscovery {
   taskId: string;
   title: string;
   query: string;
   location: LocationContext;
   web: WebContext;
+  memories: MemoryContext[];
   nextActions: string[];
   confidence: number;
 }
@@ -114,15 +124,18 @@ export async function discoverTaskContext(
     now?: Date;
     force?: boolean;
     instructions?: string | null;
+    memories?: readonly MemoryContext[];
   } = {}
 ): Promise<TaskDiscovery | null> {
   if (!options.force && !shouldDiscoverTask(task.title)) return null;
   const env = options.env ?? process.env;
   const location = locationContextFromEnv(env);
-  const querySeed = [task.title, options.instructions ?? ''].join(' ').replace(/\s+/g, ' ').trim();
-  const query = discoveryQueryFor(querySeed || task.title, location);
+  const memories = options.memories?.slice(0, 12) ?? [];
+  const memoryQuery = memories.map((memory) => memory.content).join(' ');
+  const querySeed = [task.title, options.instructions ?? '', memoryQuery].join(' ').replace(/\s+/g, ' ').trim();
+  const query = discoveryQueryFor(querySeed || task.title, location).slice(0, 500);
   const web = await fetchWebContext(query, env, options.fetchImpl ?? fetch);
-  const nextActions = nextActionsFor(querySeed || task.title, location, web);
+  const nextActions = nextActionsFor(querySeed || task.title, location, web, memories);
   const confidence = discoveryConfidence(location, web);
 
   return {
@@ -131,6 +144,7 @@ export async function discoverTaskContext(
     query,
     location,
     web,
+    memories,
     nextActions,
     confidence,
   };
@@ -184,8 +198,11 @@ function parseWebResults(json: unknown): WebSearchResult[] {
   return out;
 }
 
-function nextActionsFor(title: string, location: LocationContext, web: WebContext): string[] {
+function nextActionsFor(title: string, location: LocationContext, web: WebContext, memories: readonly MemoryContext[] = []): string[] {
   const actions: string[] = [];
+  for (const memory of memories.slice(0, 3)) {
+    actions.push(`Apply user context: ${memory.content}`);
+  }
   if (web.results.length > 0) {
     const top = web.results[0];
     actions.push(`Review top result: ${top.title}${top.url ? ` (${top.url})` : ''}`);

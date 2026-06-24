@@ -47,16 +47,21 @@ Key environment variables:
 | backend | `MAIL_PROVIDER` | optional: `smtp`, `resend`, `brevo`, `sendgrid`, or `postmark` |
 | backend | `MAIL_FROM` | sender identity, e.g. `Capture <hello@example.com>` |
 | backend | `SMTP_URL` / provider key | one of `SMTP_URL`, `RESEND_API_KEY`, `BREVO_API_KEY`, `SENDGRID_API_KEY`, `POSTMARK_SERVER_TOKEN` |
+| backend/worker | `SENTRY_DSN` / `SENTRY_ENVIRONMENT` / `SENTRY_TRACES_SAMPLE_RATE` | optional Sentry errors/traces/log correlation; services still emit JSON wide events locally when unset |
+| web | `VITE_SENTRY_DSN` / `VITE_SENTRY_ENVIRONMENT` | optional browser Sentry errors/traces/replay |
+| iOS/Mac | `SENTRY_DSN` / `SENTRY_ENVIRONMENT` | optional native Sentry errors/traces baked into release builds; local OSLog wide events still emit when unset |
 | powersync | `PS_DATA_SOURCE_URI` | `postgres://postgres:<pw>@<pg-private>:5432/postgres` |
 | powersync | `PS_STORAGE_URI` | `postgres://postgres:<pw>@<pg-private>:5432/powersync` |
 | powersync | `PS_JWKS_URL` | `http://backend.railway.internal:6060/api/auth/keys` |
 | powersync | `PS_PORT` | `8080` |
 | worker | `WORKER_DATABASE_URI` | `postgres://postgres:<pw>@<pg-private>:5432/postgres` |
 | worker (local/Mac) | `CAPTURE_WORK_ROOT` | optional Git repo root to scan for engineering-task GitHub associations; macOS falls back to `~/work` |
-| worker (local/Mac) | `OPENCLAW_EXECUTOR_ENABLED` | set to `1` only on a host that can SSH to the Mac Mini |
-| worker (local/Mac) | `OPENCLAW_SSH_HOST` / `OPENCLAW_SSH_USER` / `OPENCLAW_SSH_KEY_PATH` | OpenClaw SSH target and private key path; do not store the private key in Git |
-| worker (local/Mac) | `OPENCLAW_WORKDIR` / `OPENCLAW_CLI` / `OPENCLAW_AGENT` | OpenClaw command settings, e.g. `/Users/bravostation/clawd`, `/opt/homebrew/bin/openclaw`, `imessage-agent` |
-| worker (local/Mac) | `OPENCLAW_REMOTE_PATH` | remote PATH for non-interactive SSH; include `/opt/homebrew/bin` so `/usr/bin/env node` can run OpenClaw |
+| worker (local/Mac) | `LOCAL_HARNESS_ENABLED` | set to `1` only on the local computer assigned to execute approved agent attempts |
+| worker (local/Mac) | `LOCAL_HARNESS_KIND` | `copilot-cli`, `hermes`, `openclaw`, or `custom` |
+| worker (local/Mac) | `LOCAL_HARNESS_COMMAND` / `LOCAL_HARNESS_WORKDIR` | local harness binary and working directory on that computer |
+| worker (local/Mac) | `LOCAL_HARNESS_ARGS_JSON` | optional JSON `{ "args": [...] }` template; `{prompt}` and `{timeout}` are substituted as argv values, not shell-interpolated |
+| worker (local/Mac) | `LOCAL_HARNESS_AGENT` / `LOCAL_HARNESS_THINKING` | optional OpenClaw-style adapter settings when `LOCAL_HARNESS_KIND=openclaw` |
+| worker (local/Mac) | `LOCAL_HARNESS_DEVICE_ID` / `LOCAL_HARNESS_DEVICE_NAME` | stable label recorded in task events so multiple Macs are distinguishable |
 
 > **Postgres without TLS on the private network.** `sslmode` is **not** read from the connection
 > URI by PowerSync — it must be set explicitly. `infra/powersync/service.yaml` sets
@@ -181,6 +186,16 @@ The backend deploy (above) covers the servers. The three clients ship on their o
 
 Release automation should prefer official, auditable tools first: `release-ios.yml`, `xcodebuild`,
 `xcrun altool` / App Store Connect API credentials, and `gh workflow run release-ios.yml --ref main`.
+Merging changes under `clients/apps/CaptureiOS/`, `CaptureShare/`, `CaptureWidget/`, `clients/CaptureCore/`,
+or `clients/apps/project.yml` to `main` automatically runs `release-ios.yml` and uploads a TestFlight
+build. If the automatic run fails, fix the workflow or signing issue rather than treating the merge as
+shipped.
+Apple Developer accounts have hard certificate limits. Prefer reusing existing valid Apple Development,
+Apple Distribution, Mac Development, and Developer ID certificates/profiles before creating new ones.
+Only create a new certificate when no compatible non-expired certificate is available for the team and
+target. If the account hits the certificate cap, revoke only clearly unused or expired certificates,
+then rerun the release workflow; never commit certificates, profiles, passwords, or app-specific
+passwords into the repository.
 Use browser automation only for the Apple Developer portal gaps that the API key cannot mutate, such
 as assigning App Groups to App IDs. For that class of workflow, use Webwright/Playwright against a
 user-signed-in browser session, keep screenshots/logs as artefacts, and never store Apple passwords
@@ -195,12 +210,24 @@ or 2FA codes in the repo.
 - **Unsigned local build** — `xcodebuild … CODE_SIGNING_ALLOWED=NO` for running on your own machine
   during development (what the repo's build commands use).
 
+Merging changes under `clients/apps/CaptureMac/`, `clients/CaptureCore/`, or `clients/apps/project.yml`
+to `main` automatically runs `release-mac.yml`, publishes a signed/notarised GitHub Release, and updates
+the Sparkle appcast used by installed Mac apps.
+Reuse existing Developer ID and Mac Development signing assets where possible. Do not let CI or local
+automation create fresh Apple certificates on every run; certificate churn blocks both Mac and iOS
+releases for the whole account.
+
 ### Web app
 - **Static host** — `cd web && npm run build` produces a static bundle; deploy `web/dist` to any
   static host (Vercel, Netlify, Cloudflare Pages, or a Railway static service). Set
   `VITE_BACKEND_URL` / `VITE_POWERSYNC_URL` at build time to the Railway domains.
 - **Same-project on Railway** — add a static/Nginx service to the `capture` project so everything
   lives in one place.
+
+Merging changes under `web/` to `main` automatically runs `release-web.yml`, validates the Vite build,
+and deploys the Railway `web` service. The workflow requires `RAILWAY_API_TOKEN` (or `RAILWAY_TOKEN`)
+and `RAILWAY_PROJECT_ID` repository secrets so it deploys into the existing `capture` project without
+interactive Railway linking.
 
 > Whichever track: the clients only need the two public HTTPS domains. No client embeds secrets —
 > the backend mints short-lived JWTs and the capture endpoint is the only write path.

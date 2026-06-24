@@ -130,6 +130,7 @@ final class CodeAuthViewController: NSViewController {
     }
 
     @objc private func cancelTapped() {
+        CaptureDiagnostics.record(category: "ui", name: "auth.code.cancel", message: "Code auth sheet cancelled", fields: ["purpose": purposeName])
         presentingViewController?.dismiss(self)
     }
 
@@ -140,16 +141,23 @@ final class CodeAuthViewController: NSViewController {
             let value = emailField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !value.isEmpty else { return show("Enter your email.") }
             email = value
+            CaptureDiagnostics.record(category: "ui", name: "auth.code.request.clicked", message: "Code request clicked", fields: ["purpose": purposeName])
             setBusy(true)
             Task {
+                let context = CaptureDiagnostics.actionStarted("Request auth code", fields: ["purpose": purposeName])
+                let startedAt = Date()
                 do {
                     if purpose == .login { try await auth.requestEmailCode(email: email) }
                     else { try await auth.requestPasswordReset(email: email) }
+                    CaptureDiagnostics.actionCompleted(context, startedAt: startedAt)
                     setBusy(false)
                     phase = .enterCode
                     render()
                     show("Code sent. Check your inbox.", isError: false)
-                } catch { fail(error) }
+                } catch {
+                    CaptureDiagnostics.actionFailed(context, startedAt: startedAt, error: error)
+                    fail(error)
+                }
             }
         case .enterCode:
             let code = codeField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -158,24 +166,32 @@ final class CodeAuthViewController: NSViewController {
                 return show("Password must be at least 8 characters.")
             }
             let password = passwordField.stringValue
+            CaptureDiagnostics.record(category: "ui", name: "auth.code.verify.clicked", message: "Code verify clicked", fields: ["purpose": purposeName])
             setBusy(true)
             Task {
+                let context = CaptureDiagnostics.actionStarted("Verify auth code", fields: ["purpose": purposeName, "client": "mac"])
+                let startedAt = Date()
                 do {
                     if purpose == .login {
                         try await auth.verifyEmailCode(email: email, code: code, client: "mac")
                     } else {
                         try await auth.resetPassword(email: email, code: code, password: password, client: "mac")
                     }
+                    CaptureDiagnostics.actionCompleted(context, startedAt: startedAt)
                     setBusy(false)
                     presentingViewController?.dismiss(self)
                     onSignedIn()
-                } catch { fail(error) }
+                } catch {
+                    CaptureDiagnostics.actionFailed(context, startedAt: startedAt, error: error)
+                    fail(error)
+                }
             }
         }
     }
 
     private func fail(_ error: Error) {
         let message = (error as? CaptureError)?.message ?? error.localizedDescription
+        CaptureDiagnostics.record(severity: .error, category: "auth", name: "auth.code.failed", message: message, fields: ["purpose": purposeName])
         show(message)
     }
 
@@ -192,5 +208,9 @@ final class CodeAuthViewController: NSViewController {
         status.stringValue = message
         status.textColor = isError ? Theme.danger : Theme.mint
         status.isHidden = false
+    }
+
+    private var purposeName: String {
+        purpose == .login ? "login" : "reset"
     }
 }

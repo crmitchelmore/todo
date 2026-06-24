@@ -52,6 +52,7 @@ final class SignInViewController: UIViewController {
 
         segmented.selectedSegmentIndex = 0
         segmented.addTarget(self, action: #selector(modeChanged), for: .valueChanged)
+        segmented.selectedSegmentTintColor = Theme.signal
 
         configure(emailField, placeholder: "Email")
         emailField.keyboardType = .emailAddress
@@ -100,9 +101,12 @@ final class SignInViewController: UIViewController {
         stack.axis = .vertical
         stack.alignment = .fill
         stack.spacing = 16
+        stack.layoutMargins = UIEdgeInsets(top: 24, left: 20, bottom: 24, right: 20)
+        stack.isLayoutMarginsRelativeArrangement = true
         stack.setCustomSpacing(28, after: subtitle)
         stack.setCustomSpacing(20, after: submit)
         stack.translatesAutoresizingMaskIntoConstraints = false
+        Theme.card(stack, color: Theme.surface, radius: 24)
         keyboardSafeView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(keyboardSafeView)
         keyboardSafeView.contentView.addSubview(stack)
@@ -113,10 +117,10 @@ final class SignInViewController: UIViewController {
             keyboardSafeView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             keyboardSafeView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             keyboardSafeView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            stack.topAnchor.constraint(greaterThanOrEqualTo: keyboardSafeView.contentView.topAnchor, constant: 32),
-            stack.leadingAnchor.constraint(equalTo: keyboardSafeView.contentView.leadingAnchor, constant: 32),
-            stack.trailingAnchor.constraint(equalTo: keyboardSafeView.contentView.trailingAnchor, constant: -32),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: keyboardSafeView.contentView.bottomAnchor, constant: -32),
+            stack.topAnchor.constraint(greaterThanOrEqualTo: keyboardSafeView.contentView.topAnchor, constant: 24),
+            stack.leadingAnchor.constraint(equalTo: keyboardSafeView.contentView.leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(equalTo: keyboardSafeView.contentView.trailingAnchor, constant: -20),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: keyboardSafeView.contentView.bottomAnchor, constant: -24),
             centreY,
             emailField.heightAnchor.constraint(equalToConstant: 48),
             passwordField.heightAnchor.constraint(equalToConstant: 48),
@@ -126,8 +130,12 @@ final class SignInViewController: UIViewController {
 
     private func configure(_ field: UITextField, placeholder: String) {
         field.placeholder = placeholder
-        field.borderStyle = .roundedRect
-        field.font = .systemFont(ofSize: 16)
+        field.font = Theme.display(16, .regular)
+        Theme.input(field)
+        field.leftView = UIView(frame: CGRect(x: 0, y: 0, width: 14, height: 1))
+        field.leftViewMode = .always
+        field.rightView = UIView(frame: CGRect(x: 0, y: 0, width: 10, height: 1))
+        field.rightViewMode = .always
     }
 
     @objc private func modeChanged() {

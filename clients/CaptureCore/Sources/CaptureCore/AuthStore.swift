@@ -177,8 +177,7 @@ public final class AuthStore: @unchecked Sendable, TokenProviding {
         req.httpMethod = "GET"
         req.applyBearer(token)
         req.timeoutInterval = 15
-        let (data, response) = try await session.data(for: req)
-        guard let http = response as? HTTPURLResponse else { throw CaptureError.auth("no response") }
+        let (data, http) = try await performDataRequest(req, operation: "auth.sync_diagnostics")
         guard http.statusCode == 200 else {
             let decoded = try? JSONDecoder().decode(BackendAuthResponse.self, from: data)
             throw CaptureError.auth(decoded?.error ?? "diagnostics failed (\(http.statusCode))")
@@ -193,8 +192,7 @@ public final class AuthStore: @unchecked Sendable, TokenProviding {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = 20
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, response) = try await session.data(for: req)
-        guard let http = response as? HTTPURLResponse else { throw CaptureError.auth("no response") }
+        let (data, http) = try await performDataRequest(req, operation: "auth.issue_code")
         guard http.statusCode == 200 else {
             let decoded = try? JSONDecoder().decode(BackendAuthResponse.self, from: data)
             throw CaptureError.auth(decoded?.error ?? "request failed (\(http.statusCode))")
@@ -213,8 +211,7 @@ public final class AuthStore: @unchecked Sendable, TokenProviding {
         req.applyBearer(bearer)
         req.timeoutInterval = 20
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, response) = try await session.data(for: req)
-        guard let http = response as? HTTPURLResponse else { throw CaptureError.auth("no response") }
+        let (data, http) = try await performDataRequest(req, operation: "auth.json.\(path.replacingOccurrences(of: "/", with: "."))")
         let decodedError = try? JSONDecoder().decode(BackendAuthResponse.self, from: data)
         guard http.statusCode == 200, decodedError?.ok != false else {
             throw CaptureError.auth(decodedError?.error ?? "request failed (\(http.statusCode))")
@@ -230,8 +227,7 @@ public final class AuthStore: @unchecked Sendable, TokenProviding {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = 20
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, response) = try await session.data(for: req)
-        guard let http = response as? HTTPURLResponse else { throw CaptureError.auth("no response") }
+        let (data, http) = try await performDataRequest(req, operation: "auth.session.\(path.replacingOccurrences(of: "/", with: "."))")
         let decoded = try? JSONDecoder().decode(BackendAuthResponse.self, from: data)
         if http.statusCode == 200, decoded?.ok == true, decoded?.mfa_required == true {
             throw CaptureError.auth("This account requires a second factor. Use email/password on web to complete MFA.")
@@ -253,10 +249,7 @@ public final class AuthStore: @unchecked Sendable, TokenProviding {
         let body: [String: Any] = ["email": email, "password": password, "client": client]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await session.data(for: req)
-        guard let http = response as? HTTPURLResponse else {
-            throw CaptureError.auth("no response")
-        }
+        let (data, http) = try await performDataRequest(req, operation: path == "api/auth/register" ? "auth.register" : "auth.sign_in")
         let decoded = try? JSONDecoder().decode(BackendAuthResponse.self, from: data)
         if http.statusCode == 200, decoded?.ok == true, decoded?.mfa_required == true {
             throw CaptureError.auth("This account requires a second factor. Use email/password on web to complete MFA.")
@@ -277,9 +270,28 @@ public final class AuthStore: @unchecked Sendable, TokenProviding {
             req.httpMethod = "POST"
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             req.timeoutInterval = 8
-            _ = try? await session.data(for: req)
+            _ = try? await performDataRequest(req, operation: "auth.sign_out")
         }
         clear()
+    }
+
+    private func performDataRequest(_ request: URLRequest, operation: String) async throws -> (Data, HTTPURLResponse) {
+        let startedAt = CaptureDiagnostics.recordHTTPRequestStart(
+            request,
+            operation: operation,
+            requestBytes: request.httpBody?.count
+        )
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            CaptureDiagnostics.recordHTTPResponse(nil, data: nil, operation: operation, startedAt: startedAt, error: error)
+            throw error
+        }
+        CaptureDiagnostics.recordHTTPResponse(response, data: data, operation: operation, startedAt: startedAt)
+        guard let http = response as? HTTPURLResponse else { throw CaptureError.auth("no response") }
+        return (data, http)
     }
 
     // MARK: State

@@ -15,6 +15,7 @@
   "dependencies": {
     "@powersync/react": "^1.5.3",
     "@powersync/web": "^1.20.0",
+    "@sentry/react": "^10.57.0",
     "@simplewebauthn/browser": "^13.3.0",
     "chrono-node": "^2.7.7",
     "js-logger": "^1.6.1",

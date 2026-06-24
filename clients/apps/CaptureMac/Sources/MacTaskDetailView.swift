@@ -11,7 +11,7 @@ struct MacTaskDetailForm {
 }
 
 @MainActor
-final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, NSComboBoxDelegate {
+final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, NSComboBoxDelegate, NSTokenFieldDelegate {
     private let emptyView = NSStackView()
     private let formView = NSStackView()
     private let stateLabel = NSTextField(labelWithString: "")
@@ -22,23 +22,32 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
     private let feasibilityLabel = NSTextField(wrappingLabelWithString: "")
     private let categoryBox = NSComboBox()
     private let priorityPopup = NSPopUpButton()
-    private let tagsField = NSTextField()
+    private let tagsField = NSTokenField()
     private let primaryButton = NSButton(title: "Save changes", target: nil, action: nil)
     private let secondaryButton = NSButton(title: "Mark done", target: nil, action: nil)
     private let rejectButton = NSButton(title: "Reject", target: nil, action: nil)
     private let rollupStack = NSStackView()
     private let rollupSummary = NSTextField(labelWithString: "")
     private let rollupProgress = NSProgressIndicator()
+    private let handoffField = NSTextField()
+    private let researchButton = NSButton(title: "Research", target: nil, action: nil)
+    private let attemptButton = NSButton(title: "Attempt", target: nil, action: nil)
+    private let handoffStatusLabel = NSTextField(labelWithString: "")
     private let historyStack = NSStackView()
+    private var fullWidthSections: [NSView] = []
+    private var wrappingFields: [NSTextField] = []
 
     private var currentTask: TaskItem?
     private var currentTaskId: String?
     private var isDirty = false
+    private var availableCategories: [String] = CAPTURE_CATEGORIES
+    private var availableTags: [Tag] = []
     private var colourForTag: (String) -> String = { TagPalette.color(for: $0) }
     private var onSave: ((MacTaskDetailForm) -> Void)?
     private var onConfirm: ((MacTaskDetailForm) -> Void)?
     private var onReject: (() -> Void)?
     private var onDone: ((Bool) -> Void)?
+    private var onAgentHandoff: ((TaskStore.AgentHandoffMode, String?) -> Void)?
     private var feasibilityTask: Task<Void, Never>?
 
     override init(frame frameRect: NSRect) {
@@ -48,6 +57,11 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     deinit { feasibilityTask?.cancel() }
+
+    override func layout() {
+        super.layout()
+        updateWrappingWidths()
+    }
 
     func applyTheme() {
         layer?.backgroundColor = NSColor.clear.cgColor
@@ -68,18 +82,24 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         events: [TaskEvent],
         attachments: [TaskAttachment],
         rollup: TaskRollup,
+        categories: [TaskCategory],
+        tags: [Tag],
         colourForTag: @escaping (String) -> String,
         onSave: @escaping (MacTaskDetailForm) -> Void,
         onConfirm: @escaping (MacTaskDetailForm) -> Void,
         onReject: @escaping () -> Void,
-        onDone: @escaping (Bool) -> Void
+        onDone: @escaping (Bool) -> Void,
+        onAgentHandoff: @escaping (TaskStore.AgentHandoffMode, String?) -> Void
     ) {
         self.currentTask = task
+        self.availableCategories = Self.categoryOptions(categories: categories, selected: task?.category ?? task?.suggestedCategory)
+        self.availableTags = tags
         self.colourForTag = colourForTag
         self.onSave = onSave
         self.onConfirm = onConfirm
         self.onReject = onReject
         self.onDone = onDone
+        self.onAgentHandoff = onAgentHandoff
 
         guard let task else {
             currentTaskId = nil
@@ -90,6 +110,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
             rebuildHistory([], attachments: [])
             return
         }
+        updateCategoryItems(selected: task.category ?? task.suggestedCategory)
 
         let changedTask = currentTaskId != task.id
         currentTaskId = task.id
@@ -97,6 +118,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         formView.isHidden = false
         if changedTask || !isDirty {
             populate(task)
+            handoffStatusLabel.stringValue = ""
             isDirty = false
         }
         updateActions(task)
@@ -165,13 +187,16 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         categoryBox.addItem(withObjectValue: "")
         categoryBox.addItems(withObjectValues: CAPTURE_CATEGORIES)
         categoryBox.completes = true
+        categoryBox.isEditable = false
         categoryBox.delegate = self
 
         priorityPopup.addItems(withTitles: ["None", "P0 · immediate", "P1 · important", "P2 · normal", "P3 · someday", "P4 · reference"])
         priorityPopup.target = self
         priorityPopup.action = #selector(markDirty)
 
-        tagsField.placeholderString = "engineering, home, project-name"
+        tagsField.placeholderString = "Add managed tags…"
+        tagsField.tokenizingCharacterSet = CharacterSet(charactersIn: ",")
+        tagsField.completionDelay = 0
         tagsField.delegate = self
 
         notesView.font = Theme.display(13, .regular)
@@ -201,10 +226,22 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         rejectButton.action = #selector(rejectTapped)
         Theme.quietButton(rejectButton)
         rejectButton.contentTintColor = Theme.danger
+        handoffField.placeholderString = "Ask the AI loop what to research or try next"
+        researchButton.target = self
+        researchButton.action = #selector(researchTapped)
+        Theme.quietButton(researchButton)
+        researchButton.contentTintColor = Theme.iris
+        attemptButton.target = self
+        attemptButton.action = #selector(attemptTapped)
+        Theme.quietButton(attemptButton)
+        attemptButton.contentTintColor = Theme.iris
+        handoffStatusLabel.font = Theme.display(12, .regular)
+        handoffStatusLabel.textColor = Theme.textTertiary
 
+        rollupStack.translatesAutoresizingMaskIntoConstraints = false
         rollupStack.orientation = .vertical
         rollupStack.spacing = 8
-        rollupStack.alignment = .leading
+        rollupStack.alignment = .width
         rollupStack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
         Theme.card(rollupStack, color: Theme.surfaceHi)
         rollupSummary.font = Theme.display(13, .semibold)
@@ -221,35 +258,43 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
 
         historyStack.orientation = .vertical
         historyStack.spacing = 10
-        historyStack.alignment = .leading
+        historyStack.alignment = .width
 
         let actionRow = NSStackView(views: [primaryButton, secondaryButton, rejectButton])
         actionRow.orientation = .horizontal
         actionRow.spacing = 8
-        actionRow.distribution = .fillProportionally
+        actionRow.distribution = .fill
 
-        formView.addArrangedSubview(card([
+        let handoffActions = NSStackView(views: [researchButton, attemptButton, handoffStatusLabel])
+        handoffActions.orientation = .horizontal
+        handoffActions.spacing = 8
+        handoffActions.alignment = .firstBaseline
+        handoffActions.distribution = .fill
+
+        formView.addArrangedSubview(fullWidthSection(card([
             stateLabel,
             titleField,
             actionRow
-        ], color: Theme.surfaceRaised))
-        formView.addArrangedSubview(rollupStack)
-        formView.addArrangedSubview(card([
+        ], color: Theme.surfaceRaised)))
+        formView.addArrangedSubview(fullWidthSection(rollupStack))
+        formView.addArrangedSubview(fullWidthSection(card([
             sectionTitle("Structure"),
             row(label: "Due", views: [dueEnabled, duePicker]),
             row(label: "Calendar", views: [feasibilityLabel]),
             row(label: "Category", views: [categoryBox]),
             row(label: "Priority", views: [priorityPopup]),
             row(label: "Tags", views: [tagsField])
-        ]))
-        formView.addArrangedSubview(card([
+        ])))
+        formView.addArrangedSubview(fullWidthSection(card([
             sectionTitle("Expansion"),
             notesScroll
-        ]))
-        formView.addArrangedSubview(card([
+        ])))
+        formView.addArrangedSubview(fullWidthSection(card([
             sectionTitle("AI + activity"),
+            row(label: "AI loop", views: [handoffField]),
+            handoffActions,
             historyStack
-        ]))
+        ])))
 
         NSLayoutConstraint.activate([
             emptyView.centerXAnchor.constraint(equalTo: centerXAnchor),
@@ -259,9 +304,12 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
             formView.trailingAnchor.constraint(equalTo: trailingAnchor),
             formView.topAnchor.constraint(equalTo: topAnchor),
             formView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            categoryBox.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
-            tagsField.widthAnchor.constraint(greaterThanOrEqualToConstant: 180)
+            categoryBox.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
+            tagsField.widthAnchor.constraint(greaterThanOrEqualToConstant: 240)
         ])
+        for section in fullWidthSections {
+            section.widthAnchor.constraint(equalTo: formView.widthAnchor, constant: -(formView.edgeInsets.left + formView.edgeInsets.right)).isActive = true
+        }
     }
 
     private func populate(_ task: TaskItem) {
@@ -274,7 +322,7 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         categoryBox.stringValue = task.category ?? task.suggestedCategory ?? ""
         let priority = task.priority.flatMap { (0...4).contains($0) ? $0 : nil }
         priorityPopup.selectItem(at: (priority ?? -1) + 1)
-        tagsField.stringValue = task.tags.joined(separator: ", ")
+        tagsField.objectValue = task.tags
     }
 
     private func updateActions(_ task: TaskItem) {
@@ -287,6 +335,9 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         secondaryButton.title = task.status == .done ? "Reopen" : "Mark done"
         rejectButton.isHidden = !proposed
         duePicker.isEnabled = dueEnabled.state == .on
+        let handoffEnabled = task.status != .cancelled
+        researchButton.isEnabled = handoffEnabled
+        attemptButton.isEnabled = handoffEnabled
     }
 
     private func updateRollup(_ rollup: TaskRollup) {
@@ -303,10 +354,12 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
 
     private func rebuildHistory(_ events: [TaskEvent], attachments: [TaskAttachment]) {
         historyStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        wrappingFields.removeAll()
         guard !events.isEmpty || !attachments.isEmpty else {
             let empty = NSTextField(wrappingLabelWithString: "No synced history yet. Capture, confirmation, edits and AI updates appear here.")
             empty.font = Theme.display(12, .regular)
             empty.textColor = Theme.textTertiary
+            registerWrappingField(empty)
             historyStack.addArrangedSubview(empty)
             return
         }
@@ -344,11 +397,12 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         text.orientation = .vertical
         text.alignment = .leading
         text.spacing = 6
-        text.widthAnchor.constraint(lessThanOrEqualToConstant: 420).isActive = true
+        text.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let row = NSStackView(views: [icon, text])
         row.orientation = .horizontal
         row.alignment = .top
         row.spacing = 8
+        row.distribution = .fill
         return row
     }
 
@@ -367,22 +421,28 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         let head = NSStackView(views: [title, meta])
         head.orientation = .horizontal
         head.spacing = 8
+        head.distribution = .fill
+        title.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        meta.setContentHuggingPriority(.required, for: .horizontal)
 
         let body = NSTextField(wrappingLabelWithString: event.body ?? "")
         body.font = Theme.display(12, .regular)
         body.textColor = Theme.textSecondary
         body.isHidden = (event.body ?? "").isEmpty
-        body.preferredMaxLayoutWidth = 400
+        body.maximumNumberOfLines = 0
+        body.lineBreakMode = .byWordWrapping
+        registerWrappingField(body)
 
         let text = NSStackView(views: [head, body])
         text.orientation = .vertical
-        text.alignment = .leading
+        text.alignment = .width
         text.spacing = 2
-        text.widthAnchor.constraint(lessThanOrEqualToConstant: 420).isActive = true
+        text.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let row = NSStackView(views: [icon, text])
         row.orientation = .horizontal
         row.alignment = .top
         row.spacing = 8
+        row.distribution = .fill
         return row
     }
 
@@ -395,10 +455,13 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
 
     private func card(_ views: [NSView], color: NSColor = Theme.surfaceHi) -> NSView {
         let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        container.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         Theme.card(container, color: color)
         let stack = NSStackView(views: views)
         stack.orientation = .vertical
-        stack.alignment = .leading
+        stack.alignment = .width
         stack.spacing = 10
         stack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -412,6 +475,14 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         return container
     }
 
+    private func fullWidthSection(_ view: NSView) -> NSView {
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        fullWidthSections.append(view)
+        return view
+    }
+
     private func row(label text: String, views: [NSView]) -> NSStackView {
         let label = NSTextField(labelWithString: text)
         label.font = Theme.mono(11, .semibold)
@@ -421,22 +492,41 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         controls.orientation = .horizontal
         controls.spacing = 8
         controls.alignment = .firstBaseline
+        controls.distribution = .fill
+        controls.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        for view in views {
+            view.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        }
         let row = NSStackView(views: [label, controls])
         row.orientation = .horizontal
         row.alignment = .firstBaseline
         row.spacing = 10
-        row.widthAnchor.constraint(lessThanOrEqualToConstant: 450).isActive = true
+        row.distribution = .fill
+        row.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        row.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return row
+    }
+
+    private func registerWrappingField(_ field: NSTextField) {
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        wrappingFields.append(field)
+        updateWrappingWidths()
+    }
+
+    private func updateWrappingWidths() {
+        let labelAndIconSpace: CGFloat = 132
+        let available = max(220, bounds.width - formView.edgeInsets.left - formView.edgeInsets.right - labelAndIconSpace)
+        for field in wrappingFields {
+            field.preferredMaxLayoutWidth = available
+        }
     }
 
     private func form() -> MacTaskDetailForm {
         let title = titleField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let notes = notesView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         let category = categoryBox.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let tags = tagsField.stringValue
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let tags = tokenFieldTags()
         let priorityIndex = priorityPopup.indexOfSelectedItem
         return MacTaskDetailForm(
             title: title.isEmpty ? (currentTask?.title ?? "") : title,
@@ -479,6 +569,20 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
     func textDidChange(_ notification: Notification) { markDirty() }
     func comboBoxSelectionDidChange(_ notification: Notification) { markDirty() }
 
+    func tokenField(
+        _ tokenField: NSTokenField,
+        completionsForSubstring substring: String,
+        indexOfToken tokenIndex: Int,
+        indexOfSelectedItem selectedIndex: UnsafeMutablePointer<Int>?
+    ) -> [Any]? {
+        let key = substring.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let selected = Set(tokenFieldTags().map { TagPalette.key($0) })
+        return availableTags
+            .map(\.name)
+            .filter { !selected.contains(TagPalette.key($0)) }
+            .filter { key.isEmpty || $0.lowercased().contains(key) }
+    }
+
     @objc private func primaryTapped() {
         guard let task = currentTask else { return }
         if task.status == .proposed {
@@ -499,6 +603,21 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
         onReject?()
     }
 
+    @objc private func researchTapped() {
+        requestAgentHandoff(.research)
+    }
+
+    @objc private func attemptTapped() {
+        requestAgentHandoff(.attempt)
+    }
+
+    private func requestAgentHandoff(_ mode: TaskStore.AgentHandoffMode) {
+        let instructions = handoffField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        handoffStatusLabel.stringValue = mode == .research ? "Research queued" : "Attempt queued"
+        onAgentHandoff?(mode, instructions.isEmpty ? nil : instructions)
+        handoffField.stringValue = ""
+    }
+
     private func eventIcon(_ event: TaskEvent) -> String {
         if event.actor == "worker" || event.actor == "agent" { return "◇" }
         if event.eventType == "completed" { return "✓" }
@@ -516,6 +635,41 @@ final class MacTaskDetailView: NSView, NSTextFieldDelegate, NSTextViewDelegate, 
             formatter.dateFormat = "d MMM"
         }
         return formatter.string(from: date)
+    }
+
+    private func updateCategoryItems(selected: String?) {
+        let current = categoryBox.stringValue
+        categoryBox.removeAllItems()
+        categoryBox.addItem(withObjectValue: "")
+        categoryBox.addItems(withObjectValues: availableCategories)
+        categoryBox.stringValue = selected ?? current
+    }
+
+    private func tokenFieldTags() -> [String] {
+        if let tags = tagsField.objectValue as? [String] {
+            return TagsCodec.normalize(tags)
+        }
+        if let tags = tagsField.objectValue as? [Any] {
+            return TagsCodec.normalize(tags.map { String(describing: $0) })
+        }
+        return TagsCodec.normalize(
+            tagsField.stringValue
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        )
+    }
+
+    private static func categoryOptions(categories: [TaskCategory], selected: String?) -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for name in categories.map(\.name) + CAPTURE_CATEGORIES + [selected].compactMap({ $0 }) {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = CategoryPalette.key(trimmed)
+            guard !trimmed.isEmpty, !seen.contains(key) else { continue }
+            seen.insert(key)
+            out.append(trimmed)
+        }
+        return out
     }
 }
 

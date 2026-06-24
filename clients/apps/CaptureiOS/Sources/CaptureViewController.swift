@@ -16,12 +16,35 @@ final class CapturePasteTextField: UITextField {
 }
 
 final class CaptureViewController: UIViewController, UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate, UIDropInteractionDelegate {
+    private enum TaskSection {
+        case proposed([TaskItem])
+        case active(DateBucket, [TaskItem])
+        case done([TaskItem])
+        case rejected([TaskItem])
+
+        var title: String {
+            switch self {
+            case let .proposed(items):
+                return "NEEDS CONFIRMING · \(items.count)"
+            case let .active(bucket, items):
+                return "\(bucket.label.uppercased()) · \(items.count)"
+            case let .done(items):
+                return "DONE · \(items.count)"
+            case let .rejected(items):
+                return "REJECTED · \(items.count)"
+            }
+        }
+    }
+
     private let viewModel: CaptureViewModel
+    private let commandLabel = UILabel()
+    private let syncPill = UIButton(type: .system)
     private let captureField = CapturePasteTextField()
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
     private let filterBar = UIScrollView()
     private let filterStack = UIStackView()
     private let passkeys = NativePasskeyAuthorizer()
+    private var filterHeightConstraint: NSLayoutConstraint?
 
     init(viewModel: CaptureViewModel) {
         self.viewModel = viewModel
@@ -46,6 +69,7 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
 
         viewModel.onChange = { [weak self] in
             self?.rebuildFilterBar()
+            self?.updateSyncPill()
             self?.tableView.reloadData()
         }
         viewModel.start()
@@ -68,8 +92,8 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
 
     private func setupNavigation() {
         navigationItem.rightBarButtonItems = [
-            UIBarButtonItem(title: "Settings", style: .plain, target: self, action: #selector(openSettings)),
-            UIBarButtonItem(title: "Add Passkey", style: .plain, target: self, action: #selector(addPasskey))
+            UIBarButtonItem(image: UIImage(systemName: "gearshape"), style: .plain, target: self, action: #selector(openSettings)),
+            UIBarButtonItem(image: UIImage(systemName: "key"), style: .plain, target: self, action: #selector(addPasskey))
         ]
     }
 
@@ -109,6 +133,8 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
     @objc private func applyTheme() {
         view.backgroundColor = Theme.ink
         view.window?.tintColor = Theme.signal
+        commandLabel.textColor = Theme.textTertiary
+        syncPill.layer.borderColor = syncBorderColor.cgColor
         captureField.textColor = Theme.textPrimary
         captureField.backgroundColor = Theme.surfaceHi
         tableView.backgroundColor = Theme.ink
@@ -117,13 +143,32 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
     }
 
     private func setupCaptureBar() {
+        commandLabel.text = "COMMAND DECK"
+        commandLabel.font = Theme.mono(11, .bold)
+        commandLabel.textColor = Theme.textTertiary
+        commandLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(commandLabel)
+
+        syncPill.titleLabel?.font = Theme.mono(11, .semibold)
+        syncPill.layer.cornerRadius = 14
+        syncPill.layer.borderWidth = 1
+        syncPill.contentEdgeInsets = UIEdgeInsets(top: 6, left: 11, bottom: 6, right: 11)
+        syncPill.addAction(UIAction { [weak self] _ in self?.viewModel.refreshSyncSummary() }, for: .touchUpInside)
+        syncPill.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(syncPill)
+        updateSyncPill()
+
         captureField.placeholder = "Capture anything…"
-        captureField.borderStyle = .roundedRect
         captureField.returnKeyType = .done
         captureField.autocorrectionType = .no
         captureField.clearButtonMode = .whileEditing
         captureField.delegate = self
-        captureField.font = .systemFont(ofSize: 18)
+        captureField.font = Theme.display(18, .medium)
+        Theme.input(captureField)
+        captureField.leftView = UIView(frame: CGRect(x: 0, y: 0, width: 16, height: 1))
+        captureField.leftViewMode = .always
+        captureField.rightView = UIView(frame: CGRect(x: 0, y: 0, width: 12, height: 1))
+        captureField.rightViewMode = .always
         captureField.onPasteList = { [weak self] text in
             guard let self, self.viewModel.ingestIfList(text) else { return false }
             self.captureField.text = ""
@@ -137,11 +182,42 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         captureField.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(captureField)
         NSLayoutConstraint.activate([
-            captureField.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
+            commandLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 14),
+            commandLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            syncPill.centerYAnchor.constraint(equalTo: commandLabel.centerYAnchor),
+            syncPill.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            commandLabel.trailingAnchor.constraint(lessThanOrEqualTo: syncPill.leadingAnchor, constant: -10),
+
+            captureField.topAnchor.constraint(equalTo: commandLabel.bottomAnchor, constant: 8),
             captureField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             captureField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            captureField.heightAnchor.constraint(equalToConstant: 44)
+            captureField.heightAnchor.constraint(equalToConstant: 54)
         ])
+    }
+
+    private var syncBorderColor: UIColor {
+        switch viewModel.syncSummary.state {
+        case .aligned: return Theme.mint.withAlphaComponent(0.45)
+        case .warning: return Theme.signal.withAlphaComponent(0.45)
+        case .offline: return Theme.textTertiary.withAlphaComponent(0.45)
+        case .checking: return Theme.iris.withAlphaComponent(0.45)
+        }
+    }
+
+    private func updateSyncPill() {
+        let summary = viewModel.syncSummary
+        let color: UIColor
+        switch summary.state {
+        case .aligned: color = Theme.mint
+        case .warning: color = Theme.signal
+        case .offline: color = Theme.textTertiary
+        case .checking: color = Theme.iris
+        }
+        syncPill.setTitle("● \(summary.title)", for: .normal)
+        syncPill.setTitleColor(color, for: .normal)
+        syncPill.backgroundColor = color.withAlphaComponent(0.12)
+        syncPill.layer.borderColor = syncBorderColor.cgColor
+        syncPill.accessibilityLabel = "\(summary.title). \(summary.detail). Double tap to refresh sync diagnostics."
     }
 
     /// Horizontal scrolling chip bar to "slice by tag or multiple tags" (AND filter).
@@ -153,10 +229,13 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         filterStack.translatesAutoresizingMaskIntoConstraints = false
         filterBar.addSubview(filterStack)
         view.addSubview(filterBar)
+        let heightConstraint = filterBar.heightAnchor.constraint(equalToConstant: 34)
+        filterHeightConstraint = heightConstraint
         NSLayoutConstraint.activate([
             filterBar.topAnchor.constraint(equalTo: captureField.bottomAnchor, constant: 8),
             filterBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             filterBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            heightConstraint,
             filterStack.topAnchor.constraint(equalTo: filterBar.topAnchor),
             filterStack.bottomAnchor.constraint(equalTo: filterBar.bottomAnchor),
             filterStack.leadingAnchor.constraint(equalTo: filterBar.leadingAnchor),
@@ -170,6 +249,7 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         filterStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let tags = viewModel.allTags
         filterBar.isHidden = tags.isEmpty
+        filterHeightConstraint?.constant = tags.isEmpty ? 0 : 34
         guard !tags.isEmpty else { return }
         for tag in tags {
             let on = viewModel.isFiltering(tag.name)
@@ -196,8 +276,12 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         tableView.dataSource = self
         tableView.delegate = self
         tableView.backgroundColor = Theme.ink
-        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "cell")
+        tableView.separatorStyle = .none
+        tableView.estimatedRowHeight = 96
+        tableView.rowHeight = UITableView.automaticDimension
+        tableView.register(CaptureTaskCell.self, forCellReuseIdentifier: CaptureTaskCell.reuseIdentifier)
         tableView.translatesAutoresizingMaskIntoConstraints = false
+        tableView.contentInset = UIEdgeInsets(top: 4, left: 0, bottom: 24, right: 0)
         view.addSubview(tableView)
         NSLayoutConstraint.activate([
             tableView.topAnchor.constraint(equalTo: filterBar.bottomAnchor, constant: 8),
@@ -244,69 +328,118 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
 
     // MARK: - Table (section 0 = proposed; sections 1… = active date buckets)
 
-    private func activeGroup(for section: Int) -> (bucket: DateBucket, items: [TaskItem]) {
-        viewModel.activeGroups[section - 1]
+    private var sections: [TaskSection] {
+        var sections: [TaskSection] = []
+        if !viewModel.proposed.isEmpty { sections.append(.proposed(viewModel.proposed)) }
+        sections.append(contentsOf: viewModel.activeGroups.map { .active($0.bucket, $0.items) })
+        let done = viewModel.filteredDone
+        if !done.isEmpty { sections.append(.done(done)) }
+        let rejected = viewModel.filteredRejected
+        if !rejected.isEmpty { sections.append(.rejected(rejected)) }
+        return sections
     }
 
     func numberOfSections(in tableView: UITableView) -> Int {
-        1 + viewModel.activeGroups.count
+        max(sections.count, 1)
     }
 
-    func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        if section == 0 {
-            return viewModel.proposed.isEmpty ? nil : "Needs confirming · \(viewModel.proposed.count)"
-        }
-        let group = activeGroup(for: section)
-        return "\(group.bucket.label) · \(group.items.count)"
+    func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
+        guard !sections.isEmpty else { return nil }
+        let label = UILabel()
+        label.text = sections[section].title
+        label.font = Theme.mono(11, .semibold)
+        label.textColor = sectionColor(sections[section])
+        label.layoutMargins = UIEdgeInsets(top: 12, left: 18, bottom: 6, right: 18)
+        let container = UIView()
+        container.addSubview(label)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 18),
+            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -18),
+            label.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
+            label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -6)
+        ])
+        return container
+    }
+
+    func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
+        sections.isEmpty ? 0 : 36
     }
 
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        section == 0 ? viewModel.proposed.count : activeGroup(for: section).items.count
+        guard !sections.isEmpty else { return 1 }
+        switch sections[section] {
+        case let .proposed(items), let .done(items), let .rejected(items): return items.count
+        case let .active(_, items): return items.count
+        }
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "cell", for: indexPath)
-        cell.backgroundColor = Theme.surface
-        var config = cell.defaultContentConfiguration()
-        if indexPath.section == 0 {
-            let item = viewModel.proposed[indexPath.row]
-            config.text = item.title
-            config.textProperties.font = Theme.display(16, .semibold)
-            config.secondaryText = proposalHint(item)
-            config.secondaryTextProperties.color = Theme.signal
-            config.secondaryTextProperties.font = Theme.mono(12)
-            cell.accessoryType = .disclosureIndicator
-            cell.tintColor = Theme.signal
-        } else {
-            let item = activeGroup(for: indexPath.section).items[indexPath.row]
-            config.text = item.title
-            config.textProperties.font = Theme.display(16, .regular)
-            config.secondaryText = activeSubtitle(item)
-            config.secondaryTextProperties.color = Theme.textTertiary
-            config.secondaryTextProperties.font = Theme.mono(12)
-            cell.accessoryType = item.status == .done ? .checkmark : .none
-            cell.tintColor = Theme.mint
+        guard !sections.isEmpty else {
+            let cell = tableView.dequeueReusableCell(withIdentifier: CaptureTaskCell.reuseIdentifier, for: indexPath) as! CaptureTaskCell
+            cell.configureEmpty()
+            return cell
         }
-        cell.contentConfiguration = config
+        let cell = tableView.dequeueReusableCell(withIdentifier: CaptureTaskCell.reuseIdentifier, for: indexPath) as! CaptureTaskCell
+        let color: (String) -> String = { [weak self] in self?.viewModel.color(forTag: $0) ?? TagPalette.color(for: $0) }
+        switch sections[indexPath.section] {
+        case let .proposed(items):
+            let item = items[indexPath.row]
+            cell.configure(
+                item,
+                kind: .proposed,
+                meta: proposalHint(item),
+                colourForTag: color,
+                onPrimary: { [weak self] in
+                    self?.viewModel.confirm(item, title: item.title, dueAt: item.suggestedDueAt, category: item.suggestedCategory, tags: item.tags)
+                },
+                onSecondary: { [weak self] in self?.viewModel.reject(item) }
+            )
+        case let .active(_, items):
+            let item = items[indexPath.row]
+            cell.configure(
+                item,
+                kind: .active,
+                meta: activeSubtitle(item),
+                colourForTag: color,
+                onPrimary: { [weak self] in self?.viewModel.setDone(item, true) },
+                onSecondary: nil
+            )
+        case let .done(items):
+            let item = items[indexPath.row]
+            cell.configure(
+                item,
+                kind: .done,
+                meta: activeSubtitle(item),
+                colourForTag: color,
+                onPrimary: { [weak self] in self?.viewModel.setDone(item, false) },
+                onSecondary: nil
+            )
+        case let .rejected(items):
+            let item = items[indexPath.row]
+            cell.configure(
+                item,
+                kind: .rejected,
+                meta: rejectedSubtitle(item),
+                colourForTag: color,
+                onPrimary: nil,
+                onSecondary: nil
+            )
+        }
         return cell
     }
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        if indexPath.section == 0 {
-            let item = viewModel.proposed[indexPath.row]
-            navigationController?.pushViewController(TaskDetailViewController(viewModel: viewModel, item: item), animated: true)
-        } else {
-            let item = activeGroup(for: indexPath.section).items[indexPath.row]
-            navigationController?.pushViewController(TaskDetailViewController(viewModel: viewModel, item: item), animated: true)
-        }
+        if case .rejected? = sections[safe: indexPath.section] { return }
+        guard let item = item(at: indexPath) else { return }
+        navigationController?.pushViewController(TaskDetailViewController(viewModel: viewModel, item: item), animated: true)
     }
 
     /// Trailing swipe on an active row: edit its due date (presets + a picker), or mark done.
     func tableView(_ tableView: UITableView,
                    trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-        if indexPath.section == 0 {
-            let item = viewModel.proposed[indexPath.row]
+        if case .proposed? = sections[safe: indexPath.section], let item = item(at: indexPath) {
             let reject = UIContextualAction(style: .destructive, title: "Reject") { [weak self] _, _, done in
                 self?.viewModel.reject(item)
                 done(true)
@@ -318,8 +451,7 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
             confirm.backgroundColor = Theme.signal
             return UISwipeActionsConfiguration(actions: [reject, confirm])
         }
-        guard indexPath.section > 0 else { return nil }
-        let item = activeGroup(for: indexPath.section).items[indexPath.row]
+        guard let item = item(at: indexPath), item.status != .done, item.status != .cancelled else { return nil }
         let date = UIContextualAction(style: .normal, title: "Date") { [weak self] _, _, done in
             self?.presentDateEditor(for: item)
             done(true)
@@ -335,8 +467,7 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
 
     func tableView(_ tableView: UITableView,
                    leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-        guard indexPath.section == 0 else { return nil }
-        let item = viewModel.proposed[indexPath.row]
+        guard case .proposed? = sections[safe: indexPath.section], let item = item(at: indexPath) else { return nil }
         let confirm = UIContextualAction(style: .normal, title: "Confirm") { [weak self] _, _, done in
             self?.viewModel.confirm(item, title: item.title, dueAt: item.suggestedDueAt, category: item.suggestedCategory, tags: item.tags)
             done(true)
@@ -407,6 +538,215 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         if let cat = item.category { parts.append(cat) }
         parts.append(contentsOf: item.tags.map { "#\($0)" })
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private func item(at indexPath: IndexPath) -> TaskItem? {
+        guard let section = sections[safe: indexPath.section] else { return nil }
+        switch section {
+        case let .proposed(items), let .done(items), let .rejected(items):
+            return items[safe: indexPath.row]
+        case let .active(_, items):
+            return items[safe: indexPath.row]
+        }
+    }
+
+    private func sectionColor(_ section: TaskSection) -> UIColor {
+        switch section {
+        case .proposed: return Theme.signal
+        case let .active(bucket, _):
+            if bucket == .overdue { return Theme.danger }
+            if bucket == .today { return Theme.iris }
+            return Theme.textTertiary
+        case .done: return Theme.mint
+        case .rejected: return Theme.textTertiary
+        }
+    }
+
+    private func rejectedSubtitle(_ item: TaskItem) -> String? {
+        item.updatedAt.map { "Rejected \(DueFormatter.short($0))" } ?? "Rejected"
+    }
+}
+
+private extension Array {
+    subscript(safe index: Index) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
+}
+
+private final class CaptureTaskCell: UITableViewCell {
+    enum Kind { case proposed, active, done, rejected }
+
+    static let reuseIdentifier = "CaptureTaskCell"
+
+    private let card = UIView()
+    private let statusLabel = UILabel()
+    private let titleLabel = UILabel()
+    private let metaLabel = UILabel()
+    private let chips = UIStackView()
+    private let primary = UIButton(type: .system)
+    private let secondary = UIButton(type: .system)
+    private let textStack = UIStackView()
+    private let actionStack = UIStackView()
+    private var onPrimary: (() -> Void)?
+    private var onSecondary: (() -> Void)?
+
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        build()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        onPrimary = nil
+        onSecondary = nil
+        chips.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        secondary.isHidden = true
+        actionStack.isHidden = false
+    }
+
+    private func build() {
+        backgroundColor = .clear
+        contentView.backgroundColor = .clear
+        selectionStyle = .none
+
+        card.translatesAutoresizingMaskIntoConstraints = false
+        Theme.card(card, color: Theme.surface)
+        contentView.addSubview(card)
+
+        statusLabel.font = Theme.mono(10, .bold)
+        statusLabel.numberOfLines = 1
+
+        titleLabel.font = Theme.display(16, .semibold)
+        titleLabel.textColor = Theme.textPrimary
+        titleLabel.numberOfLines = 2
+
+        metaLabel.font = Theme.mono(11, .semibold)
+        metaLabel.textColor = Theme.textTertiary
+        metaLabel.numberOfLines = 2
+
+        chips.axis = .horizontal
+        chips.spacing = 5
+        chips.alignment = .leading
+
+        textStack.axis = .vertical
+        textStack.spacing = 4
+        textStack.alignment = .leading
+        textStack.addArrangedSubview(statusLabel)
+        textStack.addArrangedSubview(titleLabel)
+        textStack.addArrangedSubview(metaLabel)
+        textStack.addArrangedSubview(chips)
+
+        primary.addAction(UIAction { [weak self] _ in self?.onPrimary?() }, for: .touchUpInside)
+        secondary.addAction(UIAction { [weak self] _ in self?.onSecondary?() }, for: .touchUpInside)
+
+        actionStack.axis = .vertical
+        actionStack.spacing = 8
+        actionStack.alignment = .fill
+        actionStack.addArrangedSubview(primary)
+        actionStack.addArrangedSubview(secondary)
+        primary.widthAnchor.constraint(greaterThanOrEqualToConstant: 86).isActive = true
+
+        let row = UIStackView(arrangedSubviews: [textStack, actionStack])
+        row.axis = .horizontal
+        row.spacing = 12
+        row.alignment = .center
+        row.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(row)
+
+        NSLayoutConstraint.activate([
+            card.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 14),
+            card.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -14),
+            card.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 5),
+            card.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -5),
+
+            row.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
+            row.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
+            row.topAnchor.constraint(equalTo: card.topAnchor, constant: 14),
+            row.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -14)
+        ])
+    }
+
+    func configureEmpty() {
+        Theme.card(card, color: Theme.surface)
+        statusLabel.text = "READY"
+        statusLabel.textColor = Theme.textTertiary
+        titleLabel.text = "Nothing active yet"
+        titleLabel.textColor = Theme.textPrimary
+        metaLabel.text = "Capture a thought above. It will land as a proposal before it becomes real work."
+        metaLabel.textColor = Theme.textSecondary
+        actionStack.isHidden = true
+    }
+
+    func configure(
+        _ item: TaskItem,
+        kind: Kind,
+        meta: String?,
+        colourForTag: (String) -> String,
+        onPrimary: (() -> Void)?,
+        onSecondary: (() -> Void)?
+    ) {
+        self.onPrimary = onPrimary
+        self.onSecondary = onSecondary
+        let done = kind == .done
+        let rejected = kind == .rejected
+        let proposed = kind == .proposed
+
+        Theme.card(card, color: proposed ? Theme.surfaceRaised : Theme.surface)
+        card.layer.borderColor = (proposed ? Theme.signal.withAlphaComponent(0.45) : Theme.hairline).cgColor
+
+        statusLabel.text = proposed ? "STRUCTURE CHECK" : done ? "DONE" : rejected ? "REJECTED" : "ACTIVE"
+        statusLabel.textColor = proposed ? Theme.signal : done ? Theme.mint : Theme.textTertiary
+        titleLabel.text = item.title
+        titleLabel.textColor = (done || rejected) ? Theme.textTertiary : Theme.textPrimary
+        metaLabel.text = meta ?? (proposed ? "awaiting signal" : "no metadata")
+        metaLabel.textColor = proposed ? Theme.iris : Theme.textTertiary
+
+        chips.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        for tag in item.tags.prefix(4) {
+            chips.addArrangedSubview(chip(text: tag, hex: colourForTag(tag)))
+        }
+        chips.isHidden = item.tags.isEmpty
+
+        primary.isHidden = onPrimary == nil
+        secondary.isHidden = onSecondary == nil
+        primary.setTitle(proposed ? "Confirm" : done ? "Reopen" : "Done", for: .normal)
+        if proposed {
+            Theme.primary(primary)
+        } else {
+            Theme.quiet(primary, colour: done ? Theme.textSecondary : Theme.mint)
+        }
+        secondary.setTitle("Reject", for: .normal)
+        Theme.quiet(secondary, colour: Theme.danger)
+        actionStack.isHidden = onPrimary == nil && onSecondary == nil
+    }
+
+    private func chip(text: String, hex: String) -> UILabel {
+        let label = PaddedLabel()
+        label.text = text
+        label.font = Theme.mono(10, .semibold)
+        let colour = UIColor(hex: hex) ?? Theme.textSecondary
+        label.textColor = colour
+        label.backgroundColor = colour.withAlphaComponent(0.16)
+        label.layer.cornerRadius = 7
+        label.layer.borderWidth = 1
+        label.layer.borderColor = colour.withAlphaComponent(0.36).cgColor
+        label.layer.masksToBounds = true
+        return label
+    }
+}
+
+private final class PaddedLabel: UILabel {
+    private let insets = UIEdgeInsets(top: 3, left: 7, bottom: 3, right: 7)
+
+    override var intrinsicContentSize: CGSize {
+        let size = super.intrinsicContentSize
+        return CGSize(width: size.width + insets.left + insets.right, height: size.height + insets.top + insets.bottom)
+    }
+
+    override func drawText(in rect: CGRect) {
+        super.drawText(in: rect.inset(by: insets))
     }
 }
 

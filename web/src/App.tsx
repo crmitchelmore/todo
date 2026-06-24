@@ -5,6 +5,8 @@ import { CaptureBar } from './components/CaptureBar';
 import { ConfirmCard } from './components/ConfirmCard';
 import { TaskRow } from './components/TaskRow';
 import { TaskDetailPane } from './components/TaskDetailPane';
+import { CategoryManager } from './components/CategoryManager';
+import { CategorisationRulesManager } from './components/CategorisationRulesManager';
 import { TagManager } from './components/TagManager';
 import { TagFilter } from './components/TagFilter';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -44,6 +46,9 @@ export default function App() {
   const { data: done } = useQuery<TaskRecord>(
     `SELECT * FROM tasks WHERE status = 'done' ORDER BY completed_at DESC LIMIT 20`
   );
+  const { data: rejected } = useQuery<TaskRecord>(
+    `SELECT * FROM tasks WHERE status = 'cancelled' ORDER BY updated_at DESC LIMIT 50`
+  );
   const { data: pendingProposals } = useQuery<AgentProposalRecord>(
     `SELECT * FROM agent_proposals
       WHERE status = 'pending' AND task_id IS NOT NULL AND proposal_type <> 'action'
@@ -57,6 +62,7 @@ export default function App() {
 
   const filteredActive = useMemo(() => active.filter((t) => matchesTags(t, filter)), [active, filter]);
   const filteredDone = useMemo(() => done.filter((t) => matchesTags(t, filter)), [done, filter]);
+  const filteredRejected = useMemo(() => rejected.filter((t) => matchesTags(t, filter)), [rejected, filter]);
   const allVisibleTasks = useMemo(
     () => [...proposed, ...filteredActive, ...filteredDone],
     [proposed, filteredActive, filteredDone]
@@ -99,7 +105,7 @@ export default function App() {
         <h1>Capture</h1>
         <span className="header-spacer" />
         <button className="tags-toggle" onClick={() => setShowTags((s) => !s)}>
-          {showTags ? 'Close tags' : 'Manage tags'}
+          {showTags ? 'Close labels' : 'Manage labels'}
         </button>
         <button className="tags-toggle" onClick={() => setShowSettings((s) => !s)}>
           {showSettings ? 'Close settings' : 'Settings'}
@@ -120,6 +126,10 @@ export default function App() {
 
       {showTags && (
         <section>
+          <h2>Categories</h2>
+          <CategoryManager />
+          <h2>AI categorisation rules</h2>
+          <CategorisationRulesManager />
           <h2>Tags</h2>
           <TagManager />
         </section>
@@ -187,6 +197,22 @@ export default function App() {
                     task={t}
                     selected={selectedId === t.id}
                     onSelect={(task) => setSelectedId(task.id)}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {filteredRejected.length > 0 && (
+            <section className="rejected-bin">
+              <h2>Rejected · {filteredRejected.length}</h2>
+              <div className="rows">
+                {filteredRejected.map((t) => (
+                  <TaskRow
+                    key={t.id}
+                    task={t}
+                    readOnly
+                    tone="rejected"
                   />
                 ))}
               </div>

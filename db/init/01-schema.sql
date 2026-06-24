@@ -265,6 +265,113 @@ create table if not exists public.tags (
 create unique index if not exists tags_owner_name_idx on public.tags (owner_id, lower(name));
 create index if not exists tags_owner_id_idx on public.tags (owner_id, id);
 
+-- User-managed categories. Tasks reference categories by name; this table holds the editable
+-- category vocabulary and presentation metadata.
+create table if not exists public.categories (
+  id          uuid primary key default gen_random_uuid(),
+  owner_id    uuid not null references public.users(id) on delete cascade,
+  name        text not null,
+  color       text not null default '#9BA1A6',
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+
+  constraint categories_name_len_chk check (char_length(name) between 1 and 80),
+  constraint categories_color_hex_chk check (color ~ '^#[0-9A-Fa-f]{6}$')
+);
+
+create unique index if not exists categories_owner_name_idx on public.categories (owner_id, lower(name));
+create index if not exists categories_owner_id_idx on public.categories (owner_id, id);
+
+-- User-owned guidance for background categorisation. The worker reads these as suggestion hints
+-- only; task status/category/tag changes still require normal human confirmation.
+create table if not exists public.categorisation_rules (
+  id            uuid primary key default gen_random_uuid(),
+  owner_id      uuid not null references public.users(id) on delete cascade,
+  title         text not null,
+  instructions  text not null,
+  category      text,
+  tags          text,
+  enabled       integer not null default 1,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now(),
+
+  constraint categorisation_rules_title_len_chk check (char_length(title) between 1 and 120),
+  constraint categorisation_rules_instructions_len_chk check (char_length(instructions) between 1 and 1000),
+  constraint categorisation_rules_category_len_chk check (category is null or char_length(category) between 1 and 80),
+  constraint categorisation_rules_tags_len_chk check (tags is null or octet_length(tags) <= 2000),
+  constraint categorisation_rules_tags_json_chk check (tags is null or jsonb_typeof(tags::jsonb) = 'array'),
+  constraint categorisation_rules_enabled_chk check (enabled in (0, 1))
+);
+
+create index if not exists categorisation_rules_owner_enabled_idx
+  on public.categorisation_rules (owner_id, enabled, updated_at desc);
+
+-- User-visible memory/facts that guide agent research. These are owner-scoped, editable, and
+-- soft-deletable so an agent cannot permanently erase context through a retried write.
+create table if not exists public.user_memories (
+  id          uuid primary key default gen_random_uuid(),
+  owner_id    uuid not null references public.users(id) on delete cascade,
+  content     text not null,
+  domain      text,
+  source      text not null default 'manual',
+  confidence  double precision not null default 1,
+  tags        text,
+  status      text not null default 'active',
+  expires_at  timestamptz,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  deleted_at  timestamptz,
+
+  constraint user_memories_content_len_chk check (char_length(content) between 1 and 1000),
+  constraint user_memories_domain_len_chk check (domain is null or char_length(domain) between 1 and 80),
+  constraint user_memories_source_chk check (source in ('manual', 'correction', 'inferred', 'agent')),
+  constraint user_memories_confidence_chk check (confidence >= 0 and confidence <= 1),
+  constraint user_memories_tags_len_chk check (tags is null or octet_length(tags) <= 2000),
+  constraint user_memories_tags_json_chk check (tags is null or jsonb_typeof(tags::jsonb) = 'array'),
+  constraint user_memories_status_chk check (status in ('active', 'disabled', 'deleted')),
+  constraint user_memories_deleted_at_chk check ((status = 'deleted') = (deleted_at is not null))
+);
+
+create index if not exists user_memories_owner_status_expires_idx
+  on public.user_memories (owner_id, status, expires_at, updated_at desc);
+
+-- Owner-scoped local backend device registry. Multiple Macs can install Capture, while one active
+-- device may be selected to execute approved local harness attempts.
+create table if not exists public.agent_devices (
+  id                  uuid primary key default gen_random_uuid(),
+  owner_id            uuid not null references public.users(id) on delete cascade,
+  device_name         text not null,
+  platform            text not null default 'macos',
+  status              text not null default 'active',
+  is_selected_backend integer not null default 0,
+  harness_kind        text,
+  harness_label       text,
+  capabilities        text,
+  last_seen_at        timestamptz,
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now(),
+
+  constraint agent_devices_name_len_chk check (char_length(device_name) between 1 and 120),
+  constraint agent_devices_platform_len_chk check (char_length(platform) between 1 and 40),
+  constraint agent_devices_status_chk check (status in ('active', 'disabled')),
+  constraint agent_devices_selected_chk check (is_selected_backend in (0, 1)),
+  constraint agent_devices_harness_kind_chk
+    check (harness_kind is null or harness_kind in ('copilot-cli', 'hermes', 'openclaw', 'custom')),
+  constraint agent_devices_harness_label_len_chk
+    check (harness_label is null or char_length(harness_label) between 1 and 120),
+  constraint agent_devices_capabilities_len_chk
+    check (capabilities is null or octet_length(capabilities) <= 4000),
+  constraint agent_devices_capabilities_json_chk
+    check (capabilities is null or jsonb_typeof(capabilities::jsonb) is not null)
+);
+
+create unique index if not exists agent_devices_one_selected_backend_idx
+  on public.agent_devices (owner_id)
+  where status = 'active' and is_selected_backend = 1;
+
+create index if not exists agent_devices_owner_status_seen_idx
+  on public.agent_devices (owner_id, status, last_seen_at desc, updated_at desc);
+
 -- Server-owned, append-only task history / agent work log. Synced read-only to clients and loaded
 -- only for the selected task; callers mutate tasks, the backend/worker records events.
 create table if not exists public.task_events (
@@ -386,4 +493,4 @@ create index if not exists agent_proposals_owner_task_status_idx
   where task_id is not null;
 
 -- PowerSync logical replication publication.
-create publication powersync for table public.tasks, public.tags, public.task_events, public.task_attachments, public.agent_proposals;
+create publication powersync for table public.tasks, public.tags, public.categories, public.categorisation_rules, public.user_memories, public.agent_devices, public.task_events, public.task_attachments, public.agent_proposals;

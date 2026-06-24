@@ -31,14 +31,21 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
     private let dueSwitch = UISwitch()
     private let duePicker = UIDatePicker()
     private let feasibilityLabel = UILabel()
-    private let categoryField = UITextField()
+    private let categoryButton = UIButton(type: .system)
     private let priorityControl = UISegmentedControl(items: ["None", "P0", "P1", "P2", "P3", "P4"])
-    private let tagsField = UITextField()
+    private let tagStack = UIStackView()
+    private let addTagButton = UIButton(type: .system)
     private let notesView = UITextView()
     private let rollupStack = UIStackView()
     private let rollupSummaryLabel = UILabel()
     private let rollupProgress = UIProgressView(progressViewStyle: .bar)
+    private let handoffField = UITextField()
+    private let researchButton = UIButton(type: .system)
+    private let attemptButton = UIButton(type: .system)
+    private let handoffStatusLabel = UILabel()
     private let historyStack = UIStackView()
+    private var selectedCategory: String?
+    private var selectedTags: [String] = []
 
     init(viewModel: CaptureViewModel, item: TaskItem) {
         self.viewModel = viewModel
@@ -106,24 +113,20 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
         feasibilityLabel.textColor = Theme.textSecondary
         feasibilityLabel.numberOfLines = 0
 
-        categoryField.placeholder = "engineering, home, inbox…"
-        categoryField.textColor = Theme.textPrimary
-        categoryField.backgroundColor = Theme.surfaceHi
-        categoryField.layer.cornerRadius = 10
-        categoryField.layer.masksToBounds = true
-        categoryField.delegate = self
-        categoryField.addTarget(self, action: #selector(markDirty), for: .editingChanged)
+        Theme.quiet(categoryButton, colour: Theme.textPrimary)
+        categoryButton.contentHorizontalAlignment = .leading
+        categoryButton.addAction(UIAction { [weak self] _ in self?.presentCategoryPicker() }, for: .touchUpInside)
 
         priorityControl.selectedSegmentTintColor = Theme.signal
         priorityControl.addTarget(self, action: #selector(markDirty), for: .valueChanged)
 
-        tagsField.placeholder = "project, person, context"
-        tagsField.textColor = Theme.textPrimary
-        tagsField.backgroundColor = Theme.surfaceHi
-        tagsField.layer.cornerRadius = 10
-        tagsField.layer.masksToBounds = true
-        tagsField.delegate = self
-        tagsField.addTarget(self, action: #selector(markDirty), for: .editingChanged)
+        tagStack.axis = .horizontal
+        tagStack.spacing = 6
+        tagStack.alignment = .leading
+        tagStack.isLayoutMarginsRelativeArrangement = false
+        Theme.quiet(addTagButton, colour: Theme.iris)
+        addTagButton.setTitle("+ Tag", for: .normal)
+        addTagButton.addAction(UIAction { [weak self] _ in self?.presentTagPicker() }, for: .touchUpInside)
 
         notesView.font = Theme.display(15, .regular)
         notesView.textColor = Theme.textPrimary
@@ -143,6 +146,23 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
         rollupStack.addArrangedSubview(rollupProgress)
         rollupStack.isHidden = true
 
+        handoffField.placeholder = "Ask for research or an attempted next action"
+        handoffField.textColor = Theme.textPrimary
+        handoffField.backgroundColor = Theme.surfaceHi
+        handoffField.layer.cornerRadius = 10
+        handoffField.layer.masksToBounds = true
+        handoffField.returnKeyType = .done
+        handoffField.delegate = self
+        Theme.quiet(researchButton, colour: Theme.iris)
+        researchButton.setTitle("Research", for: .normal)
+        researchButton.addAction(UIAction { [weak self] _ in self?.requestAgentHandoff(.research) }, for: .touchUpInside)
+        Theme.quiet(attemptButton, colour: Theme.iris)
+        attemptButton.setTitle("Attempt", for: .normal)
+        attemptButton.addAction(UIAction { [weak self] _ in self?.requestAgentHandoff(.attempt) }, for: .touchUpInside)
+        handoffStatusLabel.font = Theme.display(13, .regular)
+        handoffStatusLabel.textColor = Theme.textTertiary
+        handoffStatusLabel.numberOfLines = 0
+
         historyStack.axis = .vertical
         historyStack.spacing = 12
 
@@ -158,12 +178,19 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
         stack.addArrangedSubview(section("Properties"))
         stack.addArrangedSubview(row(label: "Due", controls: [dueSwitch, duePicker]))
         stack.addArrangedSubview(row(label: "Calendar", controls: [feasibilityLabel]))
-        stack.addArrangedSubview(row(label: "Category", controls: [categoryField]))
+        stack.addArrangedSubview(row(label: "Category", controls: [categoryButton]))
         stack.addArrangedSubview(row(label: "Priority", controls: [priorityControl]))
-        stack.addArrangedSubview(row(label: "Tags", controls: [tagsField]))
+        stack.addArrangedSubview(row(label: "Tags", controls: [tagStack, addTagButton]))
         stack.addArrangedSubview(section("Expansion"))
         stack.addArrangedSubview(notesView)
         stack.addArrangedSubview(section("AI + activity history"))
+        stack.addArrangedSubview(handoffField)
+        let handoffActions = UIStackView(arrangedSubviews: [researchButton, attemptButton])
+        handoffActions.axis = .horizontal
+        handoffActions.spacing = 10
+        handoffActions.distribution = .fillEqually
+        stack.addArrangedSubview(handoffActions)
+        stack.addArrangedSubview(handoffStatusLabel)
         stack.addArrangedSubview(historyStack)
 
         NSLayoutConstraint.activate([
@@ -241,10 +268,12 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
         duePicker.date = task.dueAt ?? task.suggestedDueAt ?? Date()
         duePicker.isEnabled = dueSwitch.isOn
         refreshFeasibility(for: task.dueAt ?? task.suggestedDueAt)
-        categoryField.text = task.category ?? task.suggestedCategory
+        selectedCategory = task.category ?? task.suggestedCategory
         let priority = task.priority.flatMap { (0...4).contains($0) ? $0 : nil }
         priorityControl.selectedSegmentIndex = (priority ?? -1) + 1
-        tagsField.text = task.tags.joined(separator: ", ")
+        selectedTags = task.tags
+        rebuildTagChips()
+        updateCategoryButton()
     }
 
     private func updateActions() {
@@ -256,6 +285,10 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
         secondaryButton.setTitle(currentTask.status == .done ? "Reopen" : "Mark done", for: .normal)
         rejectButton.isHidden = !proposed
         duePicker.isEnabled = dueSwitch.isOn
+        let handoffEnabled = currentTask.status != .cancelled
+        researchButton.isEnabled = handoffEnabled
+        attemptButton.isEnabled = handoffEnabled
+        updateCategoryButton()
     }
 
     private func updateRollup() {
@@ -386,11 +419,8 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
     private func form() -> IOSTaskDetailForm {
         let title = (titleField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let notes = notesView.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let category = (categoryField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let tags = (tagsField.text ?? "")
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let category = selectedCategory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let tags = TagsCodec.normalize(selectedTags)
         let priority = priorityControl.selectedSegmentIndex > 0 ? priorityControl.selectedSegmentIndex - 1 : nil
         return IOSTaskDetailForm(
             title: title.isEmpty ? currentTask.title : title,
@@ -407,6 +437,93 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
         duePicker.isEnabled = dueSwitch.isOn
         refreshFeasibility(for: dueSwitch.isOn ? duePicker.date : nil)
         updateActions()
+    }
+
+    private func updateCategoryButton() {
+        categoryButton.setTitle(selectedCategory ?? "None", for: .normal)
+    }
+
+    private func categoryOptions() -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for name in viewModel.allCategories.map(\.name) + CAPTURE_CATEGORIES + [currentTask.suggestedCategory, selectedCategory].compactMap({ $0 }) {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = CategoryPalette.key(trimmed)
+            guard !trimmed.isEmpty, !seen.contains(key) else { continue }
+            seen.insert(key)
+            out.append(trimmed)
+        }
+        return out
+    }
+
+    private func presentCategoryPicker() {
+        let sheet = UIAlertController(title: "Category", message: nil, preferredStyle: .actionSheet)
+        sheet.addAction(UIAlertAction(title: "None", style: .default) { [weak self] _ in
+            self?.selectedCategory = nil
+            self?.markDirty()
+            self?.updateCategoryButton()
+        })
+        for name in categoryOptions() {
+            sheet.addAction(UIAlertAction(title: name, style: .default) { [weak self] _ in
+                self?.selectedCategory = name
+                self?.markDirty()
+                self?.updateCategoryButton()
+            })
+        }
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        sheet.popoverPresentationController?.sourceView = categoryButton
+        sheet.popoverPresentationController?.sourceRect = categoryButton.bounds
+        present(sheet, animated: true)
+    }
+
+    private func presentTagPicker() {
+        let selected = Set(selectedTags.map { TagPalette.key($0) })
+        let choices = viewModel.allTags
+            .map(\.name)
+            .filter { !selected.contains(TagPalette.key($0)) }
+        let sheet = UIAlertController(title: "Add tag", message: nil, preferredStyle: .actionSheet)
+        if choices.isEmpty {
+            sheet.message = "Create tags in Settings first."
+        }
+        for name in choices {
+            sheet.addAction(UIAlertAction(title: name, style: .default) { [weak self] _ in
+                guard let self else { return }
+                self.selectedTags = TagsCodec.normalize(self.selectedTags + [name])
+                self.rebuildTagChips()
+                self.markDirty()
+            })
+        }
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        sheet.popoverPresentationController?.sourceView = addTagButton
+        sheet.popoverPresentationController?.sourceRect = addTagButton.bounds
+        present(sheet, animated: true)
+    }
+
+    private func rebuildTagChips() {
+        tagStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        for tag in selectedTags {
+            tagStack.addArrangedSubview(tagChip(tag))
+        }
+    }
+
+    private func tagChip(_ tag: String) -> UIButton {
+        let button = UIButton(type: .system)
+        button.setTitle("\(tag) ×", for: .normal)
+        let colour = UIColor(hex: viewModel.color(forTag: tag)) ?? Theme.textSecondary
+        button.setTitleColor(colour, for: .normal)
+        button.backgroundColor = colour.withAlphaComponent(0.16)
+        button.layer.cornerRadius = 8
+        button.layer.borderWidth = 1
+        button.layer.borderColor = colour.withAlphaComponent(0.36).cgColor
+        button.titleLabel?.font = Theme.mono(11, .semibold)
+        button.contentEdgeInsets = UIEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
+        button.addAction(UIAction { [weak self] _ in
+            guard let self else { return }
+            self.selectedTags.removeAll { TagPalette.key($0) == TagPalette.key(tag) }
+            self.rebuildTagChips()
+            self.markDirty()
+        }, for: .touchUpInside)
+        return button
     }
 
     private func refreshFeasibility(for dueAt: Date?) {
@@ -454,6 +571,14 @@ final class TaskDetailViewController: UIViewController, UITextFieldDelegate, UIT
     private func rejectTapped() {
         viewModel.reject(currentTask)
         navigationController?.popViewController(animated: true)
+    }
+
+    private func requestAgentHandoff(_ mode: TaskStore.AgentHandoffMode) {
+        let instructions = (handoffField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        handoffStatusLabel.text = mode == .research ? "Research queued" : "Attempt queued"
+        viewModel.requestAgentHandoff(currentTask, mode: mode, instructions: instructions.isEmpty ? nil : instructions)
+        handoffField.text = nil
+        handoffField.resignFirstResponder()
     }
 
     private func eventIcon(_ event: TaskEvent) -> String {

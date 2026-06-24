@@ -197,7 +197,10 @@ export async function setDue(id: string, dueIso: string | null): Promise<void> {
 }
 
 export async function reject(id: string): Promise<void> {
-  await db.execute(`DELETE FROM tasks WHERE id = ?`, [id]);
+  await db.execute(`UPDATE tasks SET status = 'cancelled', updated_at = ? WHERE id = ?`, [
+    new Date().toISOString(),
+    id
+  ]);
 }
 
 export async function setDone(id: string, done: boolean): Promise<void> {

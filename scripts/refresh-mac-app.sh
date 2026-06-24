@@ -17,7 +17,7 @@ echo "==> Generating Xcode project"
 (cd "$APPS_DIR" && GIT_CONFIG_COUNT=0 xcodegen generate)
 
 echo "==> Building CaptureMac"
-xcodebuild \
+GIT_CONFIG_COUNT=0 xcodebuild \
   -project "$APPS_DIR/Capture.xcodeproj" \
   -scheme CaptureMac \
   -configuration Debug \

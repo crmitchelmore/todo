@@ -19,6 +19,8 @@
 - Follow `docs/capture-ux-patterns.md` for product grammar, layout, and visual decisions.
 - Amber is reserved for human decisions; iris/purple is for AI evidence; mint is for completion/sync.
 - Mac, web, and iOS should keep the same command-deck / triage-queue / active-outline / inspector-card-stack model while using platform-native controls.
+- When changing Capture UI, check Mac, iOS, and web parity together: preserve the same capabilities and design grammar while respecting each platform's HIG/native interaction patterns.
+- Auth and code-entry screens must remain keyboard-safe on iOS and mobile web; client settings should expose enough version/sync diagnostics to identify stale installs or endpoint mismatches.
 
 ## Local Mac app refresh
 
@@ -27,18 +29,29 @@
 - The script pulls/rebases, builds, moves old `/Applications` and `~/Applications` Capture bundles to `/tmp/todo/capture-mac-old-installs/<timestamp>/`, installs `/Applications/CaptureMac.app`, and launches it.
 - Do not manually delete old app installs; move them aside or use the script.
 
+## UI validation loop
+
+- After UI changes, run `scripts/ui-validate.sh web ios mac` or the narrow affected surface, then inspect the generated `.ui-artifacts/<timestamp>/design-review.md` checklist and screenshots/logs.
+- Use Playwright/Webwright for browser interaction, iOS Simulator for iOS, and the built Mac app screenshot/log path for macOS. Fix usability/design issues before claiming parity.
+
 ## PowerSync/Railway rollouts
 
 - Schema changes that sync to clients must be rolled out across every layer together: Postgres migration/publication, PowerSync sync rules, backend upload allow-list, and web/Swift local schemas.
 - Deploy Railway services from the repository root; only use service-specific paths where existing scripts document them.
+- Railway deploy path exception: deploy `backend` and `powersync` from the repository root, but deploy `worker` with `scripts/with-secrets.sh railway up ./worker --path-as-root --ci --service worker` because Railway cannot infer the worker from the monorepo root.
 - Do not ship App Store/TestFlight clients with a schema-writing change until the live Railway backend and PowerSync service have been migrated and redeployed.
 
-## OpenClaw executor
+## Apple signing
 
-- Approved AI attempt checkpoints are executed by the worker only when `OPENCLAW_EXECUTOR_ENABLED=1` and SSH settings are configured; keep production/Railway safe-by-default unless the host can actually reach the Mac Mini.
-- The Mac Mini executor target is `bravostation@bravos-mac-mini.taile313a5.ts.net`, workdir `/Users/bravostation/clawd`, CLI `/opt/homebrew/bin/openclaw`, default agent `imessage-agent`, using `openclaw agent --agent imessage-agent --message "$PROMPT" --json --timeout 120`.
-- Use non-interactive SSH (`-o BatchMode=yes`) with the private key outside the repo. The current integration public key to authorise on the Mini is `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAB0tzfbA0+aKXye4HItr3TeUCwol4fg2GrOua8F8/Sa capture-openclaw-executor`.
-- Do not close OpenClaw execution work until SSH/OpenClaw smoke succeeds and a completed or failed attempt is recorded back into `task_events`.
+- Reuse existing valid Apple signing certificates and provisioning profiles where possible; do not create new certificates/profiles on every release attempt.
+- If signing fails due certificate capacity, clean up clearly unused/expired Apple Developer certificates and repair profiles, then rerun the release workflow. Never commit certificates, profiles, Apple passwords, or app-specific passwords.
+
+## Local harness executor
+
+- Approved AI attempt checkpoints are executed only by the worker running on the selected local backend computer when `LOCAL_HARNESS_ENABLED=1`; keep production/Railway safe-by-default unless a local harness is explicitly configured.
+- Supported harness kinds are `copilot-cli`, `hermes`, `openclaw`, and `custom`; use `LOCAL_HARNESS_COMMAND`, `LOCAL_HARNESS_WORKDIR`, and optional `LOCAL_HARNESS_ARGS_JSON` to point at whatever CLI is installed on that Mac.
+- Pass prompts as argv placeholders (`{prompt}`), not shell-interpolated strings, and keep timeouts bounded with `LOCAL_HARNESS_TIMEOUT_SECONDS`.
+- Do not close local harness execution work until the configured harness smoke succeeds and a completed or failed attempt is recorded back into `task_events` with harness kind/device metadata.
 
 ## Web testing
 

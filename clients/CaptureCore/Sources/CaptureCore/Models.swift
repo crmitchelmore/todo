@@ -1,7 +1,8 @@
 import Foundation
 
 /// Lifecycle of a captured item. Only `confirmed`/`active`+ are "real" todos;
-/// `proposed` is the instant-capture inbox awaiting the mandatory human confirm.
+/// `proposed` is the instant-capture inbox awaiting the mandatory human confirm,
+/// and `cancelled` is the low-fidelity rejected bin.
 public enum TaskStatus: String, Sendable, CaseIterable {
     case proposed
     case active
@@ -84,6 +85,178 @@ public struct TaskItem: Identifiable, Sendable, Equatable {
 public let CAPTURE_CATEGORIES = [
     "engineering", "leadership", "home", "errands", "health", "finance", "personal", "inbox"
 ]
+
+/// A user-managed category. Tasks reference categories by name so renames can preserve the stable
+/// metadata row while rewriting task.category values.
+public struct TaskCategory: Identifiable, Sendable, Equatable {
+    public let id: String
+    public var ownerId: String
+    public var name: String
+    public var color: String
+    public var createdAt: Date?
+    public var updatedAt: Date?
+
+    public init(id: String, ownerId: String, name: String, color: String, createdAt: Date? = nil, updatedAt: Date? = nil) {
+        self.id = id
+        self.ownerId = ownerId
+        self.name = name
+        self.color = color
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+/// User-owned, human-readable instructions that guide background categorisation. The worker only
+/// uses these to propose category/tag suggestions; task confirmation remains a human action.
+public struct CategorisationRule: Identifiable, Sendable, Equatable {
+    public let id: String
+    public var ownerId: String
+    public var title: String
+    public var instructions: String
+    public var category: String?
+    public var tags: [String]
+    public var enabled: Bool
+    public var createdAt: Date?
+    public var updatedAt: Date?
+
+    public init(
+        id: String,
+        ownerId: String,
+        title: String,
+        instructions: String,
+        category: String? = nil,
+        tags: [String] = [],
+        enabled: Bool = true,
+        createdAt: Date? = nil,
+        updatedAt: Date? = nil
+    ) {
+        self.id = id
+        self.ownerId = ownerId
+        self.title = title
+        self.instructions = instructions
+        self.category = category
+        self.tags = tags
+        self.enabled = enabled
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+public enum UserMemoryStatus: String, Sendable, Equatable {
+    case active
+    case disabled
+    case deleted
+}
+
+public enum UserMemorySource: String, Sendable, Equatable {
+    case manual
+    case correction
+    case inferred
+    case agent
+}
+
+/// User-visible facts/preferences that the worker may use as context for agent research.
+/// Memories are soft-deletable and optionally expire so stale personal context does not silently
+/// guide future decisions forever.
+public struct UserMemory: Identifiable, Sendable, Equatable {
+    public let id: String
+    public var ownerId: String
+    public var content: String
+    public var domain: String?
+    public var source: UserMemorySource
+    public var confidence: Double
+    public var tags: [String]
+    public var status: UserMemoryStatus
+    public var expiresAt: Date?
+    public var createdAt: Date?
+    public var updatedAt: Date?
+    public var deletedAt: Date?
+
+    public init(
+        id: String,
+        ownerId: String,
+        content: String,
+        domain: String? = nil,
+        source: UserMemorySource = .manual,
+        confidence: Double = 1,
+        tags: [String] = [],
+        status: UserMemoryStatus = .active,
+        expiresAt: Date? = nil,
+        createdAt: Date? = nil,
+        updatedAt: Date? = nil,
+        deletedAt: Date? = nil
+    ) {
+        self.id = id
+        self.ownerId = ownerId
+        self.content = content
+        self.domain = domain
+        self.source = source
+        self.confidence = confidence
+        self.tags = tags
+        self.status = status
+        self.expiresAt = expiresAt
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.deletedAt = deletedAt
+    }
+}
+
+public enum AgentDeviceStatus: String, Sendable, Equatable {
+    case active
+    case disabled
+}
+
+public enum AgentHarnessKind: String, Sendable, Equatable, CaseIterable {
+    case copilotCLI = "copilot-cli"
+    case hermes
+    case openclaw
+    case custom
+}
+
+/// A synced local-computer registration row. Multiple Macs can install Capture, but at most one
+/// active device should be selected as the backend computer for approved local harness attempts.
+public struct AgentDevice: Identifiable, Sendable, Equatable {
+    public let id: String
+    public var ownerId: String
+    public var deviceName: String
+    public var platform: String
+    public var status: AgentDeviceStatus
+    public var isSelectedBackend: Bool
+    public var harnessKind: AgentHarnessKind?
+    public var harnessLabel: String?
+    public var capabilities: [String]
+    public var lastSeenAt: Date?
+    public var createdAt: Date?
+    public var updatedAt: Date?
+
+    public init(
+        id: String,
+        ownerId: String,
+        deviceName: String,
+        platform: String = "macos",
+        status: AgentDeviceStatus = .active,
+        isSelectedBackend: Bool = false,
+        harnessKind: AgentHarnessKind? = nil,
+        harnessLabel: String? = nil,
+        capabilities: [String] = [],
+        lastSeenAt: Date? = nil,
+        createdAt: Date? = nil,
+        updatedAt: Date? = nil
+    ) {
+        self.id = id
+        self.ownerId = ownerId
+        self.deviceName = deviceName
+        self.platform = platform
+        self.status = status
+        self.isSelectedBackend = isSelectedBackend
+        self.harnessKind = harnessKind
+        self.harnessLabel = harnessLabel
+        self.capabilities = capabilities
+        self.lastSeenAt = lastSeenAt
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
 
 /// Append-only history row for a task. Written by the backend/worker and synced read-only to
 /// clients so detail panes can show user changes and AI/agent work without joining into hot lists.
@@ -225,6 +398,18 @@ public enum TagPalette {
     /// Canonical comparison key for a tag name (trimmed, case-insensitive).
     public static func key(_ name: String) -> String {
         name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+}
+
+public enum CategoryPalette {
+    public static let colors = TagPalette.colors
+
+    public static func color(for name: String) -> String {
+        TagPalette.color(for: name)
+    }
+
+    public static func key(_ name: String) -> String {
+        TagPalette.key(name)
     }
 }
 
