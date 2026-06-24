@@ -30,8 +30,9 @@ on the network, sync, or a model. Software then proposes structure and enriches 
 your own personal context — first an instant on-device guess, then a richer background pass — and
 surfaces the result as a **proposal**. Nothing becomes a real todo until you give a one-gesture
 confirmation. An always-on autonomous agent running on **your own hardware** can research items
-and, for low-risk reversible work, optionally act — but it always returns results as proposals
-you approve. You own one set of todos, synced across every surface.
+and, for low-risk reversible work, optionally act — and it can propose how an item is structured,
+when to schedule it, and when it looks done — but it always returns results as proposals you
+approve. You own one set of todos, synced across every surface.
 
 What makes Capture different is the relationship between **speed and control**: capture is
 effortless, trust comes from a fast, mandatory confirmation of every item's structure, and the
@@ -99,7 +100,8 @@ These produce the **non-negotiable values**:
 6. **Defensive by default.** Per-user isolation enforced at the data boundary, revocable sessions,
    least-privilege credentials, bounded payloads — not just application-layer checks.
 7. **Privacy-respecting use of personal data.** Personal context is used to help the user and is
-   exposed no further than each integration needs.
+   exposed no further than each integration needs. AI assistance is opt-in, personal data is not
+   used to train shared models, and the data-retention posture of any model provider is explicit.
 
 ### 2.3 The key features and how they relate
 
@@ -111,9 +113,11 @@ off it.
     model, a date parser, or an agent.
   - *Suggest* is an immediate on-device guess (a due date and a category) that patches the item
     with no network round-trip, so the confirm card is useful right away — even offline.
-  - *Enrich* is a richer background pass (broader categories, urgency, fuller date and recurrence
-    parsing, tags, project hints, personal-context discovery, confidence, provenance) that patches
-    the **same** item again.
+  - *Enrich* is a richer background pass (broader categories, urgency, fuller date / deadline /
+    recurrence parsing, a duration estimate, tags, priority, project hints, personal-context
+    discovery) that patches the **same** item again. Every suggestion it writes carries its own
+    confidence and provenance, and is conditioned on the user's own confirmed history so guesses
+    feel personal rather than generic.
   - *Confirm* is the mandatory human gate: a one-gesture accept / inline-edit / reject.
   - *Sync* propagates every patch and every confirmation to all surfaces.
   - The crucial relationship: **suggestion and enrichment never change an item's lifecycle status
@@ -138,9 +142,27 @@ off it.
   and location feed proposals and enrichment. They are *categories of context*, sitting behind the
   enrichment/agent layer — never on the capture hot path — and they never silently create real
   todos or change lifecycle status.
-- **Completion detection.** Personal context (for example, an email reply that reads as "done")
-  can produce a *proposal* to mark an item complete — never an automatic completion. It re-enters
-  the same confirm gate.
+- **Completion detection.** A signal from any source — an email reply that reads as "done", an
+  agent observation, a connected tool changing state — can produce a *proposal* to mark an item
+  complete, never an automatic completion. Each signal is one cited, confidence-scored proposal that
+  re-enters the same confirm gate.
+- **Rich, intent-revealing structure.** A task is more than a title and a due date. It can carry a
+  start/defer date (hide until), a due date (when you plan to work on it), a hard deadline (when it
+  must be done), a deliberate "today / committed" flag, a duration estimate, a priority, a recurrence
+  rule, blocking/related dependencies, and reminders. Every one of these can be *suggested* by
+  enrichment and is *confirmed* (or edited) by the human — structure is never silently imposed.
+- **AI decomposition.** For a large item, the agent can propose a set of subtasks (or turn a pasted
+  outline into a tree). Each proposed child enters the triage queue, so an AI plan still becomes real
+  work only by human confirmation.
+- **Scheduling proposals.** The agent can propose *where* work lands — time-blocks across the day or
+  week — using the calendar-feasibility evidence the system already computes, plus the duration,
+  deadline, priority, earliest-start, and an optional "ideal-week" template. It can warn that a
+  deadline is at risk or that a day is over-committed. Crucially this is **propose-then-confirm, not
+  auto-pilot**: the human approves, edits, or rejects; nothing is written to the calendar silently.
+- **Edit / merge proposals.** When automation would change an *existing* confirmed field, a note, or
+  an external item — not just create a new one — it surfaces a before/after diff for approval.
+  Confirm-before-save thus extends to **confirm-before-change**, so agents can tidy and update
+  without silently rewriting your data.
 
 Every source of structure converges on one human gate:
 
@@ -161,8 +183,11 @@ responsibility:
 
 - **Capture & sync plane.** Native clients on each platform plus a complete browser client. Their
   job is instant local writes and reflecting synced state. Fast-capture entry points — a global
-  desktop hotkey, a system share action, voice/shortcut entry, widgets, the web, and paste-a-list —
-  all funnel into the same single write. Clients render optimistic state and sync in the background.
+  desktop hotkey, a system share action, voice/shortcut entry (with an accept / refine / reject pass
+  on the transcription), widgets, the web, paste-a-list, an email-forwarding address, a browser
+  clipper that grabs the page and selection, context-autofill from the foreground app, and the agent
+  itself as a text/message delegate — all funnel into the same single write. Clients render optimistic
+  state and sync in the background.
 - **Hosted sync core.** An account-agnostic, owner-scoped source of truth that mirrors an
   offline-first local store on every client. It is the trust boundary: ownership, allowed write
   surfaces, and append-only history are enforced here. Because the shared core *is* the database,
@@ -187,6 +212,10 @@ responsibility:
   unconfirmed state and can be edited inline before accepting.
 - **Approval before consequence.** Any action that mutates external state needs an approval
   checkpoint and must record completion or failure back into the item's history.
+- **Confirm before change.** Automation that alters existing confirmed structure, a note, or an
+  external item shows a before/after diff and waits for approval — the change-time counterpart of
+  confirm-before-save. Approvals, reminders, and at-risk warnings can be actioned (accept / reject /
+  snooze) directly from a notification, without opening the app.
 - **Local-first optimism.** The UI reflects local writes immediately and treats sync and agent work
   as evidence that lands later, asynchronously.
 - **Evidence-led.** Human decisions are fast because proposals show confidence, provenance, and the
@@ -241,6 +270,20 @@ confirmed-and-active rows together — without weakening the gate. Completion st
 completion timestamp; **reopening** a done task returns it to active, clears the completion
 timestamp, and appends an audit event.
 
+**Active work has sub-states orthogonal to the gate.** Within `active`, a task may be flagged
+*in-progress* or *blocked / on-hold* (for example, waiting on a dependency). These describe how the
+work is going, not whether it is real; they never substitute for — or bypass — the
+proposed→confirmed gate, and the active outline and roll-ups read them to show what is moving and
+what is stuck.
+
+**Recurring tasks spawn forward, never mutate the past.** A confirmed task may carry a recurrence
+rule and an anchor — repeat on a fixed schedule, or repeat from the date it was completed. When such
+a task is completed, the system spawns the next occurrence as a **new** row at `confirmed` status
+(the human already approved the pattern; re-confirming every occurrence would flood the triage
+queue), inheriting structure and linked to the completed instance for lineage. The completed row
+stays immutable, so each occurrence keeps its own audit trail. Enrichment may *suggest* a recurrence
+rule on capture, but it becomes canonical only once confirmed.
+
 **Complication resolved — enrichment must write continuously without ever advancing an item.**
 Enrichment and agents need to keep improving a `proposed` item (better date, category, tags,
 research notes) while never promoting it. The enrichment write is therefore scoped two ways: it may
@@ -248,8 +291,9 @@ touch only suggestion fields, *and* only while the row is still `proposed`. Conc
 background update both restricts the columns it sets and guards its filter on `status = 'proposed'`,
 so a confirmation that races ahead simply causes the enrichment write to affect zero rows. Status
 changes have exactly one author: the human. Transitions append **semantic events** (captured,
-confirmed, updated, enriched, agent-requested, agent-completed, agent-failed, completed, reopened,
-rejected, cancelled), and the history surfaces meaning first, raw detail second.
+confirmed, updated, enriched, scheduled, rescheduled, blocked, unblocked, recurrence-spawned,
+agent-requested, agent-completed, agent-failed, completed, reopened, rejected, cancelled), and the
+history surfaces meaning first, raw detail second.
 
 ### 3.2 Capture must never block on intelligence or sync
 
@@ -273,15 +317,28 @@ database purely by authenticating as the same owner. No single vendor cloud sits
 and the user owns the data. Consistency across surfaces is **eventual and reactive** (local-first
 optimistic writes, background sync), not instantaneous.
 
-**Concurrency choice — per-row last-write-wins vs richer merge.** We adopt **per-row
-last-write-wins** (most recent write to a row wins; no field-level reconciliation). The rationale
-is conceptual-integrity- and stability-first: the expected workload is one identity across a few
-devices plus one agent, where *concurrent edits to the same task* are rare. Last-write-wins is
-dramatically simpler to reason about, test, and operate, and it keeps capture fast. We explicitly
-recorded the alternative — a field-level conflict-free merge — and the trigger to adopt it: *only
-if* simultaneous multi-device edits of the *same* task become common, and even then applied
-selectively to the fields that need it rather than replacing the whole model. This is a reversible,
-documented decision, not a permanent constraint.
+**Concurrency choice — per-field last-write-wins, with set-valued fields handled additively.** The
+default is **per-field last-write-wins**: every write carries only the columns it actually changed,
+so two devices editing *different* fields of the same task — one edits the title while the agent
+patches a suggestion — never clobber each other; only a genuine same-field race resolves
+last-write-wins. This is the safe realisation of the same simple philosophy — avoid a heavyweight
+merge engine until evidence demands it — and it is the sync layer's own default, but it only holds
+if the write path patches changed columns rather than replacing the whole row, so a naive whole-row
+write is explicitly disallowed. Two further rules remove the remaining silent-loss traps:
+
+- **Set-valued fields are additive, not overwritten.** Tags (and similar sets) live as their own
+  owner-scoped rows with a unique key and insert-on-conflict-do-nothing, giving *add-wins* semantics:
+  a tag added on one device and a different tag added on another both survive. Serialising such a set
+  into a single value would let one device's write erase the other's.
+- **Status only advances; it never regresses.** The write handler enforces the lifecycle as a state
+  machine, so a late-arriving enrichment or agent write can never pull a `confirmed` / `done` item
+  back to `proposed`. This is the write-time guarantee behind §3.1's invariant.
+
+We explicitly recorded the heavier alternative — a field-level conflict-free merge for long-form text,
+so two offline edits to the *same* note both survive — and the trigger to adopt it: *only if*
+concurrent editing of the same long text becomes common, applied selectively to that field rather
+than the whole model. Wall-clock tie-breaking is imperfect under clock skew; it is acceptable for
+this single-user, few-devices-plus-one-agent workload and revisited if evidence says otherwise.
 
 **Complication resolved — account switching must not leak optimistic writes.** Local optimistic
 data is cleared on a *true* account boundary (sign-out, or sign-in as a different owner). A normal
@@ -309,6 +366,11 @@ The edge cases are resolved at the **data boundary**, not in UI code:
   from the source-position map, so a child is never written before the parent it must reference.
   Active items enter as `proposed`; already-completed bullets import directly as `done`. Ancestor
   titles may be retained as lightweight compatibility labels while the hierarchy remains canonical.
+- **Typed relations beyond hierarchy.** Besides parent/child, tasks may carry typed links —
+  *blocking / blocked-by*, *related*, *precedes / follows* — and an *earliest-start* date. These are
+  owner-scoped and pass the same self-reference and cycle guards, so the dependency graph, like the
+  project tree, can never close into a ring or cross owners. Dependencies let the active outline mark
+  work *blocked* (§3.1) and let scheduling respect ordering (§3.13).
 
 **Roll-ups must never mutate child history, and must not contend on writes.** Parent/project
 presentation is a **materialised / rolled-up read view**: a read-path recursive aggregation walks
@@ -425,11 +487,20 @@ The **autonomy / risk taxonomy** governs what may happen without asking:
 **Structure is always confirmed**, at every level — autonomy may advance *work*, but never bypasses
 the human's authorship of an item's structure.
 
+**Proposal types share one gate.** Everything enrichment or the agent emits is one of a small set of
+proposal types — a *suggestion* (a suggested field), a *decomposition* (subtasks), a *schedule*
+(proposed time-blocks), an *edit / merge* (a diff against an existing field, note, or external item),
+a *completion signal*, or a consequential *action*. All carry confidence and provenance and pass the
+confirm/approval gate; an *edit / merge* additionally renders a before/after diff, so changing
+existing data is as reviewable as creating a new item. New proposal types must reuse this one gate
+rather than opening a side-channel.
+
 ### 3.9 Provenance and confidence on proposals
 
-Every proposal — capture suggestion, enrichment, email extraction, agent research, completion
-detection — carries **provenance** (its source category and, where possible, a verbatim source
-quote) and a **confidence** value constrained to the 0–1 range at the data boundary. This is what
+Every suggestion and proposal — an on-device guess, a background enrichment, an email extraction,
+agent research, a schedule, an edit/merge, a completion signal — carries **provenance** (its source
+category and, where possible, a verbatim source quote) and a **confidence** value constrained to the
+0–1 range at the data boundary. This is what
 makes the confirm gate fast rather than burdensome: the user sees *why* something was proposed and
 *how sure* the system is, and can accept with one gesture or correct inline. On the card, a source
 quote (for example, the email sentence that implied the task) is rendered in the distinct
@@ -444,10 +515,12 @@ to a checkpoint move that checkpoint consistently.
 Clients never scatter raw writes through UI code; they go through a single **repository** that
 centralises lifecycle operations and keeps invariants close to the logic. Its behaviours include:
 connect / disconnect sync; prepare and clear active-user state; capture a single item; detect and
-ingest a nested list; confirm and reject proposals; mark done and reopen; update details; edit due
-date and tags; watch the proposed, active, and done lists; watch a single task, its events, and its
-descendants / roll-ups; and manage lightweight tags. Surfaces differ in UI while sharing product
-behaviour.
+ingest a nested list; confirm and reject proposals; mark done and reopen; update details; set the
+dates (start / due / deadline), a recurrence rule, a duration estimate, and priority; toggle the
+today/committed flag; manage tags, relations, and reminders; request a decomposition or a schedule
+proposal and decide it; decide an edit/merge proposal; watch the proposed, active, done, today,
+upcoming/scheduled, and blocked lists; and watch a single task, its events, and its descendants /
+roll-ups. Surfaces differ in UI while sharing product behaviour.
 
 The **sync contract** is correspondingly narrow: replicate owner-scoped rows to every authenticated
 client; support local-first optimistic writes for tasks, tags, and bounded attachment previews; keep
@@ -478,12 +551,103 @@ rather than internal wiring, written in **arrange-act-assert** form. Representat
   approved attempt executes at most once.
 - Arrange a pending proposal; act by accepting it twice; assert the first succeeds and the second is
   not reapplied.
+- Arrange a confirmed recurring task; act by completing it; assert a new `confirmed` occurrence is
+  spawned, linked to the now-immutable completed row, with its own fresh history.
+- Arrange one task; act by editing different fields on two offline devices; assert both edits survive
+  after sync (per-field, not whole-row, last-write-wins).
+- Arrange one task; act by adding a different tag on two offline devices; assert both tags survive
+  (add-wins set).
+- Arrange a `confirmed` task; act by replaying a late enrichment or agent write; assert status cannot
+  regress to `proposed`.
+- Arrange a schedule or edit/merge proposal; act by leaving it pending; assert no calendar write and
+  no change to the existing field occur until the human approves.
 
 Mocking is reserved for hard external edges (third-party personal-context sources, the language
 model, the executor on user hardware); the core data and sync paths are exercised against real
 boundaries, because production behaviour — not theoretical correctness — is the source of truth.
 
-### 3.12 Non-goals
+### 3.12 The richer task model: dates, recurrence, dependencies
+
+Capture's task carries more intent-revealing structure than a title and a single date. Every field
+below is suggestible by enrichment and confirmed (or edited) by the human, is owner-scoped, and sits
+on the write-path allowlist (§3.6); none is set silently.
+
+**Dates serve different questions.** Four distinct date concepts replace a single "due":
+
+- *start / defer* — the task is hidden from active views until this date, so work surfaces when it
+  can begin rather than adding noise earlier.
+- *due* — when you plan to work on it; drives gentle overdue signalling and is the usual recurrence
+  anchor.
+- *deadline* — a hard external cut-off, distinct from due; rendered with its own emphasis and
+  escalating reminders, and never silently moved by automation.
+- *committed / today* — a deliberate, human-only flag meaning "I will work on this today," separate
+  from "due today." The **Today** view is the union of committed items and items whose start / due /
+  deadline has arrived, so a curated focus list is never just mechanical date-matching.
+
+**Recurrence is a rule plus an anchor.** A recurring task stores a recurrence rule (an established
+calendar-recurrence format) and an anchor — *repeat on schedule* (next occurrence computed from the
+original date) or *repeat from completion* (next computed from when it was actually finished) —
+optionally bounded by an end date or a count. Completion spawns the next occurrence forward as a new
+confirmed row (§3.1), preserving per-occurrence history.
+
+**Dependencies and ordering.** Typed relations (§3.4) — blocking / blocked-by, related, precedes /
+follows — plus an *earliest-start* date let work be marked *blocked* and let the scheduler respect
+ordering. The dependency graph reuses the same owner-scoping and cycle guards as the project tree.
+
+**Effort and priority.** A *duration estimate* (and accumulated *time spent*) and a small *priority*
+scale make the active outline and scheduling meaningful. Enrichment can propose a duration from the
+title and the user's own history of similar tasks; the human confirms.
+
+**Set-valued fields stay additive.** Tags and reminders are their own rows, not serialised blobs
+(§3.3), so concurrent additions never silently overwrite one another.
+
+### 3.13 Scheduling: propose-then-confirm time-blocking
+
+Scheduling is where Capture's "agent proposes, human disposes" stance pays off most. The system
+already scores calendar *feasibility* for a date (is there a clear focus window before it?); a
+schedule proposal extends that into *placing* work — without ever writing to the calendar by itself.
+
+**Inputs.** A schedule proposal reads the duration estimate, due vs hard deadline, priority,
+earliest-start and dependencies, the user's working hours and an optional *ideal-week template*
+(which kinds of work belong in which windows — deep work mornings, admin late Friday), existing busy
+time, and buffer / travel allowances.
+
+**Output is a proposal, not an action.** The agent returns a set of proposed time-blocks carrying the
+feasibility evidence and a confidence; the human approves, edits, or rejects them through the same
+confirm card and proposal / checkpoint machinery (§3.8, §3.9). Nothing lands on the calendar
+silently; a consequential external write still passes the approval gate.
+
+**Warnings are proposals too.** When projected completion slips past a deadline the agent raises an
+*at-risk* warning early (not just an overdue flag); when a day exceeds its planned capacity it raises
+an *over-commitment* warning offering to push lower-priority work. When a scheduled block is missed,
+named actions — reschedule, complete-and-add-time, split-and-reschedule — let the human re-plan in
+one gesture.
+
+**Routines.** Recurring routines (§3.12) can be scheduled with flexible windows ("most mornings,
+flexible") and a weekly focus-time target that the scheduler defends by moving — not dropping — the
+block when conflicts appear.
+
+### 3.14 Delivery: actionable notifications and reminders
+
+Decisions and reminders must reach the user wherever they are and be actionable without opening the
+app — otherwise the confirm gate becomes friction.
+
+**Reminders** can be absolute, relative to a due or start date, or location-based (on arriving at or
+leaving a place), and attach as their own rows so a task can carry several. Location reminders reuse
+the location integration and the same privacy posture (§2.2).
+
+**Approval delivery.** A proposal or approval can be delivered as an *actionable notification* whose
+buttons map to the confirm gate — accept / reject / snooze — so the human can dispose of it from the
+lock screen or a glance. The action is recorded through the normal idempotent, single-use proposal
+decision path (§3.9), so a tap from a notification and a tap in the app cannot double-apply. A missed
+notification never loses the decision: the item simply remains in the triage queue.
+
+**Ambiguous or missing input.** When a date (or other suggested field) cannot be parsed confidently,
+enrichment does not guess silently: it either leaves the field unset for the human to add at the
+confirm card, or surfaces a low-confidence suggestion clearly marked as such. Capture-first speed is
+never sacrificed to resolve an ambiguity — the item is already safely captured.
+
+### 3.15 Non-goals
 
 Capture is **single-account-first** (multi-user is supported structurally but is not a launch
 focus). It is not a team-collaboration suite, not a calendar/email replacement, and not an
