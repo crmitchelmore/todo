@@ -10,16 +10,21 @@ import type { AttachmentDraft } from './attachments';
  * Capture is the hot path: ONE instant local INSERT, nothing awaited on the network or an LLM.
  * Enrichment is fired off in the background and patches the row when ready.
  */
-export async function capture(raw: string, attachments: AttachmentDraft[] = []): Promise<string> {
+export interface CaptureOptions {
+  agentMode?: 'research' | 'attempt';
+  agentPlanConfirmation?: boolean;
+}
+
+export async function capture(raw: string, attachments: AttachmentDraft[] = [], options: CaptureOptions = {}): Promise<string> {
   const title = raw.trim();
   if (!title && attachments.length === 0) return '';
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const effectiveTitle = title || attachments[0]?.filename || 'Image attachment';
   await db.execute(
-    `INSERT INTO tasks (id, owner_id, title, status, source, created_at, updated_at)
-     VALUES (?, ?, ?, 'proposed', 'capture', ?, ?)`,
-    [id, ownerId(), effectiveTitle, now, now]
+    `INSERT INTO tasks (id, owner_id, title, status, source, agent_mode, agent_plan_confirmation, created_at, updated_at)
+     VALUES (?, ?, ?, 'proposed', 'capture', ?, ?, ?, ?)`,
+    [id, ownerId(), effectiveTitle, options.agentMode ?? 'research', options.agentPlanConfirmation === false ? 0 : 1, now, now]
   );
   for (const attachment of attachments) {
     await addAttachment(id, attachment, now);
@@ -74,13 +79,13 @@ export interface ConfirmFields {
  * in the proposed inbox; `[x]` items import directly as done). Otherwise returns null and the
  * caller should fall back to single `capture`.
  */
-export async function captureList(raw: string): Promise<string[] | null> {
+export async function captureList(raw: string, options: CaptureOptions = {}): Promise<string[] | null> {
   const items = parseMarkdownList(raw);
   if (!items) return null;
-  return captureBatch(items);
+  return captureBatch(items, options);
 }
 
-export async function captureBatch(items: ParsedCaptureItem[]): Promise<string[]> {
+export async function captureBatch(items: ParsedCaptureItem[], options: CaptureOptions = {}): Promise<string[]> {
   const prepared = items
     .map((item, itemIndex) => ({ id: crypto.randomUUID(), item, itemIndex }))
     .filter((p) => p.item.title.trim().length > 0);
@@ -97,15 +102,15 @@ export async function captureBatch(items: ParsedCaptureItem[]): Promise<string[]
     if (item.isDone) {
       await db.execute(
         `INSERT INTO tasks
-           (id, owner_id, parent_task_id, title, status, category, tags, source, created_at, updated_at, confirmed_at, completed_at)
-         VALUES (?, ?, ?, ?, 'done', NULL, ?, 'paste', ?, ?, ?, ?)`,
-        [id, ownerId(), parentId, item.title, tagsJSON, now, now, now, now]
+           (id, owner_id, parent_task_id, title, status, category, tags, source, agent_mode, agent_plan_confirmation, created_at, updated_at, confirmed_at, completed_at)
+         VALUES (?, ?, ?, ?, 'done', NULL, ?, 'paste', ?, ?, ?, ?, ?, ?)`,
+        [id, ownerId(), parentId, item.title, tagsJSON, options.agentMode ?? 'research', options.agentPlanConfirmation === false ? 0 : 1, now, now, now, now]
       );
     } else {
       await db.execute(
-        `INSERT INTO tasks (id, owner_id, parent_task_id, title, status, tags, source, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 'proposed', ?, 'paste', ?, ?)`,
-        [id, ownerId(), parentId, item.title, tagsJSON, now, now]
+        `INSERT INTO tasks (id, owner_id, parent_task_id, title, status, tags, source, agent_mode, agent_plan_confirmation, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'proposed', ?, 'paste', ?, ?, ?, ?)`,
+        [id, ownerId(), parentId, item.title, tagsJSON, options.agentMode ?? 'research', options.agentPlanConfirmation === false ? 0 : 1, now, now]
       );
       void enrich(id, item.title);
     }

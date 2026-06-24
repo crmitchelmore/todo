@@ -170,7 +170,7 @@ async function requireAuth(req: AuthedRequest, res: Response, next: NextFunction
 const ALLOWED_COLUMNS: Record<string, Set<string>> = {
   tasks: new Set([
     'id', 'owner_id', 'parent_task_id', 'title', 'notes', 'status', 'category', 'tags', 'due_at', 'priority',
-    'github_repo', 'github_url',
+    'github_repo', 'github_url', 'agent_mode', 'agent_plan_confirmation',
     'suggested_due_at', 'suggested_category', 'suggestion_confidence', 'suggestion_source',
     'source', 'created_at', 'updated_at', 'confirmed_at', 'completed_at'
   ]),
@@ -195,7 +195,7 @@ const ALLOWED_COLUMNS: Record<string, Set<string>> = {
     'id', 'owner_id', 'task_id', 'filename', 'mime_type', 'byte_size', 'preview_data_url', 'created_at'
   ])
 };
-const READ_ONLY_SYNC_TABLES = new Set(['task_events', 'agent_proposals']);
+const READ_ONLY_SYNC_TABLES = new Set(['task_events', 'agent_proposals', 'notifications']);
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
@@ -1108,9 +1108,20 @@ function sanitize(table: string, data: Record<string, unknown>): Record<string, 
   for (const [k, v] of Object.entries(data)) {
     if (allowed.has(k)) out[k] = v;
   }
+  if (table === 'tasks') normalizeTaskWrite(out);
   if (table === 'user_memories') normalizeUserMemoryWrite(out);
   if (table === 'agent_devices') normalizeAgentDeviceWrite(out);
   return out;
+}
+
+function normalizeTaskWrite(data: Record<string, unknown>): void {
+  if (Object.hasOwn(data, 'agent_mode')) {
+    data.agent_mode = data.agent_mode === 'attempt' ? 'attempt' : 'research';
+  }
+  if (Object.hasOwn(data, 'agent_plan_confirmation')) {
+    const confirm = Number(data.agent_plan_confirmation);
+    data.agent_plan_confirmation = confirm === 0 ? 0 : 1;
+  }
 }
 
 function normalizeAgentDeviceWrite(data: Record<string, unknown>): void {
@@ -1626,6 +1637,14 @@ async function markTaskProposalDecision(
  */
 const CAPTURE_SOURCES = new Set(['share-extension', 'app-intent', 'mac-hotkey', 'capture', 'siri']);
 
+function parseAgentMode(value: unknown): 'research' | 'attempt' {
+  return value === 'attempt' ? 'attempt' : 'research';
+}
+
+function parsePlanConfirmation(value: unknown): 0 | 1 {
+  return value === false || value === 0 || value === 'false' || value === '0' ? 0 : 1;
+}
+
 app.post('/api/capture', requireAuth, async (req: AuthedRequest, res: Response) => {
   const body = req.body ?? {};
   const id: string = typeof body.id === 'string' && body.id ? body.id : randomUUID();
@@ -1634,6 +1653,8 @@ app.post('/api/capture', requireAuth, async (req: AuthedRequest, res: Response) 
   const source: string = CAPTURE_SOURCES.has(body.source) ? body.source : 'capture';
   const parentTaskId: string | null =
     typeof body.parent_task_id === 'string' && body.parent_task_id ? body.parent_task_id : null;
+  const agentMode = parseAgentMode(body.agent_mode);
+  const agentPlanConfirmation = parsePlanConfirmation(body.agent_plan_confirmation);
 
   const title = rawText || url || '';
   if (!title) return res.status(400).json({ ok: false, error: 'empty capture' });
@@ -1644,11 +1665,11 @@ app.post('/api/capture', requireAuth, async (req: AuthedRequest, res: Response) 
   try {
     await client.query('BEGIN');
     const result = await client.query(
-      `INSERT INTO public.tasks (id, owner_id, parent_task_id, title, notes, status, source)
-       VALUES ($1, $2, $3, $4, $5, 'proposed', $6)
+      `INSERT INTO public.tasks (id, owner_id, parent_task_id, title, notes, status, source, agent_mode, agent_plan_confirmation)
+       VALUES ($1, $2, $3, $4, $5, 'proposed', $6, $7, $8)
        ON CONFLICT (id) DO NOTHING
        RETURNING id`,
-      [id, req.ownerId, parentTaskId, title, notes, source]
+      [id, req.ownerId, parentTaskId, title, notes, source, agentMode, agentPlanConfirmation]
     );
     if ((result.rowCount ?? 0) > 0) {
       await recordTaskEvent(client, {
@@ -1658,7 +1679,7 @@ app.post('/api/capture', requireAuth, async (req: AuthedRequest, res: Response) 
         eventType: 'captured',
         title: 'Captured',
         body: title,
-        metadata: { source, has_url: Boolean(url), parent_task_id: parentTaskId },
+        metadata: { source, has_url: Boolean(url), parent_task_id: parentTaskId, agent_mode: agentMode, agent_plan_confirmation: agentPlanConfirmation },
         idempotencyKey: `capture:${id}`,
       });
     }

@@ -40,6 +40,11 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
     private let commandLabel = UILabel()
     private let syncPill = UIButton(type: .system)
     private let captureField = CapturePasteTextField()
+    private let automationStack = UIStackView()
+    private let attemptSwitch = UISwitch()
+    private let confirmPlanSwitch = UISwitch()
+    private let attemptLabel = UILabel()
+    private let confirmPlanLabel = UILabel()
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
     private let filterBar = UIScrollView()
     private let filterStack = UIStackView()
@@ -170,7 +175,7 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         captureField.rightView = UIView(frame: CGRect(x: 0, y: 0, width: 12, height: 1))
         captureField.rightViewMode = .always
         captureField.onPasteList = { [weak self] text in
-            guard let self, self.viewModel.ingestIfList(text) else { return false }
+            guard let self, self.viewModel.ingestIfList(text, options: self.captureOptions()) else { return false }
             self.captureField.text = ""
             return true
         }
@@ -181,6 +186,29 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         captureField.addInteraction(UIDropInteraction(delegate: self))
         captureField.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(captureField)
+
+        attemptLabel.text = "Attempt after research"
+        attemptLabel.font = Theme.display(12, .medium)
+        attemptLabel.textColor = Theme.iris
+        confirmPlanLabel.text = "Confirm plan"
+        confirmPlanLabel.font = Theme.display(12, .medium)
+        confirmPlanLabel.textColor = Theme.textSecondary
+        attemptSwitch.transform = CGAffineTransform(scaleX: 0.72, y: 0.72)
+        confirmPlanSwitch.transform = CGAffineTransform(scaleX: 0.72, y: 0.72)
+        confirmPlanSwitch.isOn = true
+        confirmPlanSwitch.isHidden = true
+        confirmPlanLabel.isHidden = true
+        attemptSwitch.addAction(UIAction { [weak self] _ in
+            let enabled = self?.attemptSwitch.isOn == true
+            self?.confirmPlanSwitch.isHidden = !enabled
+            self?.confirmPlanLabel.isHidden = !enabled
+        }, for: .valueChanged)
+        automationStack.axis = .horizontal
+        automationStack.spacing = 8
+        automationStack.alignment = .center
+        [attemptSwitch, attemptLabel, confirmPlanSwitch, confirmPlanLabel].forEach(automationStack.addArrangedSubview)
+        automationStack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(automationStack)
         NSLayoutConstraint.activate([
             commandLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 14),
             commandLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
@@ -191,7 +219,10 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
             captureField.topAnchor.constraint(equalTo: commandLabel.bottomAnchor, constant: 8),
             captureField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             captureField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            captureField.heightAnchor.constraint(equalToConstant: 54)
+            captureField.heightAnchor.constraint(equalToConstant: 54),
+            automationStack.topAnchor.constraint(equalTo: captureField.bottomAnchor, constant: 6),
+            automationStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            automationStack.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -16)
         ])
     }
 
@@ -232,7 +263,7 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         let heightConstraint = filterBar.heightAnchor.constraint(equalToConstant: 34)
         filterHeightConstraint = heightConstraint
         NSLayoutConstraint.activate([
-            filterBar.topAnchor.constraint(equalTo: captureField.bottomAnchor, constant: 8),
+            filterBar.topAnchor.constraint(equalTo: automationStack.bottomAnchor, constant: 8),
             filterBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             filterBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             heightConstraint,
@@ -297,7 +328,7 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         let text = textField.text ?? ""
         guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
         textField.text = "" // instant clear = perceived speed
-        viewModel.capture(text) // background, not awaited
+        viewModel.capture(text, options: captureOptions()) // background, not awaited
         return false // keep keyboard up for rapid capture
     }
 
@@ -309,7 +340,11 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
         }
         let text = (captureField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         captureField.text = ""
-        viewModel.capture(text.isEmpty ? (drafts.first?.filename ?? "Image attachment") : text, attachments: drafts)
+        viewModel.capture(text.isEmpty ? (drafts.first?.filename ?? "Image attachment") : text, attachments: drafts, options: captureOptions())
+    }
+
+    private func captureOptions() -> TaskStore.CaptureOptions {
+        TaskStore.CaptureOptions(agentMode: attemptSwitch.isOn ? .attempt : .research, agentPlanConfirmation: confirmPlanSwitch.isOn)
     }
 
     func dropInteraction(_ interaction: UIDropInteraction, canHandle session: UIDropSession) -> Bool {

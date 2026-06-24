@@ -10,6 +10,11 @@ public enum TaskStatus: String, Sendable, CaseIterable {
     case cancelled
 }
 
+public enum TaskAgentMode: String, Codable, Sendable, Equatable, CaseIterable {
+    case research
+    case attempt
+}
+
 /// A single task row. Mirrors `public.tasks` in Postgres and the web SQLite schema.
 /// Timestamps are ISO-8601 text (PowerSync columns are text/integer/real only).
 public struct TaskItem: Identifiable, Sendable, Equatable {
@@ -25,6 +30,8 @@ public struct TaskItem: Identifiable, Sendable, Equatable {
     public var priority: Int?
     public var githubRepo: String?
     public var githubURL: String?
+    public var agentMode: TaskAgentMode
+    public var agentPlanConfirmation: Bool
     public var suggestedDueAt: Date?
     public var suggestedCategory: String?
     public var suggestionConfidence: Double?
@@ -48,6 +55,8 @@ public struct TaskItem: Identifiable, Sendable, Equatable {
         priority: Int? = nil,
         githubRepo: String? = nil,
         githubURL: String? = nil,
+        agentMode: TaskAgentMode = .research,
+        agentPlanConfirmation: Bool = true,
         suggestedDueAt: Date? = nil,
         suggestedCategory: String? = nil,
         suggestionConfidence: Double? = nil,
@@ -70,6 +79,8 @@ public struct TaskItem: Identifiable, Sendable, Equatable {
         self.priority = priority
         self.githubRepo = githubRepo
         self.githubURL = githubURL
+        self.agentMode = agentMode
+        self.agentPlanConfirmation = agentPlanConfirmation
         self.suggestedDueAt = suggestedDueAt
         self.suggestedCategory = suggestedCategory
         self.suggestionConfidence = suggestionConfidence
@@ -79,6 +90,31 @@ public struct TaskItem: Identifiable, Sendable, Equatable {
         self.updatedAt = updatedAt
         self.confirmedAt = confirmedAt
         self.completedAt = completedAt
+    }
+
+}
+
+public struct CaptureNotification: Identifiable, Sendable, Equatable {
+    public let id: String
+    public var ownerId: String
+    public var taskId: String?
+    public var kind: String
+    public var severity: String
+    public var title: String
+    public var body: String?
+    public var metadata: String?
+    public var createdAt: Date?
+
+    public init(id: String, ownerId: String, taskId: String?, kind: String, severity: String, title: String, body: String?, metadata: String?, createdAt: Date?) {
+        self.id = id
+        self.ownerId = ownerId
+        self.taskId = taskId
+        self.kind = kind
+        self.severity = severity
+        self.title = title
+        self.body = body
+        self.metadata = metadata
+        self.createdAt = createdAt
     }
 }
 

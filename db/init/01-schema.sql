@@ -123,6 +123,8 @@ create table if not exists public.tasks (
   priority              integer,                       -- 0 = highest .. 4 = lowest
   github_repo           text,                          -- Optional owner/repo association for engineering work
   github_url            text,
+  agent_mode            text not null default 'research',
+  agent_plan_confirmation integer not null default 1,
 
   -- Background suggestions (filled asynchronously after instant capture; never block the write).
   suggested_due_at      timestamptz,
@@ -195,6 +197,34 @@ begin
       alter table public.tasks
         add constraint tasks_github_url_len_chk
         check (github_url is null or char_length(github_url) between 1 and 500);
+      end if;
+end $$;
+
+do $$
+begin
+      if not exists (
+      select 1
+        from pg_constraint
+       where conname = 'tasks_agent_mode_chk'
+         and conrelid = 'public.tasks'::regclass
+      ) then
+      alter table public.tasks
+        add constraint tasks_agent_mode_chk
+        check (agent_mode in ('research', 'attempt'));
+      end if;
+end $$;
+
+do $$
+begin
+      if not exists (
+      select 1
+        from pg_constraint
+       where conname = 'tasks_agent_plan_confirmation_chk'
+         and conrelid = 'public.tasks'::regclass
+      ) then
+      alter table public.tasks
+        add constraint tasks_agent_plan_confirmation_chk
+        check (agent_plan_confirmation in (0, 1));
       end if;
 end $$;
 
@@ -451,6 +481,44 @@ create table if not exists public.task_attachments (
 create index if not exists task_attachments_owner_task_created_idx
   on public.task_attachments (owner_id, task_id, created_at desc, id desc);
 
+-- Synced notification history. Server/worker-owned rows let every client show missed
+-- research/attempt/interview notifications and optionally raise local OS notifications.
+create table if not exists public.notifications (
+  id          uuid primary key,
+  owner_id    uuid not null references public.users(id) on delete cascade,
+  task_id     uuid,
+  kind        text not null,
+  severity    text not null default 'info',
+  title       text not null,
+  body        text,
+  metadata    text,
+  created_at  timestamptz not null default now(),
+
+  constraint notifications_owner_task_fk
+    foreign key (owner_id, task_id)
+    references public.tasks(owner_id, id)
+    on delete set null,
+  constraint notifications_kind_chk
+    check (kind in (
+      'research_ready',
+      'interview_needed',
+      'attempt_plan_ready',
+      'attempt_started',
+      'attempt_completed',
+      'attempt_failed'
+    )),
+  constraint notifications_severity_chk check (severity in ('info', 'success', 'warning', 'error')),
+  constraint notifications_title_len_chk check (char_length(title) between 1 and 160),
+  constraint notifications_body_len_chk check (body is null or char_length(body) <= 2000),
+  constraint notifications_metadata_len_chk check (metadata is null or octet_length(metadata) <= 4096),
+  constraint notifications_metadata_json_chk check (metadata is null or jsonb_typeof(metadata::jsonb) is not null)
+);
+create index if not exists notifications_owner_created_idx
+  on public.notifications (owner_id, created_at desc, id desc);
+create index if not exists notifications_owner_task_created_idx
+  on public.notifications (owner_id, task_id, created_at desc, id desc)
+  where task_id is not null;
+
 -- Server/agent-owned proposals that are surfaced through existing confirm-card task rows.
 -- Clients read this provenance/confidence stream, but do not upload rows to it.
 create table if not exists public.agent_proposals (
@@ -493,4 +561,4 @@ create index if not exists agent_proposals_owner_task_status_idx
   where task_id is not null;
 
 -- PowerSync logical replication publication.
-create publication powersync for table public.tasks, public.tags, public.categories, public.categorisation_rules, public.user_memories, public.agent_devices, public.task_events, public.task_attachments, public.agent_proposals;
+create publication powersync for table public.tasks, public.tags, public.categories, public.categorisation_rules, public.user_memories, public.agent_devices, public.task_events, public.task_attachments, public.agent_proposals, public.notifications;

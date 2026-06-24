@@ -11,6 +11,8 @@ export function CaptureBar() {
   const [flash, setFlash] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<AttachmentDraft[]>([]);
   const [dragging, setDragging] = useState(false);
+  const [attemptAfterResearch, setAttemptAfterResearch] = useState(false);
+  const [confirmPlan, setConfirmPlan] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -23,7 +25,10 @@ export function CaptureBar() {
     setValue(''); // instant clear = perceived speed
     const outgoing = attachments;
     setAttachments([]);
-    void capture(v, outgoing); // background; not awaited
+    void capture(v, outgoing, {
+      agentMode: attemptAfterResearch ? 'attempt' : 'research',
+      agentPlanConfirmation: confirmPlan,
+    }); // background; not awaited
   }
 
   async function addImageFiles(files: File[]) {
@@ -49,7 +54,10 @@ export function CaptureBar() {
     const items = parseMarkdownList(text);
     if (!items || items.length === 0) return; // let the browser paste normally
     e.preventDefault();
-    void captureBatch(items);
+    void captureBatch(items, {
+      agentMode: attemptAfterResearch ? 'attempt' : 'research',
+      agentPlanConfirmation: confirmPlan,
+    });
     setValue('');
     setFlash(`Added ${items.length} item${items.length === 1 ? '' : 's'} from list`);
     window.setTimeout(() => setFlash(null), 2500);
@@ -105,6 +113,26 @@ export function CaptureBar() {
           ))}
         </div>
       )}
+      <div className="capture-agent-options" aria-label="Agent automation options">
+        <label>
+          <input
+            type="checkbox"
+            checked={attemptAfterResearch}
+            onChange={(event) => setAttemptAfterResearch(event.target.checked)}
+          />
+          Attempt after research
+        </label>
+        {attemptAfterResearch && (
+          <label>
+            <input
+              type="checkbox"
+              checked={confirmPlan}
+              onChange={(event) => setConfirmPlan(event.target.checked)}
+            />
+            Confirm plan first
+          </label>
+        )}
+      </div>
       {flash && <span className="capture-flash">{flash}</span>}
     </div>
   );

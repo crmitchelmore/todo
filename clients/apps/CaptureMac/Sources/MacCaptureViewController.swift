@@ -16,6 +16,8 @@ final class MacCaptureViewController: NSViewController {
     private let viewModel: MacViewModel
     private let splitView = NSSplitView()
     private let captureField = AttachmentCaptureTextField()
+    private let attemptAfterResearch = NSButton(checkboxWithTitle: "Attempt after research", target: nil, action: nil)
+    private let confirmPlanBeforeAttempt = NSButton(checkboxWithTitle: "Confirm plan first", target: nil, action: nil)
     private let settingsButton = NSButton(title: "Settings", target: nil, action: nil)
     private let proposedTable = FastConfirmTableView()
     private let activeTable = NSTableView()
@@ -84,7 +86,7 @@ final class MacCaptureViewController: NSViewController {
         let tv = CapturePasteTextView()
         tv.isFieldEditor = true
         tv.onPasteList = { [weak self] text in
-            guard let self, self.viewModel.ingestIfList(text) else { return false }
+            guard let self, self.viewModel.ingestIfList(text, options: self.captureOptions()) else { return false }
             self.captureField.stringValue = ""
             return true
         }
@@ -138,6 +140,19 @@ final class MacCaptureViewController: NSViewController {
         captureField.translatesAutoresizingMaskIntoConstraints = false
         captureField.onDroppedImages = { [weak self] images in self?.capture(images: images) }
 
+        attemptAfterResearch.target = self
+        attemptAfterResearch.action = #selector(attemptOptionChanged)
+        attemptAfterResearch.font = Theme.display(12, .medium)
+        attemptAfterResearch.contentTintColor = Theme.iris
+        attemptAfterResearch.translatesAutoresizingMaskIntoConstraints = false
+        confirmPlanBeforeAttempt.target = self
+        confirmPlanBeforeAttempt.action = #selector(confirmPlanOptionChanged)
+        confirmPlanBeforeAttempt.font = Theme.display(12, .medium)
+        confirmPlanBeforeAttempt.contentTintColor = Theme.textSecondary
+        confirmPlanBeforeAttempt.state = .on
+        confirmPlanBeforeAttempt.translatesAutoresizingMaskIntoConstraints = false
+        confirmPlanBeforeAttempt.isHidden = true
+
         settingsButton.target = self
         settingsButton.action = #selector(settingsTapped)
         settingsButton.title = "⚙︎"
@@ -170,7 +185,7 @@ final class MacCaptureViewController: NSViewController {
         configure(scroll: proposedScroll, table: proposedTable)
         configure(scroll: activeScroll, table: activeTable)
 
-        [commandLabel, captureField, settingsButton, proposedHeader, proposedScroll, activeHeader, filterBar, activeScroll].forEach {
+        [commandLabel, captureField, settingsButton, attemptAfterResearch, confirmPlanBeforeAttempt, proposedHeader, proposedScroll, activeHeader, filterBar, activeScroll].forEach {
             listPane.addSubview($0)
         }
         styleScrollSurfaces()
@@ -196,7 +211,12 @@ final class MacCaptureViewController: NSViewController {
             settingsButton.trailingAnchor.constraint(equalTo: listPane.trailingAnchor, constant: -18),
             settingsButton.widthAnchor.constraint(equalToConstant: 44),
 
-            proposedHeader.topAnchor.constraint(equalTo: captureField.bottomAnchor, constant: 18),
+            attemptAfterResearch.topAnchor.constraint(equalTo: captureField.bottomAnchor, constant: 8),
+            attemptAfterResearch.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 22),
+            confirmPlanBeforeAttempt.centerYAnchor.constraint(equalTo: attemptAfterResearch.centerYAnchor),
+            confirmPlanBeforeAttempt.leadingAnchor.constraint(equalTo: attemptAfterResearch.trailingAnchor, constant: 12),
+
+            proposedHeader.topAnchor.constraint(equalTo: attemptAfterResearch.bottomAnchor, constant: 16),
             proposedHeader.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 22),
 
             proposedScroll.topAnchor.constraint(equalTo: proposedHeader.bottomAnchor, constant: 8),
@@ -366,11 +386,17 @@ final class MacCaptureViewController: NSViewController {
         onOpenSettings?()
     }
 
+    @objc private func attemptOptionChanged() {
+        confirmPlanBeforeAttempt.isHidden = attemptAfterResearch.state != .on
+    }
+
+    @objc private func confirmPlanOptionChanged() {}
+
     @objc private func captureSubmit() {
         let text = captureField.stringValue
         guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         captureField.stringValue = "" // instant clear
-        viewModel.capture(text, source: "command_deck")
+        viewModel.capture(text, source: "command_deck", options: captureOptions())
     }
 
     private func capture(images: [NSImage]) {
@@ -378,7 +404,14 @@ final class MacCaptureViewController: NSViewController {
         guard !drafts.isEmpty else { return }
         let text = captureField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         captureField.stringValue = ""
-        viewModel.capture(text.isEmpty ? (drafts.first?.filename ?? "Image attachment") : text, attachments: drafts, source: "command_deck_images")
+        viewModel.capture(text.isEmpty ? (drafts.first?.filename ?? "Image attachment") : text, attachments: drafts, source: "command_deck_images", options: captureOptions())
+    }
+
+    private func captureOptions() -> TaskStore.CaptureOptions {
+        TaskStore.CaptureOptions(
+            agentMode: attemptAfterResearch.state == .on ? .attempt : .research,
+            agentPlanConfirmation: confirmPlanBeforeAttempt.state == .on
+        )
     }
 
     private func selectedProposal() -> TaskItem? {

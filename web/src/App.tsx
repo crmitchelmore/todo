@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useStatus, useQuery } from '@powersync/react';
-import type { AgentProposalRecord, TaskRecord } from './powersync/schema';
+import type { AgentProposalRecord, NotificationRecord, TaskRecord } from './powersync/schema';
 import { CaptureBar } from './components/CaptureBar';
 import { ConfirmCard } from './components/ConfirmCard';
 import { TaskRow } from './components/TaskRow';
@@ -12,6 +12,7 @@ import { TagFilter } from './components/TagFilter';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ApprovalQueue } from './components/ApprovalQueue';
 import { AgentOperationsPanel } from './components/AgentOperationsPanel';
+import { NotificationHistory } from './components/NotificationHistory';
 import { dateBucket, type DateBucketKey } from './lib/dates';
 import { decodeTags, tagKey } from './lib/tags';
 import { signOut } from './lib/auth';
@@ -59,6 +60,9 @@ export default function App() {
       WHERE status = 'pending' AND proposal_type = 'action'
       ORDER BY created_at DESC`
   );
+  const { data: notifications } = useQuery<NotificationRecord>(
+    `SELECT * FROM notifications ORDER BY created_at DESC, id DESC LIMIT 50`
+  );
 
   const filteredActive = useMemo(() => active.filter((t) => matchesTags(t, filter)), [active, filter]);
   const filteredDone = useMemo(() => done.filter((t) => matchesTags(t, filter)), [done, filter]);
@@ -86,6 +90,27 @@ export default function App() {
   useEffect(() => {
     if (selectedId && !selectedTask) setSelectedId(null);
   }, [selectedId, selectedTask]);
+
+  useEffect(() => {
+    if (notifications.length === 0 || !('Notification' in window)) return;
+    if (Notification.permission === 'default') {
+      void Notification.requestPermission();
+      return;
+    }
+    if (Notification.permission !== 'granted') return;
+    const delivered = new Set(JSON.parse(localStorage.getItem('capture.deliveredNotifications') ?? '[]') as string[]);
+    const next = new Set(delivered);
+    for (const notification of notifications.slice(0, 8).reverse()) {
+      if (!notification.id) continue;
+      if (delivered.has(notification.id)) continue;
+      next.add(notification.id);
+      new Notification(notification.title ?? 'Capture update', {
+        body: notification.body ?? undefined,
+        tag: notification.id,
+      });
+    }
+    localStorage.setItem('capture.deliveredNotifications', JSON.stringify([...next].slice(-200)));
+  }, [notifications]);
 
   // Group the active list by date bucket (already sorted by due_at from the query).
   const groups = useMemo(() => {
@@ -140,6 +165,7 @@ export default function App() {
       <div className="workbench-grid">
         <main className="task-stream">
           <ApprovalQueue proposals={actionProposals} tasksById={tasksById} />
+          <NotificationHistory notifications={notifications} />
 
           {proposed.length > 0 && (
             <section>

@@ -45,7 +45,7 @@ const pool = new pg.Pool({ connectionString: DATABASE_URI });
 
 // Claim proposed rows that haven't yet had a server/LLM pass. on-device + null are upgradeable.
 const SELECT_SQL = `
-  SELECT id, owner_id, title
+  SELECT id, owner_id, title, agent_mode, agent_plan_confirmation
   FROM public.tasks
   WHERE status = 'proposed'
     AND coalesce(suggestion_source, 'on-device') NOT IN ('server', 'llm')
@@ -193,6 +193,14 @@ interface ApprovedInterviewRow {
   title: string;
 }
 
+interface ProposedTaskRow {
+  id: string;
+  owner_id: string;
+  title: string;
+  agent_mode: 'research' | 'attempt' | null;
+  agent_plan_confirmation: number | null;
+}
+
 interface CategorisationRuleRow {
   owner_id: string;
   title: string;
@@ -226,6 +234,35 @@ function boundedJSON(value: Record<string, unknown>, maxBytes: number): string {
 
 function metadataJSON(value: Record<string, unknown>): string {
   return boundedJSON(value, 4096);
+}
+
+async function recordNotification(input: {
+  ownerId: string;
+  taskId: string;
+  kind: 'research_ready' | 'interview_needed' | 'attempt_plan_ready' | 'attempt_started' | 'attempt_completed' | 'attempt_failed';
+  severity: 'info' | 'success' | 'warning' | 'error';
+  title: string;
+  body?: string | null;
+  metadata?: Record<string, unknown>;
+  idempotencyKey: string;
+}): Promise<void> {
+  const id = deterministicUuid(`${input.ownerId}:${input.taskId}:notification:${input.kind}:${input.idempotencyKey}`);
+  await pool.query(
+    `INSERT INTO public.notifications
+       (id, owner_id, task_id, kind, severity, title, body, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      id,
+      input.ownerId,
+      input.taskId,
+      input.kind,
+      input.severity,
+      input.title.slice(0, 160),
+      input.body?.slice(0, 2000) ?? null,
+      input.metadata ? metadataJSON(input.metadata) : null,
+    ]
+  );
 }
 
 async function recordEnrichmentEvent(
@@ -608,6 +645,16 @@ async function recordAutoResearchCompletionEvent(
       }),
     ]
   );
+  await recordNotification({
+    ownerId: row.owner_id,
+    taskId: row.id,
+    kind: 'research_ready',
+    severity: 'success',
+    title: 'AI research ready',
+    body: brief.nextActions.slice(0, 3).join('\n') || brief.body.slice(0, 240),
+    metadata: { request_id: request.requestId, source: 'auto-research', confidence: brief.confidence },
+    idempotencyKey: request.requestId,
+  });
 }
 
 async function recordAutoResearchProposal(
@@ -698,6 +745,109 @@ async function recordInterviewPromptGate(
       mutatesExternalState: false,
     });
     await client.query('COMMIT');
+    await recordNotification({
+      ownerId: row.owner_id,
+      taskId: row.id,
+      kind: 'interview_needed',
+      severity: 'warning',
+      title: 'More context needed',
+      body: prompt.question,
+      metadata: { source: 'auto-research', reason, option_count: prompt.options.length },
+      idempotencyKey: 'interview:auto-research',
+    });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function recordAutoAttemptGate(
+  row: ProposedTaskRow,
+  request: AgentHandoffRequest,
+  discovery: TaskDiscovery,
+  brief: AgentResearchBrief,
+  requirePlanConfirmation: boolean
+): Promise<void> {
+  const payload = {
+    task_id: row.id,
+    request_id: request.requestId,
+    handoff_mode: 'attempt',
+    instructions: request.instructions,
+    discovery,
+    research: brief,
+    source: 'auto-research',
+  };
+  if (requirePlanConfirmation) {
+    const handoffRow: HandoffRequestRow = {
+      request_event_id: deterministicUuid(`${row.owner_id}:${row.id}:auto-attempt:${request.requestId}:request-event`),
+      owner_id: row.owner_id,
+      task_id: row.id,
+      metadata: metadataJSON({ request_id: request.requestId, mode: 'attempt', instructions: request.instructions }),
+      title: row.title,
+    };
+    await recordAttemptApprovalGate(handoffRow, request, discovery, brief);
+    await recordNotification({
+      ownerId: row.owner_id,
+      taskId: row.id,
+      kind: 'attempt_plan_ready',
+      severity: 'warning',
+      title: 'AI attempt plan needs approval',
+      body: brief.nextActions.slice(0, 3).join('\n') || brief.body.slice(0, 240),
+      metadata: { request_id: request.requestId, source: 'auto-research', require_plan_confirmation: true },
+      idempotencyKey: request.requestId,
+    });
+    return;
+  }
+
+  const checkpointId = deterministicUuid(`${row.owner_id}:task-${row.id}-${request.requestId}:auto-attempt`);
+  const proposalId = deterministicUuid(`${row.owner_id}:task-${row.id}-${request.requestId}:auto-attempt:proposal`);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO public.agent_proposals
+         (id, owner_id, task_id, proposal_type, status, title, body, payload, provenance, confidence, source, decided_at)
+       VALUES ($1, $2, $3, 'action', 'accepted', 'AI attempt auto-approved', $4, $5, $6, $7, 'auto-research', now())
+       ON CONFLICT (id) DO NOTHING`,
+      [
+        proposalId,
+        row.owner_id,
+        row.id,
+        brief.body.slice(0, 2000),
+        boundedJSON({ ...payload, action_type: 'attempt_task', auto_approved: true }, 8192),
+        boundedJSON({ source: 'auto-research', worker: 'capture-enrichment', auto_approved_by_capture_option: true }, 4096),
+        brief.confidence,
+      ]
+    );
+    await client.query(
+      `INSERT INTO public.agent_checkpoints
+         (id, owner_id, task_id, proposal_id, thread_id, checkpoint_key, interrupt_before,
+          action_type, risk_level, status, action_payload, decided_at)
+       VALUES ($1, $2, $3, $4, $5, 'attempt:auto-research', 'external_action',
+          'attempt_task', 'medium', 'approved', $6, now())
+       ON CONFLICT (id) DO NOTHING`,
+      [
+        checkpointId,
+        row.owner_id,
+        row.id,
+        proposalId,
+        `task-${row.id}-${request.requestId}`,
+        boundedJSON(payload, 8192),
+      ]
+    );
+    await client.query('COMMIT');
+    await recordNotification({
+      ownerId: row.owner_id,
+      taskId: row.id,
+      kind: 'attempt_started',
+      severity: 'info',
+      title: 'AI attempt queued',
+      body: 'The local harness will try this task and report back.',
+      metadata: { request_id: request.requestId, checkpoint_id: checkpointId, source: 'auto-research' },
+      idempotencyKey: request.requestId,
+    });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     throw err;
@@ -899,6 +1049,22 @@ async function recordLocalHarnessCompletionEvent(
       }),
     ]
   );
+  await recordNotification({
+    ownerId: row.owner_id,
+    taskId: row.task_id,
+    kind: 'attempt_completed',
+    severity: 'success',
+    title: 'AI attempt completed',
+    body: result.reply.slice(0, 500),
+    metadata: {
+      request_id: request.requestId,
+      checkpoint_id: row.checkpoint_id,
+      harness_kind: result.harnessKind,
+      harness_status: result.status,
+      source: 'local-harness',
+    },
+    idempotencyKey: row.checkpoint_id,
+  });
 }
 
 async function recordLocalHarnessFailureEvent(
@@ -929,6 +1095,20 @@ async function recordLocalHarnessFailureEvent(
       }),
     ]
   );
+  await recordNotification({
+    ownerId: row.owner_id,
+    taskId: row.task_id,
+    kind: 'attempt_failed',
+    severity: 'error',
+    title: 'AI attempt failed',
+    body: String(error).slice(0, 500),
+    metadata: {
+      request_id: requestId,
+      checkpoint_id: row.checkpoint_id,
+      source: 'local-harness',
+    },
+    idempotencyKey: row.checkpoint_id,
+  });
 }
 
 async function processApprovedLocalHarnessAttempts(config: LocalHarnessConfig | null = LOCAL_HARNESS_CONFIG): Promise<number> {
@@ -1141,6 +1321,9 @@ async function tick(): Promise<number> {
           } else if (brief) {
             await recordAutoResearchProposal(row, request, discovery, brief);
             await recordAutoResearchCompletionEvent(row, request, discovery, brief);
+            if (row.agent_mode === 'attempt') {
+              await recordAutoAttemptGate(row, { ...request, mode: 'attempt' }, discovery, brief, row.agent_plan_confirmation !== 0);
+            }
           }
         }
         enriched += 1;

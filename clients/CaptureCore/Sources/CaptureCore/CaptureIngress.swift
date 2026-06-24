@@ -7,6 +7,8 @@ public struct CaptureInput: Codable, Sendable {
     public var rawText: String
     public var url: String?
     public var source: String
+    public var agentMode: TaskAgentMode
+    public var agentPlanConfirmation: Bool
     public var createdAtClient: Date
 
     public init(
@@ -14,12 +16,16 @@ public struct CaptureInput: Codable, Sendable {
         rawText: String,
         url: String? = nil,
         source: String,
+        agentMode: TaskAgentMode = .research,
+        agentPlanConfirmation: Bool = true,
         createdAtClient: Date = Date()
     ) {
         self.id = id
         self.rawText = rawText
         self.url = url
         self.source = source
+        self.agentMode = agentMode
+        self.agentPlanConfirmation = agentPlanConfirmation
         self.createdAtClient = createdAtClient
     }
 }
@@ -59,7 +65,9 @@ public struct HTTPCaptureIngress: CaptureIngress {
             "id": input.id,
             "raw_text": input.rawText,
             "url": input.url as Any,
-            "source": input.source
+            "source": input.source,
+            "agent_mode": input.agentMode.rawValue,
+            "agent_plan_confirmation": input.agentPlanConfirmation
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 

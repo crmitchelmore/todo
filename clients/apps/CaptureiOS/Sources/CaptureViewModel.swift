@@ -1,5 +1,6 @@
 import UIKit
 import CaptureCore
+import UserNotifications
 
 struct CaptureSyncSummary: Equatable {
     enum State: Equatable { case checking, aligned, warning, offline }
@@ -63,12 +64,15 @@ final class CaptureViewModel {
     private(set) var tagColors: [String: String] = [:]   // lowercased name -> hex
     private(set) var tagFilter: Set<String> = []          // lowercased; AND semantics
     private(set) var syncSummary: CaptureSyncSummary = .checking
+    private(set) var notifications: [CaptureNotification] = []
 
     var onChange: (() -> Void)?
     private var tasks: [Task<Void, Never>] = []
     private var syncTask: Task<Void, Never>?
     private var started = false
     private var lastSyncRestart: Date?
+    private var notificationBootstrapComplete = false
+    private let deliveredNotificationsKey = "capture.ios.deliveredNotifications"
 
     init(auth: AuthStore, config: CaptureConfig = .fromEnvironment()) {
         self.auth = auth
@@ -97,6 +101,7 @@ final class CaptureViewModel {
         watch({ try self.store.watchRejected() }, assign: { self.rejected = $0 })
         watchTags()
         watchCategories()
+        watchNotifications()
         refreshSyncSummary()
     }
 
@@ -150,6 +155,76 @@ final class CaptureViewModel {
             } catch {}
         }
         tasks.append(t)
+    }
+
+    private func watchNotifications() {
+        let t = Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await rows in try self.store.watchNotifications() {
+                    await MainActor.run {
+                        self.notifications = rows
+                        self.deliverNotifications(rows)
+                        self.onChange?()
+                    }
+                }
+            } catch {}
+        }
+        tasks.append(t)
+    }
+
+    private func deliverNotifications(_ rows: [CaptureNotification]) {
+        var delivered = Set(UserDefaults.standard.stringArray(forKey: deliveredNotificationsKey) ?? [])
+        if !notificationBootstrapComplete {
+            delivered.formUnion(rows.map(\.id))
+            UserDefaults.standard.set(Array(delivered.suffix(200)), forKey: deliveredNotificationsKey)
+            notificationBootstrapComplete = true
+            return
+        }
+        for notification in rows.reversed() where !delivered.contains(notification.id) {
+            delivered.insert(notification.id)
+            scheduleSystemNotification(notification)
+        }
+        UserDefaults.standard.set(Array(delivered.suffix(200)), forKey: deliveredNotificationsKey)
+    }
+
+    private func scheduleSystemNotification(_ notification: CaptureNotification) {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            let addRequest = {
+                let content = UNMutableNotificationContent()
+                content.title = notification.title
+                content.body = notification.body ?? ""
+                content.sound = .default
+                let request = UNNotificationRequest(identifier: notification.id, content: content, trigger: nil)
+                center.add(request)
+            }
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                addRequest()
+            case .notDetermined:
+                center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+                    CaptureDiagnostics.record(
+                        severity: error == nil ? .info : .error,
+                        category: "notifications",
+                        name: "notifications.authorization",
+                        message: granted ? "Notification permission granted" : "Notification permission not granted",
+                        fields: error.map { ["error": $0.localizedDescription] } ?? [:]
+                    )
+                    if granted { addRequest() }
+                }
+            case .denied:
+                CaptureDiagnostics.record(
+                    severity: .warning,
+                    category: "notifications",
+                    name: "notifications.delivery.skipped",
+                    message: "Notification permission denied",
+                    fields: ["notification_id": notification.id]
+                )
+            @unknown default:
+                break
+            }
+        }
     }
 
     func color(forTag name: String) -> String {
@@ -238,9 +313,9 @@ final class CaptureViewModel {
         tasks.append(t)
     }
 
-    func capture(_ text: String, attachments: [TaskAttachmentDraft] = []) {
-        if ingestIfList(text) { return }
-        store.capture(text, attachments: attachments) // instant, non-blocking
+    func capture(_ text: String, attachments: [TaskAttachmentDraft] = [], options: TaskStore.CaptureOptions = .researchOnly) {
+        if ingestIfList(text, options: options) { return }
+        store.capture(text, attachments: attachments, options: options) // instant, non-blocking
         refreshSyncSummary()
     }
 
@@ -248,9 +323,9 @@ final class CaptureViewModel {
     /// become parent-linked subtasks with compatibility tags; `[x]` items import as done).
     /// Returns true if it was a list.
     @discardableResult
-    func ingestIfList(_ text: String) -> Bool {
+    func ingestIfList(_ text: String, options: TaskStore.CaptureOptions = .researchOnly) -> Bool {
         guard let items = store.detectList(text) else { return false }
-        store.captureBatch(items)
+        store.captureBatch(items, options: options)
         refreshSyncSummary()
         return true
     }

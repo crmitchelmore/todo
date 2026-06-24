@@ -20,6 +20,7 @@ final class TaxonomySettingsStore: ObservableObject {
     @Published var rules: [CategorisationRule] = []
     @Published var memories: [UserMemory] = []
     @Published var agentDevices: [AgentDevice] = []
+    @Published var notifications: [CaptureNotification] = []
     @Published var agentDeviceMessage: String?
     @Published var agentDeviceBusy = false
 
@@ -86,6 +87,17 @@ final class TaxonomySettingsStore: ObservableObject {
                 }
             } catch {
                 NSLog("[Capture] Agent device settings watch failed: \(error)")
+            }
+        })
+        watchers.append(Task { [weak self] in
+            guard let store = self?.taskStore else { return }
+            do {
+                for try await rows in try store.watchNotifications() {
+                    guard let self else { break }
+                    await MainActor.run { self.notifications = rows }
+                }
+            } catch {
+                NSLog("[Capture] Notification settings watch failed: \(error)")
             }
         })
     }
@@ -369,6 +381,11 @@ private struct SettingsView: View {
                         .padding(.top, 4)
                 }
 
+                GroupBox("Notification History") {
+                    NativeNotificationHistoryView(notifications: taxonomy.notifications)
+                        .padding(.top, 4)
+                }
+
                 GroupBox("Agent Backend Computer") {
                     AgentBackendSettingsView(taxonomy: taxonomy)
                         .padding(.top, 4)
@@ -637,6 +654,55 @@ private struct DiagnosticsDebugView: View {
                 )
             }
         )
+    }
+}
+
+private struct NativeNotificationHistoryView: View {
+    let notifications: [CaptureNotification]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Research, interview and attempt updates stay here even if the system banner was missed.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if notifications.isEmpty {
+                Text("No notifications yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(nsColor: Theme.surface))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(notifications.prefix(30)) { notification in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(notification.kind.replacingOccurrences(of: "_", with: " ").uppercased())
+                                    .font(.system(size: 9, design: .monospaced).weight(.bold))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text(notification.createdAt?.formatted(date: .abbreviated, time: .shortened) ?? "")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(notification.title)
+                                .font(.system(.body, design: .rounded).weight(.semibold))
+                            if let body = notification.body, !body.isEmpty {
+                                Text(body)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(nsColor: Theme.surface))
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                }
+            }
+        }
     }
 }
 

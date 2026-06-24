@@ -32,6 +32,18 @@ public final class TaskStore: @unchecked Sendable {
         case attempt
     }
 
+    public struct CaptureOptions: Sendable, Equatable {
+        public var agentMode: TaskAgentMode
+        public var agentPlanConfirmation: Bool
+
+        public init(agentMode: TaskAgentMode = .research, agentPlanConfirmation: Bool = true) {
+            self.agentMode = agentMode
+            self.agentPlanConfirmation = agentPlanConfirmation
+        }
+
+        public static let researchOnly = CaptureOptions()
+    }
+
     public func connect() async throws {
         let startedAt = Date()
         do {
@@ -265,7 +277,7 @@ public final class TaskStore: @unchecked Sendable {
     /// Instant capture: generates an id, fires a local insert + background
     /// enrichment, and returns immediately. Never blocks on the network or an LLM.
     @discardableResult
-    public func capture(_ raw: String, attachments: [TaskAttachmentDraft] = []) -> String {
+    public func capture(_ raw: String, attachments: [TaskAttachmentDraft] = [], options: CaptureOptions = .researchOnly) -> String {
         let title = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let id = UUID().uuidString.lowercased()
         let effectiveTitle = title.isEmpty ? (attachments.first?.filename ?? "Image attachment") : title
@@ -283,10 +295,10 @@ public final class TaskStore: @unchecked Sendable {
                 try await db.execute(
                     sql: """
                     INSERT INTO \(TASKS_TABLE)
-                        (id, owner_id, title, status, source, created_at, updated_at)
-                    VALUES (?, ?, ?, 'proposed', 'capture', ?, ?)
+                        (id, owner_id, title, status, source, agent_mode, agent_plan_confirmation, created_at, updated_at)
+                    VALUES (?, ?, ?, 'proposed', 'capture', ?, ?, ?, ?)
                     """,
-                    parameters: [id, ownerId, effectiveTitle, now, now]
+                    parameters: [id, ownerId, effectiveTitle, options.agentMode.rawValue, options.agentPlanConfirmation ? 1 : 0, now, now]
                 )
                 CaptureDiagnostics.record(
                     category: "local_store",
@@ -384,7 +396,7 @@ public final class TaskStore: @unchecked Sendable {
     /// as completed. Any tags are materialised in the `tags` table (auto-coloured) so they
     /// show up in the manager. Returns the new ids in order.
     @discardableResult
-    public func captureBatch(_ items: [ParsedCaptureItem]) -> [String] {
+    public func captureBatch(_ items: [ParsedCaptureItem], options: CaptureOptions = .researchOnly) -> [String] {
         let prepared: [(sourceIndex: Int, id: String, item: ParsedCaptureItem)] = items.enumerated()
             .map { (sourceIndex: $0.offset, id: UUID().uuidString.lowercased(), item: $0.element) }
             .filter { !$0.item.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -410,20 +422,20 @@ public final class TaskStore: @unchecked Sendable {
                     _ = try? await db.execute(
                         sql: """
                         INSERT INTO \(TASKS_TABLE)
-                            (id, owner_id, parent_task_id, title, status, category, tags, source,
+                            (id, owner_id, parent_task_id, title, status, category, tags, source, agent_mode, agent_plan_confirmation,
                              created_at, updated_at, confirmed_at, completed_at)
-                        VALUES (?, ?, ?, ?, 'done', NULL, ?, 'paste', ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, 'done', NULL, ?, 'paste', ?, ?, ?, ?, ?, ?)
                         """,
-                        parameters: [id, ownerId, parentId, item.title, tagsJSON, now, now, now, now]
+                        parameters: [id, ownerId, parentId, item.title, tagsJSON, options.agentMode.rawValue, options.agentPlanConfirmation ? 1 : 0, now, now, now, now]
                     )
                 } else {
                     _ = try? await db.execute(
                         sql: """
                         INSERT INTO \(TASKS_TABLE)
-                            (id, owner_id, parent_task_id, title, status, tags, source, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, 'proposed', ?, 'paste', ?, ?)
+                            (id, owner_id, parent_task_id, title, status, tags, source, agent_mode, agent_plan_confirmation, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, 'proposed', ?, 'paste', ?, ?, ?, ?)
                         """,
-                        parameters: [id, ownerId, parentId, item.title, tagsJSON, now, now]
+                        parameters: [id, ownerId, parentId, item.title, tagsJSON, options.agentMode.rawValue, options.agentPlanConfirmation ? 1 : 0, now, now]
                     )
                     await Self.enrich(db: db, id: id, title: item.title)
                 }
@@ -806,6 +818,18 @@ public final class TaskStore: @unchecked Sendable {
             """,
             parameters: [taskId, taskId, limit, limit],
             mapper: Self.mapTaskEvent
+        )
+    }
+
+    public func watchNotifications(limit: Int = 80) throws -> AsyncThrowingStream<[CaptureNotification], Error> {
+        try db.watch(
+            sql: """
+            SELECT * FROM \(NOTIFICATIONS_TABLE)
+             ORDER BY created_at DESC, id DESC
+             LIMIT ?
+            """,
+            parameters: [limit],
+            mapper: Self.mapNotification
         )
     }
 
@@ -1483,6 +1507,20 @@ public final class TaskStore: @unchecked Sendable {
         )
     }
 
+    static func mapNotification(_ cursor: SqlCursor) throws -> CaptureNotification {
+        CaptureNotification(
+            id: try cursor.getString(name: "id"),
+            ownerId: (try cursor.getStringOptional(name: "owner_id")) ?? "",
+            taskId: try cursor.getStringOptional(name: "task_id"),
+            kind: try cursor.getString(name: "kind"),
+            severity: (try cursor.getStringOptional(name: "severity")) ?? "info",
+            title: try cursor.getString(name: "title"),
+            body: try cursor.getStringOptional(name: "body"),
+            metadata: try cursor.getStringOptional(name: "metadata"),
+            createdAt: ISO8601.date(try cursor.getStringOptional(name: "created_at"))
+        )
+    }
+
     static func mapTaskRollup(_ cursor: SqlCursor) throws -> TaskRollup {
         TaskRollup(
             total: (try cursor.getIntOptional(name: "total")) ?? 0,
@@ -1505,6 +1543,8 @@ public final class TaskStore: @unchecked Sendable {
             priority: try cursor.getIntOptional(name: "priority"),
             githubRepo: try cursor.getStringOptional(name: "github_repo"),
             githubURL: try cursor.getStringOptional(name: "github_url"),
+            agentMode: TaskAgentMode(rawValue: (try cursor.getStringOptional(name: "agent_mode")) ?? TaskAgentMode.research.rawValue) ?? .research,
+            agentPlanConfirmation: ((try cursor.getIntOptional(name: "agent_plan_confirmation")) ?? 1) != 0,
             suggestedDueAt: ISO8601.date(try cursor.getStringOptional(name: "suggested_due_at")),
             suggestedCategory: try cursor.getStringOptional(name: "suggested_category"),
             suggestionConfidence: try cursor.getDoubleOptional(name: "suggestion_confidence"),

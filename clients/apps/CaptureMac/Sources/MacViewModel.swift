@@ -1,5 +1,6 @@
 import AppKit
 import CaptureCore
+import UserNotifications
 
 /// A row in the Mac active list: either a date-bucket section header or a task.
 enum MacActiveRow {
@@ -23,12 +24,15 @@ final class MacViewModel {
     private(set) var selectedEvents: [TaskEvent] = []
     private(set) var selectedAttachments: [TaskAttachment] = []
     private(set) var selectedRollup: TaskRollup = .empty
+    private(set) var notifications: [CaptureNotification] = []
 
     private var observers: [() -> Void] = []
     private var started = false
     private var tasks: [Task<Void, Never>] = []
     private var detailTasks: [Task<Void, Never>] = []
     private var lastSyncRestart: Date?
+    private var notificationBootstrapComplete = false
+    private let deliveredNotificationsKey = "capture.mac.deliveredNotifications"
 
     init(auth: AuthStore, config: CaptureConfig = .fromEnvironment()) {
         self.auth = auth
@@ -61,6 +65,7 @@ final class MacViewModel {
         watch("rejected", { try self.store.watchRejected() }, assign: { self.rejected = $0 })
         watchTags()
         watchCategories()
+        watchNotifications()
     }
 
     func restartSyncIfNeeded(reason: String) {
@@ -139,6 +144,78 @@ final class MacViewModel {
             }
         }
         tasks.append(t)
+    }
+
+    private func watchNotifications() {
+        let t = Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await rows in try self.store.watchNotifications() {
+                    await MainActor.run {
+                        self.notifications = rows
+                        self.deliverNotifications(rows)
+                        self.notify()
+                    }
+                }
+            } catch {
+                NSLog("[Capture] Notification watch failed: \(error)")
+            }
+        }
+        tasks.append(t)
+    }
+
+    private func deliverNotifications(_ rows: [CaptureNotification]) {
+        var delivered = Set(UserDefaults.standard.stringArray(forKey: deliveredNotificationsKey) ?? [])
+        if !notificationBootstrapComplete {
+            delivered.formUnion(rows.map(\.id))
+            UserDefaults.standard.set(Array(delivered.suffix(200)), forKey: deliveredNotificationsKey)
+            notificationBootstrapComplete = true
+            return
+        }
+        for notification in rows.reversed() where !delivered.contains(notification.id) {
+            delivered.insert(notification.id)
+            scheduleSystemNotification(notification)
+        }
+        UserDefaults.standard.set(Array(delivered.suffix(200)), forKey: deliveredNotificationsKey)
+    }
+
+    private func scheduleSystemNotification(_ notification: CaptureNotification) {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            let addRequest = {
+                let content = UNMutableNotificationContent()
+                content.title = notification.title
+                content.body = notification.body ?? ""
+                content.sound = .default
+                let request = UNNotificationRequest(identifier: notification.id, content: content, trigger: nil)
+                center.add(request)
+            }
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                addRequest()
+            case .notDetermined:
+                center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+                    CaptureDiagnostics.record(
+                        severity: error == nil ? .info : .error,
+                        category: "notifications",
+                        name: "notifications.authorization",
+                        message: granted ? "Notification permission granted" : "Notification permission not granted",
+                        fields: error.map { ["error": $0.localizedDescription] } ?? [:]
+                    )
+                    if granted { addRequest() }
+                }
+            case .denied:
+                CaptureDiagnostics.record(
+                    severity: .warning,
+                    category: "notifications",
+                    name: "notifications.delivery.skipped",
+                    message: "Notification permission denied",
+                    fields: ["notification_id": notification.id]
+                )
+            @unknown default:
+                break
+            }
+        }
     }
 
     /// Colour for a tag chip — user-chosen if known, else the deterministic palette colour
@@ -222,17 +299,22 @@ final class MacViewModel {
         tasks.append(t)
     }
 
-    func capture(_ text: String, attachments: [TaskAttachmentDraft] = [], source: String = "main") {
+    func capture(
+        _ text: String,
+        attachments: [TaskAttachmentDraft] = [],
+        source: String = "main",
+        options: TaskStore.CaptureOptions = .researchOnly
+    ) {
         let context = CaptureDiagnostics.actionStarted(
             "Capture task",
             fields: ["source": source, "attachment_count": "\(attachments.count)", "text_chars": "\(text.count)"]
         )
         let startedAt = Date()
-        if ingestIfList(text) {
+        if ingestIfList(text, options: options) {
             CaptureDiagnostics.actionCompleted(context, startedAt: startedAt, fields: ["handled_as": "list"])
             return
         }
-        store.capture(text, attachments: attachments)
+        store.capture(text, attachments: attachments, options: options)
         CaptureDiagnostics.actionCompleted(context, startedAt: startedAt)
     }
 
@@ -240,11 +322,11 @@ final class MacViewModel {
     /// become parent-linked subtasks with compatibility tags; `[x]` items import as done).
     /// Returns true if it was a list.
     @discardableResult
-    func ingestIfList(_ text: String) -> Bool {
+    func ingestIfList(_ text: String, options: TaskStore.CaptureOptions = .researchOnly) -> Bool {
         guard let items = store.detectList(text) else { return false }
         let context = CaptureDiagnostics.actionStarted("Capture pasted list", fields: ["item_count": "\(items.count)"])
         let startedAt = Date()
-        store.captureBatch(items)
+        store.captureBatch(items, options: options)
         CaptureDiagnostics.actionCompleted(context, startedAt: startedAt)
         return true
     }

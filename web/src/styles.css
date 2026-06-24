@@ -599,6 +599,31 @@ header h1::after {
   object-fit: cover;
   display: block;
 }
+.capture-agent-options {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 0 0 6px 20px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.capture-agent-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid rgba(139, 123, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(139, 123, 255, 0.08);
+}
+.capture-agent-options input {
+  flex: 0 0 auto;
+  accent-color: var(--iris);
+  width: 13px;
+  height: 13px;
+  padding: 0;
+}
 
 .kbd {
   font-family: var(--font-mono);
@@ -989,6 +1014,62 @@ h2::after { content: ''; flex: 1; height: 1px; background: var(--line); }
   margin-top: 14px;
 }
 .approval-primary { background: linear-gradient(180deg, var(--signal), var(--signal-deep)); color: #1a0f00; }
+
+/* ============================ Notification history ============================ */
+.notification-history {
+  margin-bottom: 34px;
+  padding: 16px;
+  border: 1px solid rgba(139, 123, 255, 0.22);
+  border-radius: var(--r-xl);
+  background:
+    radial-gradient(90% 120% at 100% 0%, rgba(139, 123, 255, 0.12), transparent 45%),
+    var(--panel);
+}
+.notification-history-head {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.notification-history-head p {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.notification-stack {
+  display: grid;
+  gap: 8px;
+}
+.notification-card {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--iris);
+  border-radius: var(--r-md);
+  background: rgba(10, 11, 13, 0.54);
+}
+.notification-card.tone-danger { border-left-color: var(--danger); }
+.notification-card.tone-signal { border-left-color: var(--signal); }
+.notification-card.tone-mint { border-left-color: var(--mint); }
+.notification-kind {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-faint);
+}
+.notification-card h3 {
+  margin: 4px 0;
+  font: 700 16px var(--font-display);
+}
+.notification-card p {
+  margin: 0 0 6px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.notification-card time {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+}
 
 /* ============================ Active / done rows ============================ */
 .groups { display: flex; flex-direction: column; gap: 6px; }

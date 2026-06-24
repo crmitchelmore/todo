@@ -45,3 +45,7 @@ streams:
     auto_subscribe: true
     queries:
       - SELECT * FROM agent_proposals WHERE owner_id = auth.user_id()
+  notifications:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM notifications WHERE owner_id = auth.user_id()

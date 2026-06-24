@@ -15,6 +15,8 @@ const tasks = new Table(
     priority: column.integer,
     github_repo: column.text,
     github_url: column.text,
+    agent_mode: column.text,
+    agent_plan_confirmation: column.integer,
     suggested_due_at: column.text,
     suggested_category: column.text,
     suggestion_confidence: column.real,
@@ -145,7 +147,21 @@ const agent_proposals = new Table(
   { indexes: { by_status: ['status', 'created_at'], by_task_status: ['task_id', 'status'] } }
 );
 
-export const AppSchema = new Schema({ tasks, tags, categories, categorisation_rules, user_memories, agent_devices, task_events, task_attachments, agent_proposals });
+const notifications = new Table(
+  {
+    owner_id: column.text,
+    task_id: column.text,
+    kind: column.text,
+    severity: column.text,
+    title: column.text,
+    body: column.text,
+    metadata: column.text,
+    created_at: column.text
+  },
+  { indexes: { by_created: ['created_at'], by_task_created: ['task_id', 'created_at'] } }
+);
+
+export const AppSchema = new Schema({ tasks, tags, categories, categorisation_rules, user_memories, agent_devices, task_events, task_attachments, agent_proposals, notifications });
 
 export type Database = (typeof AppSchema)['types'];
 export type TaskRecord = Database['tasks'];
@@ -157,3 +173,4 @@ export type AgentDeviceRecord = Database['agent_devices'];
 export type TaskEventRecord = Database['task_events'];
 export type TaskAttachmentRecord = Database['task_attachments'];
 export type AgentProposalRecord = Database['agent_proposals'];
+export type NotificationRecord = Database['notifications'];
