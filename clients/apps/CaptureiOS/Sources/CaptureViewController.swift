@@ -98,12 +98,17 @@ final class CaptureViewController: UIViewController, UITableViewDataSource, UITa
     private func setupNavigation() {
         navigationItem.rightBarButtonItems = [
             UIBarButtonItem(image: UIImage(systemName: "gearshape"), style: .plain, target: self, action: #selector(openSettings)),
+            UIBarButtonItem(image: UIImage(systemName: "bell"), style: .plain, target: self, action: #selector(openNotifications)),
             UIBarButtonItem(image: UIImage(systemName: "key"), style: .plain, target: self, action: #selector(addPasskey))
         ]
     }
 
     @objc private func openSettings() {
         navigationController?.pushViewController(SettingsViewController(viewModel: viewModel), animated: true)
+    }
+
+    @objc private func openNotifications() {
+        navigationController?.pushViewController(NotificationHistoryViewController(viewModel: viewModel), animated: true)
     }
 
     @objc private func signOut() {

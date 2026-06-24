@@ -35,6 +35,7 @@ export default function App() {
   const status = useStatus();
   const [showTags, setShowTags] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
   const [filter, setFilter] = useState<string[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -135,6 +136,10 @@ export default function App() {
         <button className="tags-toggle" onClick={() => setShowSettings((s) => !s)}>
           {showSettings ? 'Close settings' : 'Settings'}
         </button>
+        <button className="notification-toggle" onClick={() => setShowNotifications((s) => !s)} aria-label="Notification history">
+          <span>Notifications</span>
+          {notifications.length > 0 && <strong>{notifications.length}</strong>}
+        </button>
         <span className={`sync ${status.connected ? 'on' : 'off'}`}>
           {status.connected ? 'synced' : 'offline'}
         </span>
@@ -161,11 +166,11 @@ export default function App() {
       )}
 
       {showSettings && <SettingsPanel onSignOut={handleSignOut} />}
+      {showNotifications && <NotificationHistory notifications={notifications} onClose={() => setShowNotifications(false)} />}
 
       <div className="workbench-grid">
         <main className="task-stream">
           <ApprovalQueue proposals={actionProposals} tasksById={tasksById} />
-          <NotificationHistory notifications={notifications} />
 
           {proposed.length > 0 && (
             <section>

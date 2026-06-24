@@ -14,7 +14,6 @@ final class SettingsViewController: UIViewController {
     private let tagsStack = UIStackView()
     private let rulesStack = UIStackView()
     private let memoriesStack = UIStackView()
-    private let notificationsStack = UIStackView()
     private var taxonomyWatchTasks: [Task<Void, Never>] = []
     private var rules: [CategorisationRule] = []
     private var memories: [UserMemory] = []
@@ -182,35 +181,6 @@ final class SettingsViewController: UIViewController {
         return row
     }
 
-    private func notificationRow(_ notification: CaptureNotification) -> UIView {
-        let kind = UILabel()
-        kind.text = notification.kind.replacingOccurrences(of: "_", with: " ").uppercased()
-        kind.font = Theme.mono(10, .bold)
-        kind.textColor = notification.severity == "error" ? Theme.danger : notification.severity == "warning" ? Theme.signal : Theme.iris
-        let title = UILabel()
-        title.text = notification.title
-        title.font = Theme.display(14, .semibold)
-        title.textColor = Theme.textPrimary
-        title.numberOfLines = 2
-        let body = UILabel()
-        body.text = notification.body
-        body.font = Theme.display(12, .regular)
-        body.textColor = Theme.textSecondary
-        body.numberOfLines = 3
-        let time = UILabel()
-        time.text = notification.createdAt?.formatted(date: .abbreviated, time: .shortened)
-        time.font = Theme.mono(10)
-        time.textColor = Theme.textTertiary
-        let row = UIStackView(arrangedSubviews: [kind, title, body, time])
-        row.axis = .vertical
-        row.spacing = 4
-        row.layoutMargins = UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
-        row.isLayoutMarginsRelativeArrangement = true
-        row.backgroundColor = Theme.surfaceHi
-        row.layer.cornerRadius = 12
-        return row
-    }
-
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override func viewDidLoad() {
@@ -285,7 +255,6 @@ final class SettingsViewController: UIViewController {
         stack.addArrangedSubview(section(title: "AI Categorisation Rules", controls: [makeAddButton(title: "Add rule", action: { [weak self] in self?.promptCreateRule() }), rulesStack]))
         stack.addArrangedSubview(section(title: "Tags", controls: [makeAddButton(title: "Add tag", action: { [weak self] in self?.promptCreateTag() }), tagsStack]))
         stack.addArrangedSubview(section(title: "Sync Diagnostics", controls: [diagnosticsStatus, diagnosticsDetail, diagnosticsMeta, diagnosticsRefresh]))
-        stack.addArrangedSubview(section(title: "Notification History", controls: [notificationsStack]))
         stack.addArrangedSubview(section(title: "Account", controls: [accountNote, signOutButton]))
         categoriesStack.axis = .vertical
         categoriesStack.spacing = 8
@@ -295,8 +264,6 @@ final class SettingsViewController: UIViewController {
         rulesStack.spacing = 8
         memoriesStack.axis = .vertical
         memoriesStack.spacing = 8
-        notificationsStack.axis = .vertical
-        notificationsStack.spacing = 8
         rebuildTaxonomy()
 
         NSLayoutConstraint.activate([
@@ -400,7 +367,6 @@ final class SettingsViewController: UIViewController {
         tagsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         rulesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         memoriesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        notificationsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let existingCategories = Set(viewModel.allCategories.map { CategoryPalette.key($0.name) })
         let missingDefaults = CAPTURE_CATEGORIES.filter { !existingCategories.contains(CategoryPalette.key($0)) }
         if !missingDefaults.isEmpty {
@@ -445,12 +411,6 @@ final class SettingsViewController: UIViewController {
         }
         if rules.isEmpty {
             rulesStack.addArrangedSubview(emptyLabel("No rules yet. Add one like “wok research → errands + shopping”."))
-        }
-        for notification in viewModel.notifications.prefix(30) {
-            notificationsStack.addArrangedSubview(notificationRow(notification))
-        }
-        if viewModel.notifications.isEmpty {
-            notificationsStack.addArrangedSubview(emptyLabel("No notifications yet. Research and attempt updates will stay here."))
         }
         for tag in viewModel.allTags {
             tagsStack.addArrangedSubview(taxonomyRow(

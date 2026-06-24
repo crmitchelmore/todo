@@ -18,6 +18,7 @@ final class MacCaptureViewController: NSViewController {
     private let captureField = AttachmentCaptureTextField()
     private let attemptAfterResearch = NSButton(checkboxWithTitle: "Attempt after research", target: nil, action: nil)
     private let confirmPlanBeforeAttempt = NSButton(checkboxWithTitle: "Confirm plan first", target: nil, action: nil)
+    private let notificationsButton = NSButton(title: "Notifications", target: nil, action: nil)
     private let settingsButton = NSButton(title: "Settings", target: nil, action: nil)
     private let proposedTable = FastConfirmTableView()
     private let activeTable = NSTableView()
@@ -33,6 +34,7 @@ final class MacCaptureViewController: NSViewController {
     private var didRestoreSplitPosition = false
     private var proposedHeightConstraint: NSLayoutConstraint?
     var onOpenSettings: (() -> Void)?
+    var onOpenNotifications: (() -> Void)?
 
     init(viewModel: MacViewModel) {
         self.viewModel = viewModel
@@ -153,6 +155,15 @@ final class MacCaptureViewController: NSViewController {
         confirmPlanBeforeAttempt.translatesAutoresizingMaskIntoConstraints = false
         confirmPlanBeforeAttempt.isHidden = true
 
+        notificationsButton.target = self
+        notificationsButton.action = #selector(notificationsTapped)
+        notificationsButton.title = "◆"
+        notificationsButton.bezelStyle = .rounded
+        notificationsButton.font = Theme.display(12, .semibold)
+        notificationsButton.contentTintColor = Theme.iris
+        notificationsButton.translatesAutoresizingMaskIntoConstraints = false
+        notificationsButton.toolTip = "Notifications"
+
         settingsButton.target = self
         settingsButton.action = #selector(settingsTapped)
         settingsButton.title = "⚙︎"
@@ -185,7 +196,7 @@ final class MacCaptureViewController: NSViewController {
         configure(scroll: proposedScroll, table: proposedTable)
         configure(scroll: activeScroll, table: activeTable)
 
-        [commandLabel, captureField, settingsButton, attemptAfterResearch, confirmPlanBeforeAttempt, proposedHeader, proposedScroll, activeHeader, filterBar, activeScroll].forEach {
+        [commandLabel, captureField, notificationsButton, settingsButton, attemptAfterResearch, confirmPlanBeforeAttempt, proposedHeader, proposedScroll, activeHeader, filterBar, activeScroll].forEach {
             listPane.addSubview($0)
         }
         styleScrollSurfaces()
@@ -205,8 +216,11 @@ final class MacCaptureViewController: NSViewController {
 
             captureField.topAnchor.constraint(equalTo: commandLabel.bottomAnchor, constant: 6),
             captureField.leadingAnchor.constraint(equalTo: listPane.leadingAnchor, constant: 18),
-            captureField.trailingAnchor.constraint(equalTo: settingsButton.leadingAnchor, constant: -10),
+            captureField.trailingAnchor.constraint(equalTo: notificationsButton.leadingAnchor, constant: -10),
 
+            notificationsButton.centerYAnchor.constraint(equalTo: captureField.centerYAnchor),
+            notificationsButton.trailingAnchor.constraint(equalTo: settingsButton.leadingAnchor, constant: -8),
+            notificationsButton.widthAnchor.constraint(equalToConstant: 36),
             settingsButton.centerYAnchor.constraint(equalTo: captureField.centerYAnchor),
             settingsButton.trailingAnchor.constraint(equalTo: listPane.trailingAnchor, constant: -18),
             settingsButton.widthAnchor.constraint(equalToConstant: 44),
@@ -384,6 +398,11 @@ final class MacCaptureViewController: NSViewController {
     @objc private func settingsTapped() {
         CaptureDiagnostics.record(category: "ui", name: "button.settings.open", message: "Settings button clicked")
         onOpenSettings?()
+    }
+
+    @objc private func notificationsTapped() {
+        CaptureDiagnostics.record(category: "ui", name: "button.notifications.open", message: "Notifications button clicked")
+        onOpenNotifications?()
     }
 
     @objc private func attemptOptionChanged() {

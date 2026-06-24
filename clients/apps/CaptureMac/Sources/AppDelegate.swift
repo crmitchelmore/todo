@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private lazy var captureVC: MacCaptureViewController = {
         let vc = MacCaptureViewController(viewModel: model)
         vc.onOpenSettings = { [weak self] in self?.openSettings() }
+        vc.onOpenNotifications = { [weak self] in self?.openNotifications() }
         return vc
     }()
     private lazy var quick = QuickCaptureController(viewModel: model)
@@ -18,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let hotKeyStore = HotKeyStore()
     private let preferencesStore = MacPreferencesStore()
     private var settingsWindow: SettingsWindowController?
+    private var notificationWindow: NotificationHistoryWindowController?
     private var quickAppMenuItem: NSMenuItem?
     private let updater = UpdaterController.shared   // starts Sparkle scheduled checks
     private var started = false
@@ -131,6 +133,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let quickItem = appMenu.addItem(withTitle: quickCaptureTitle(for: hotKeyStore.hotKey), action: #selector(quickCapture), keyEquivalent: "")
         quickAppMenuItem = quickItem
         appMenu.addItem(withTitle: "Open Capture", action: #selector(newCapture), keyEquivalent: "n")
+        let notificationsItem = appMenu.addItem(withTitle: "Notifications…", action: #selector(openNotifications), keyEquivalent: "0")
+        notificationsItem.target = self
         let passkeyItem = appMenu.addItem(withTitle: "Add Passkey…", action: #selector(addPasskey), keyEquivalent: "")
         passkeyItem.target = self
         appMenu.addItem(.separator())
@@ -235,6 +239,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             )
         }
         settingsWindow?.show()
+    }
+
+    @objc private func openNotifications() {
+        CaptureDiagnostics.record(category: "ui", name: "menu.app.open_notifications", message: "Open notifications clicked")
+        if notificationWindow == nil {
+            notificationWindow = NotificationHistoryWindowController(taskStore: model.store)
+        }
+        notificationWindow?.show()
     }
 
     private func applyAppearance(_ mode: CaptureAppearanceMode) {
