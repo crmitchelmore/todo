@@ -22,6 +22,10 @@
 - When changing Capture UI, check Mac, iOS, and web parity together: preserve the same capabilities and design grammar while respecting each platform's HIG/native interaction patterns.
 - Auth and code-entry screens must remain keyboard-safe on iOS and mobile web; client settings should expose enough version/sync diagnostics to identify stale installs or endpoint mismatches.
 
+## Product documentation
+
+- Keep Capture product, vision, and specification docs technology-agnostic: describe the product essence, user outcomes, and relationships between capabilities; avoid naming implementation stacks, vendor services, or frameworks unless the doc is explicitly about architecture, deployment, or release mechanics.
+
 ## Local Mac app refresh
 
 - Before validating or dogfooding the Mac app on this machine, run `scripts/refresh-mac-app.sh`.
