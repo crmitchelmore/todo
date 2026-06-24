@@ -15,6 +15,10 @@ The product intent is simple:
 
 The rebuild should preserve the product's conceptual integrity: Capture is not a generic project manager with AI bolted on. It is an instant inbox, confirmation workflow, personal-context organiser, and agent workbench built around the principle that the human decides what becomes durable task state.
 
+The philosophy is simple - speed, automation and delight.
+
+Design wise, the vision is omnifocus but for AI in 2030.
+
 ### Supported surfaces
 
 The product must support three primary user-facing platforms:
