@@ -21,6 +21,11 @@
 - Mac, web, and iOS should keep the same command-deck / triage-queue / active-outline / inspector-card-stack model while using platform-native controls.
 - When changing Capture UI, check Mac, iOS, and web parity together: preserve the same capabilities and design grammar while respecting each platform's HIG/native interaction patterns.
 - Auth and code-entry screens must remain keyboard-safe on iOS and mobile web; client settings should expose enough version/sync diagnostics to identify stale installs or endpoint mismatches.
+- Notification history is first-class app chrome, not Settings content: provide dedicated notification entry points and history surfaces on web, macOS, and iOS. Settings may configure notifications, but must not be the primary notification inbox.
+
+## Observability and diagnostics
+
+- Diagnostics/debug instrumentation must reuse Capture's existing structured observability/wide-event stack so events stay usable for analytics and remote observability. Local in-app diagnostics should be a bounded view over those events, not a separate debug-only log format.
 
 ## Product documentation
 
