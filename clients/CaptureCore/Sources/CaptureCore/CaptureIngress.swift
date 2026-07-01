@@ -64,10 +64,11 @@ public struct HTTPCaptureIngress: CaptureIngress {
         let rawSummaryURL = URLSummaryCapture.urlOnly(input.rawText)
         let summaryURL = rawSummaryURL ?? (input.rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? input.url.flatMap(URLSummaryCapture.urlOnly) : nil)
         let source = summaryURL == nil ? input.source : URLSummaryCapture.source
+        let requestURL: String? = summaryURL ?? input.url
         let body: [String: Any] = [
             "id": input.id,
             "raw_text": summaryURL ?? input.rawText,
-            "url": (summaryURL ?? input.url) as Any,
+            "url": requestURL as Any,
             "source": source,
             "agent_mode": input.agentMode.rawValue,
             "agent_plan_confirmation": input.agentPlanConfirmation
