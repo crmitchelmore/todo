@@ -1,6 +1,6 @@
 # Obsidian integration
 
-Capture has a typed Obsidian connector boundary in `integrations/`, but it is not yet wired into the worker or backend. It is scaffolded up to the credential boundary: when credentials are absent, calls fail with `IntegrationNotConfiguredError`; when credentials are present, the connector uses the Local REST API shape for health, vault search, and note reads with bounded request timeouts.
+Capture has a typed Obsidian connector boundary in `integrations/` and a worker write-back path for URL-only captures. When a capture contains only one `http(s)` URL, clients mark it as `source='url-summary'`; the worker extracts readable page markdown, asks the configured LLM for a 1-2 sentence overview plus a 3-5 paragraph summary, writes the markdown into the task notes, and optionally creates an Obsidian note through the local `obsidian` CLI.
 
 ## Setup
 
@@ -15,6 +15,18 @@ OBSIDIAN_API_URL=http://127.0.0.1:27123
 OBSIDIAN_API_KEY=<local-rest-api-key>
 ```
 
+For URL-summary write-back through the Obsidian CLI, configure the worker process on the machine that has vault access:
+
+```sh
+OPENAI_API_KEY=<llm-key>
+OBSIDIAN_CLI_ENABLED=1
+OBSIDIAN_CLI_COMMAND=obsidian
+OBSIDIAN_VAULT=<vault-name>
+OBSIDIAN_SUMMARY_FOLDER=Capture/Summaries
+```
+
+The worker prefers the `defuddle` CLI (`defuddle parse <url> --md`) for clean page extraction when available, then falls back to bounded HTTP extraction. Set `URL_SUMMARY_DEFUDDLE_COMMAND` to a custom binary path or `URL_SUMMARY_DISABLE_DEFUDDLE=1` to skip that step.
+
 ## Connector surface
 
 - `searchVault(query)` calls `POST /search/simple/?query=...` with `Authorization: Bearer ...` and returns typed `VaultSearchHit` values.
@@ -26,9 +38,10 @@ OBSIDIAN_API_KEY=<local-rest-api-key>
 - `buildObsidianSemanticIndex(connector, seedQueries)` uses Local REST search to find candidate notes, fetches each note once, chunks markdown by heading/size, and builds a local deterministic embedding index for task-context retrieval.
 - `healthCheck()` calls the Local REST API root endpoint and reports `ok` only when the configured service is reachable.
 - Connector calls use an 8 second timeout by default so an agent cannot hang indefinitely on vault operations.
+- URL-summary notes use Obsidian-flavoured markdown with frontmatter, a source link, a summary callout, and a `## Summary` section in the same document.
 
 The plugin is currently enabled locally and responds on both `https://127.0.0.1:27124` and `http://127.0.0.1:27123`. The API key is stored only in the session secrets file, not in the repository.
 
 ## Security posture
 
-The Obsidian Local REST API token grants access to the local vault API, so store it only as an environment secret on the trusted machine that runs the agent. Write-back is an explicit connector method and should only be called after the relevant Capture-side proposal has been confirmed.
+The Obsidian Local REST API token grants access to the local vault API, so store it only as an environment secret on the trusted machine that runs the agent. CLI write-back stores only non-secret vault/folder/command settings in the app settings UI; the worker environment remains the source of truth for actual vault access.

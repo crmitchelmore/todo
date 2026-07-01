@@ -83,4 +83,24 @@ final class CaptureIngressTests: XCTestCase {
         XCTAssertEqual(input.id, input.id.lowercased())
         XCTAssertEqual(input.id.count, 36) // canonical UUID string length
     }
+
+    func testHTTPIngressMarksURLOnlyCaptureForSummary() async throws {
+        MockURLProtocol.statusCode = 200
+        let session = mockedSession()
+        let ingress = HTTPCaptureIngress(backendURL: URL(string: "http://localhost:6060")!, session: session)
+
+        try await ingress.capture(CaptureInput(rawText: "https://example.com/article", source: "share-extension"))
+
+        let body = try XCTUnwrap(MockURLProtocol.lastRequestBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["source"] as? String, URLSummaryCapture.source)
+        XCTAssertEqual(json["raw_text"] as? String, "https://example.com/article")
+    }
+
+    func testURLSummaryCaptureOnlyMatchesBareHTTPURLs() {
+        XCTAssertEqual(URLSummaryCapture.urlOnly(" https://example.com/article "), "https://example.com/article")
+        XCTAssertNil(URLSummaryCapture.urlOnly("read https://example.com/article"))
+        XCTAssertNil(URLSummaryCapture.urlOnly("obsidian://open?vault=Notes"))
+        XCTAssertNil(URLSummaryCapture.urlOnly("example.com/article"))
+    }
 }

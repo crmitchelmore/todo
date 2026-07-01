@@ -10,6 +10,11 @@ final class SettingsViewController: UIViewController {
     private let diagnosticsDetail = UILabel()
     private let diagnosticsMeta = UILabel()
     private let diagnosticsRefresh = UIButton(type: .system)
+    private let obsidianEnabled = UISwitch()
+    private let obsidianVaultField = UITextField()
+    private let obsidianFolderField = UITextField()
+    private let obsidianCommandField = UITextField()
+    private let obsidianEnvPreview = UILabel()
     private let categoriesStack = UIStackView()
     private let tagsStack = UIStackView()
     private let rulesStack = UIStackView()
@@ -250,6 +255,7 @@ final class SettingsViewController: UIViewController {
 
         stack.addArrangedSubview(header)
         stack.addArrangedSubview(section(title: "Appearance", controls: [appearanceControl]))
+        stack.addArrangedSubview(section(title: "Obsidian URL Summaries", controls: obsidianControls()))
         stack.addArrangedSubview(section(title: "Categories", controls: [makeAddButton(title: "Add category", action: { [weak self] in self?.promptCreateCategory() }), categoriesStack]))
         stack.addArrangedSubview(section(title: "Agent Memory", controls: [makeAddButton(title: "Add memory", action: { [weak self] in self?.promptCreateMemory() }), memoriesStack]))
         stack.addArrangedSubview(section(title: "AI Categorisation Rules", controls: [makeAddButton(title: "Add rule", action: { [weak self] in self?.promptCreateRule() }), rulesStack]))
@@ -284,17 +290,37 @@ final class SettingsViewController: UIViewController {
     private func loadPreferences() {
         let appearance = CapturePreferences.load().appearance
         appearanceControl.selectedSegmentIndex = CaptureAppearanceMode.allCases.firstIndex(of: appearance) ?? 1
+        let preferences = CapturePreferences.load()
+        obsidianEnabled.isOn = preferences.obsidianEnabled
+        obsidianVaultField.text = preferences.obsidianVault
+        obsidianFolderField.text = preferences.obsidianSummaryFolder
+        obsidianCommandField.text = preferences.obsidianCLICommand
+        refreshObsidianEnvPreview()
     }
 
     @objc private func appearanceChanged() {
         let index = appearanceControl.selectedSegmentIndex
         guard CaptureAppearanceMode.allCases.indices.contains(index) else { return }
         let mode = CaptureAppearanceMode.allCases[index]
-        CapturePreferences(appearance: mode).save()
+        var preferences = CapturePreferences.load()
+        preferences.appearance = mode
+        preferences.save()
         view.window?.overrideUserInterfaceStyle = mode.userInterfaceStyle
         view.window?.rootViewController?.setNeedsStatusBarAppearanceUpdate()
         NotificationCenter.default.post(name: .captureAppearanceChanged, object: nil)
         applyTheme()
+    }
+
+    @objc private func obsidianSettingsChanged() {
+        let current = CapturePreferences.load()
+        CapturePreferences(
+            appearance: current.appearance,
+            obsidianEnabled: obsidianEnabled.isOn,
+            obsidianVault: obsidianVaultField.text ?? "",
+            obsidianSummaryFolder: obsidianFolderField.text?.nilIfEmpty ?? "Capture/Summaries",
+            obsidianCLICommand: obsidianCommandField.text?.nilIfEmpty ?? "obsidian"
+        ).save()
+        refreshObsidianEnvPreview()
     }
 
     private func applyTheme() {
@@ -490,6 +516,69 @@ final class SettingsViewController: UIViewController {
         button.heightAnchor.constraint(equalToConstant: 40).isActive = true
         button.addAction(UIAction { _ in action() }, for: .touchUpInside)
         return button
+    }
+
+    private func obsidianControls() -> [UIView] {
+        let help = UILabel()
+        help.text = "URL-only captures generate an overview plus a 3-5 paragraph markdown summary. Mirror these local settings into the worker environment for CLI write-back."
+        help.font = Theme.display(13, .regular)
+        help.textColor = Theme.textSecondary
+        help.numberOfLines = 0
+
+        let toggleRow = UIStackView(arrangedSubviews: [settingLabel("Enable CLI write-back"), obsidianEnabled])
+        toggleRow.axis = .horizontal
+        toggleRow.alignment = .center
+        toggleRow.spacing = 10
+        obsidianEnabled.addTarget(self, action: #selector(obsidianSettingsChanged), for: .valueChanged)
+
+        configureObsidianField(obsidianVaultField, placeholder: "Vault name")
+        configureObsidianField(obsidianFolderField, placeholder: "Capture/Summaries")
+        configureObsidianField(obsidianCommandField, placeholder: "obsidian")
+        obsidianEnvPreview.font = Theme.mono(11, .regular)
+        obsidianEnvPreview.textColor = Theme.textTertiary
+        obsidianEnvPreview.numberOfLines = 0
+
+        return [
+            help,
+            toggleRow,
+            labelledField("Vault", obsidianVaultField),
+            labelledField("Summary folder", obsidianFolderField),
+            labelledField("CLI command", obsidianCommandField),
+            obsidianEnvPreview,
+        ]
+    }
+
+    private func configureObsidianField(_ field: UITextField, placeholder: String) {
+        field.placeholder = placeholder
+        field.borderStyle = .roundedRect
+        field.textColor = Theme.textPrimary
+        field.backgroundColor = Theme.surfaceHi
+        field.autocapitalizationType = .none
+        field.autocorrectionType = .no
+        field.addTarget(self, action: #selector(obsidianSettingsChanged), for: .editingChanged)
+    }
+
+    private func labelledField(_ title: String, _ field: UITextField) -> UIView {
+        let stack = UIStackView(arrangedSubviews: [settingLabel(title), field])
+        stack.axis = .vertical
+        stack.spacing = 6
+        return stack
+    }
+
+    private func settingLabel(_ text: String) -> UILabel {
+        let label = UILabel()
+        label.text = text
+        label.font = Theme.mono(11, .semibold)
+        label.textColor = Theme.textTertiary
+        return label
+    }
+
+    private func refreshObsidianEnvPreview() {
+        let enabled = obsidianEnabled.isOn ? "1" : "0"
+        let vault = obsidianVaultField.text?.nilIfEmpty ?? "<vault>"
+        let folder = obsidianFolderField.text?.nilIfEmpty ?? "Capture/Summaries"
+        let command = obsidianCommandField.text?.nilIfEmpty ?? "obsidian"
+        obsidianEnvPreview.text = "OBSIDIAN_CLI_ENABLED=\(enabled) OBSIDIAN_VAULT=\(vault) OBSIDIAN_SUMMARY_FOLDER=\(folder) OBSIDIAN_CLI_COMMAND=\(command)"
     }
 
     private func taxonomyRow(
