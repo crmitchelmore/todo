@@ -61,11 +61,15 @@ public struct HTTPCaptureIngress: CaptureIngress {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.applyBearer(token?.currentToken())
         req.timeoutInterval = 8
+        let rawSummaryURL = URLSummaryCapture.urlOnly(input.rawText)
+        let summaryURL = rawSummaryURL ?? (input.rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? input.url.flatMap(URLSummaryCapture.urlOnly) : nil)
+        let source = summaryURL == nil ? input.source : URLSummaryCapture.source
+        let requestURL: String? = summaryURL ?? input.url
         let body: [String: Any] = [
             "id": input.id,
-            "raw_text": input.rawText,
-            "url": input.url as Any,
-            "source": input.source,
+            "raw_text": summaryURL ?? input.rawText,
+            "url": requestURL as Any,
+            "source": source,
             "agent_mode": input.agentMode.rawValue,
             "agent_plan_confirmation": input.agentPlanConfirmation
         ]

@@ -280,7 +280,9 @@ public final class TaskStore: @unchecked Sendable {
     public func capture(_ raw: String, attachments: [TaskAttachmentDraft] = [], options: CaptureOptions = .researchOnly) -> String {
         let title = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let id = UUID().uuidString.lowercased()
-        let effectiveTitle = title.isEmpty ? (attachments.first?.filename ?? "Image attachment") : title
+        let summaryURL = attachments.isEmpty ? URLSummaryCapture.urlOnly(title) : nil
+        let effectiveTitle = summaryURL ?? (title.isEmpty ? (attachments.first?.filename ?? "Image attachment") : title)
+        let source = summaryURL == nil ? "capture" : URLSummaryCapture.source
         guard !effectiveTitle.isEmpty else { return id }
         let ownerId = self.ownerId
         CaptureDiagnostics.record(
@@ -296,9 +298,9 @@ public final class TaskStore: @unchecked Sendable {
                     sql: """
                     INSERT INTO \(TASKS_TABLE)
                         (id, owner_id, title, status, source, agent_mode, agent_plan_confirmation, created_at, updated_at)
-                    VALUES (?, ?, ?, 'proposed', 'capture', ?, ?, ?, ?)
+                    VALUES (?, ?, ?, 'proposed', ?, ?, ?, ?, ?)
                     """,
-                    parameters: [id, ownerId, effectiveTitle, options.agentMode.rawValue, options.agentPlanConfirmation ? 1 : 0, now, now]
+                    parameters: [id, ownerId, effectiveTitle, source, options.agentMode.rawValue, options.agentPlanConfirmation ? 1 : 0, now, now]
                 )
                 CaptureDiagnostics.record(
                     category: "local_store",

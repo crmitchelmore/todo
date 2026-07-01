@@ -6,7 +6,15 @@ import {
   syncDiagnosticIssues,
   type CombinedSyncDiagnostics
 } from '../lib/diagnostics';
-import { applyAppearance, getAppearance, setAppearance, type AppearanceMode } from '../lib/preferences';
+import {
+  applyAppearance,
+  getAppearance,
+  getObsidianSettings,
+  setAppearance,
+  setObsidianSettings,
+  type AppearanceMode,
+  type ObsidianSettings
+} from '../lib/preferences';
 
 const APPEARANCE_OPTIONS: Array<{ value: AppearanceMode; label: string; hint: string }> = [
   { value: 'system', label: 'System', hint: 'Follow this device.' },
@@ -20,6 +28,7 @@ export function SettingsPanel({ onSignOut }: { onSignOut: () => Promise<void> })
   const [diagnostics, setDiagnostics] = useState<CombinedSyncDiagnostics | null>(null);
   const [diagnosticsBusy, setDiagnosticsBusy] = useState(false);
   const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
+  const [obsidian, setObsidianState] = useState<ObsidianSettings>(() => getObsidianSettings());
 
   useEffect(() => {
     applyAppearance(appearance);
@@ -32,6 +41,11 @@ export function SettingsPanel({ onSignOut }: { onSignOut: () => Promise<void> })
   function choose(mode: AppearanceMode) {
     setAppearance(mode);
     setAppearanceState(mode);
+  }
+
+  function updateObsidian(next: ObsidianSettings) {
+    setObsidianSettings(next);
+    setObsidianState(next);
   }
 
   async function loadDiagnostics() {
@@ -86,6 +100,52 @@ export function SettingsPanel({ onSignOut }: { onSignOut: () => Promise<void> })
         busy={diagnosticsBusy}
         onRefresh={() => void loadDiagnostics()}
       />
+
+      <div className="settings-card obsidian-settings-card">
+        <div className="settings-card-title">
+          <div>
+            <h3>Obsidian URL summaries</h3>
+            <p>URL-only captures become markdown summaries. A local worker can write them into Obsidian when the CLI is configured.</p>
+          </div>
+          <label className="settings-toggle">
+            <input
+              type="checkbox"
+              checked={obsidian.enabled}
+              onChange={(event) => updateObsidian({ ...obsidian, enabled: event.target.checked })}
+            />
+            Enabled
+          </label>
+        </div>
+        <div className="settings-form-grid">
+          <label>
+            <span>Vault</span>
+            <input
+              value={obsidian.vault}
+              placeholder="Personal Knowledge"
+              onChange={(event) => updateObsidian({ ...obsidian, vault: event.target.value })}
+            />
+          </label>
+          <label>
+            <span>Summary folder</span>
+            <input
+              value={obsidian.summaryFolder}
+              placeholder="Capture/Summaries"
+              onChange={(event) => updateObsidian({ ...obsidian, summaryFolder: event.target.value })}
+            />
+          </label>
+          <label>
+            <span>CLI command</span>
+            <input
+              value={obsidian.cliCommand}
+              placeholder="obsidian"
+              onChange={(event) => updateObsidian({ ...obsidian, cliCommand: event.target.value })}
+            />
+          </label>
+        </div>
+        <p className="settings-env-hint">
+          Worker env: OBSIDIAN_CLI_ENABLED={obsidian.enabled ? '1' : '0'} · OBSIDIAN_VAULT={obsidian.vault || 'vault name'} · OBSIDIAN_SUMMARY_FOLDER={obsidian.summaryFolder || 'Capture/Summaries'} · OBSIDIAN_CLI_COMMAND={obsidian.cliCommand || 'obsidian'}
+        </p>
+      </div>
 
       <div className="settings-card">
         <h3>Agent memory</h3>

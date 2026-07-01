@@ -369,6 +369,11 @@ private struct SettingsView: View {
                         .padding(.top, 4)
                 }
 
+                GroupBox("Obsidian URL Summaries") {
+                    ObsidianSettingsView(preferences: preferences)
+                        .padding(.top, 4)
+                }
+
                 GroupBox("Agent Backend Computer") {
                     AgentBackendSettingsView(taxonomy: taxonomy)
                         .padding(.top, 4)
@@ -523,6 +528,51 @@ private struct DiagnosticMetric: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(nsColor: Theme.surface))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+private struct ObsidianSettingsView: View {
+    @ObservedObject var preferences: MacPreferencesStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("URL-only captures generate a two-level markdown summary.")
+                    .font(.system(.body, design: .rounded).weight(.semibold))
+                Text("The worker writes directly to Obsidian when these values are mirrored into its local environment; no API keys are stored here.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Toggle("Enable Obsidian CLI write-back", isOn: Binding(
+                get: { preferences.preferences.obsidianEnabled },
+                set: { preferences.preferences.obsidianEnabled = $0 }
+            ))
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 10) {
+                TextField("Vault name", text: Binding(
+                    get: { preferences.preferences.obsidianVault },
+                    set: { preferences.preferences.obsidianVault = $0 }
+                ))
+                TextField("Summary folder", text: Binding(
+                    get: { preferences.preferences.obsidianSummaryFolder },
+                    set: { preferences.preferences.obsidianSummaryFolder = $0 }
+                ))
+                TextField("CLI command", text: Binding(
+                    get: { preferences.preferences.obsidianCLICommand },
+                    set: { preferences.preferences.obsidianCLICommand = $0 }
+                ))
+            }
+            .textFieldStyle(.roundedBorder)
+            Text(envPreview)
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+        }
+    }
+
+    private var envPreview: String {
+        let p = preferences.preferences
+        return "OBSIDIAN_CLI_ENABLED=\(p.obsidianEnabled ? "1" : "0") OBSIDIAN_VAULT=\(p.obsidianVault.isEmpty ? "<vault>" : p.obsidianVault) OBSIDIAN_SUMMARY_FOLDER=\(p.obsidianSummaryFolder) OBSIDIAN_CLI_COMMAND=\(p.obsidianCLICommand)"
     }
 }
 
