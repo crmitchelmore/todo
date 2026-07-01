@@ -5,6 +5,7 @@ import { suggest } from './suggest';
 import { parseMarkdownList, type ParsedCaptureItem } from './markdownList';
 import { encodeTags, ensureTags, normalizeTags } from './tags';
 import type { AttachmentDraft } from './attachments';
+import { URL_SUMMARY_SOURCE, urlOnlyCapture } from './urlSummary';
 
 /**
  * Capture is the hot path: ONE instant local INSERT, nothing awaited on the network or an LLM.
@@ -15,11 +16,13 @@ export async function capture(raw: string, attachments: AttachmentDraft[] = []):
   if (!title && attachments.length === 0) return '';
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  const effectiveTitle = title || attachments[0]?.filename || 'Image attachment';
+  const summaryUrl = attachments.length === 0 ? urlOnlyCapture(title) : null;
+  const effectiveTitle = summaryUrl ?? (title || attachments[0]?.filename || 'Image attachment');
+  const source = summaryUrl ? URL_SUMMARY_SOURCE : 'capture';
   await db.execute(
     `INSERT INTO tasks (id, owner_id, title, status, source, created_at, updated_at)
-     VALUES (?, ?, ?, 'proposed', 'capture', ?, ?)`,
-    [id, ownerId(), effectiveTitle, now, now]
+     VALUES (?, ?, ?, 'proposed', ?, ?, ?)`,
+    [id, ownerId(), effectiveTitle, source, now, now]
   );
   for (const attachment of attachments) {
     await addAttachment(id, attachment, now);

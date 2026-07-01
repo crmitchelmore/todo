@@ -21,6 +21,14 @@ import { learnCategoryHints, type CategoryHints, type HistoricalTask } from './h
 import { bestMatch, discoverConfiguredGitHubRepositories, shouldAssociateGitHubProject, type GitHubRepository } from './githubProject.js';
 import { compactMemories, loadActiveMemories } from './memories.js';
 import { captureException, initObservability, startSpan, wideEvent } from './observability.js';
+import {
+  generateUrlSummaryDocument,
+  URL_SUMMARY_DONE_SOURCE,
+  URL_SUMMARY_FAILED_SOURCE,
+  URL_SUMMARY_SOURCE,
+  urlOnlyCapture,
+  type UrlSummaryDocument,
+} from './urlSummary.js';
 
 /**
  * Capture enrichment worker.
@@ -45,10 +53,10 @@ const pool = new pg.Pool({ connectionString: DATABASE_URI });
 
 // Claim proposed rows that haven't yet had a server/LLM pass. on-device + null are upgradeable.
 const SELECT_SQL = `
-  SELECT id, owner_id, title
+  SELECT id, owner_id, title, source
   FROM public.tasks
   WHERE status = 'proposed'
-    AND coalesce(suggestion_source, 'on-device') NOT IN ('server', 'llm')
+    AND coalesce(suggestion_source, 'on-device') NOT IN ('server', 'llm', 'url-summary', 'url-summary-failed')
   ORDER BY created_at ASC
   LIMIT $1
 `;
@@ -167,6 +175,13 @@ interface GitHubAssociationRow {
   category: string | null;
   suggested_category: string | null;
   github_repo: string | null;
+}
+
+interface EnrichmentTaskRow {
+  id: string;
+  owner_id: string;
+  title: string;
+  source: string | null;
 }
 
 interface ApprovedAttemptRow {
@@ -422,6 +437,109 @@ async function recordGitHubAssociationEvent(
       }),
     ]
   );
+}
+
+async function recordUrlSummaryCompletionEvent(
+  row: EnrichmentTaskRow,
+  summary: UrlSummaryDocument
+): Promise<void> {
+  const eventId = deterministicUuid(`${row.owner_id}:${row.id}:url-summary:${summary.url}`);
+  await pool.query(
+    `INSERT INTO public.task_events
+       (id, owner_id, task_id, actor, event_type, title, body, metadata)
+     VALUES ($1, $2, $3, 'agent', 'agent_completed', 'URL summary ready', $4, $5)
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      eventId,
+      row.owner_id,
+      row.id,
+      summary.overview.slice(0, 2000),
+      metadataJSON({
+        source: URL_SUMMARY_SOURCE,
+        url: summary.url,
+        title: summary.title,
+        model: summary.model,
+        obsidian_path: summary.obsidianPath,
+        extracted_chars: summary.extractedChars,
+        paragraph_count: summary.paragraphs.length,
+        confidence: 0.9,
+      }),
+    ]
+  );
+}
+
+async function recordUrlSummaryFailureEvent(
+  row: EnrichmentTaskRow,
+  url: string,
+  error: unknown
+): Promise<void> {
+  const eventId = deterministicUuid(`${row.owner_id}:${row.id}:url-summary-failed:${url}`);
+  await pool.query(
+    `INSERT INTO public.task_events
+       (id, owner_id, task_id, actor, event_type, title, body, metadata)
+     VALUES ($1, $2, $3, 'agent', 'agent_failed', 'URL summary failed', $4, $5)
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      eventId,
+      row.owner_id,
+      row.id,
+      String(error).slice(0, 2000),
+      metadataJSON({ source: URL_SUMMARY_SOURCE, url }),
+    ]
+  );
+}
+
+async function processUrlSummary(row: EnrichmentTaskRow): Promise<boolean> {
+  const url = urlOnlyCapture(row.title);
+  if (!url) return false;
+
+  try {
+    const summary = await generateUrlSummaryDocument(url);
+    const result = await pool.query(
+      `UPDATE public.tasks
+          SET title = $3,
+              notes = $4,
+              source = $5,
+              suggested_due_at = NULL,
+              suggested_category = NULL,
+              suggestion_confidence = $6,
+              suggestion_source = $7,
+              updated_at = now()
+        WHERE id = $1
+          AND owner_id = $2
+          AND status = 'proposed'
+          AND coalesce(suggestion_source, 'on-device') NOT IN ('url-summary', 'url-summary-failed')`,
+      [
+        row.id,
+        row.owner_id,
+        summary.title.slice(0, 240),
+        summary.markdown,
+        URL_SUMMARY_SOURCE,
+        0.9,
+        URL_SUMMARY_DONE_SOURCE,
+      ]
+    );
+    if ((result.rowCount ?? 0) === 0) return true;
+    await recordUrlSummaryCompletionEvent(row, summary);
+    console.log(`[worker] summarised URL ${row.id} -> ${summary.url}${summary.obsidianPath ? ` obsidian=${summary.obsidianPath}` : ''}`);
+  } catch (err) {
+    await pool.query(
+      `UPDATE public.tasks
+          SET source = $3,
+              suggestion_confidence = 0,
+              suggestion_source = $4,
+              updated_at = now()
+        WHERE id = $1
+          AND owner_id = $2
+          AND status = 'proposed'
+          AND coalesce(suggestion_source, 'on-device') NOT IN ('url-summary', 'url-summary-failed')`,
+      [row.id, row.owner_id, URL_SUMMARY_SOURCE, URL_SUMMARY_FAILED_SOURCE]
+    );
+    await recordUrlSummaryFailureEvent(row, url, err);
+    captureException(err, { op: 'url_summary', task_id: row.id });
+    console.error(`[worker] failed URL summary ${row.id}:`, String(err));
+  }
+  return true;
 }
 
 async function processGitHubAssociations(): Promise<number> {
@@ -1036,12 +1154,13 @@ async function tick(): Promise<number> {
     let interviewResponses = 0;
     let handoffs = 0;
     let githubAssociations = 0;
+    let urlSummaries = 0;
     try {
       localHarnessAttempts = await processApprovedLocalHarnessAttempts();
       interviewResponses = await processApprovedInterviewResponses();
       handoffs = await processAgentHandoffRequests();
       githubAssociations = await processGitHubAssociations();
-      const { rows } = await pool.query(SELECT_SQL, [BATCH]);
+      const { rows } = await pool.query<EnrichmentTaskRow>(SELECT_SQL, [BATCH]);
       if (rows.length === 0) {
         wideEvent('worker.tick', {
           duration_ms: Math.round(performance.now() - started),
@@ -1049,6 +1168,7 @@ async function tick(): Promise<number> {
           interview_responses: interviewResponses,
           handoffs,
           github_associations: githubAssociations,
+          url_summaries: urlSummaries,
           enriched,
           batch_rows: 0,
         });
@@ -1089,6 +1209,11 @@ async function tick(): Promise<number> {
 
   for (const row of rows) {
     try {
+      if (await processUrlSummary(row)) {
+        urlSummaries += 1;
+        enriched += 1;
+        continue;
+      }
       const e = await enrich(
         row.title,
         new Date(),
@@ -1160,6 +1285,7 @@ async function tick(): Promise<number> {
         interview_responses: interviewResponses,
         handoffs,
         github_associations: githubAssociations,
+        url_summaries: urlSummaries,
         enriched,
         batch_rows: rows.length,
       });

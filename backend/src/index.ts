@@ -59,6 +59,7 @@ import {
   signOAuthState,
   verifyOAuthState,
 } from './oauth.js';
+import { URL_SUMMARY_SOURCE, urlOnlyCapture } from './urlSummary.js';
 
 /**
  * Capture backend connector (multi-user, email + password auth).
@@ -129,6 +130,7 @@ function recordFailure(key: string): void {
 function clearFailures(key: string): void {
   failures.delete(key);
 }
+
 
 // --- Auth middleware: opaque session token -> req.ownerId -------------------------------------
 
@@ -1624,21 +1626,23 @@ async function markTaskProposalDecision(
  * Idempotent on the client-generated `id`. Always forced to status=proposed and to the caller's
  * own `owner_id` — extensions can never create or mutate a real todo, or write for another user.
  */
-const CAPTURE_SOURCES = new Set(['share-extension', 'app-intent', 'mac-hotkey', 'capture', 'siri']);
+const CAPTURE_SOURCES = new Set(['share-extension', 'app-intent', 'mac-hotkey', 'capture', 'siri', URL_SUMMARY_SOURCE]);
 
 app.post('/api/capture', requireAuth, async (req: AuthedRequest, res: Response) => {
   const body = req.body ?? {};
   const id: string = typeof body.id === 'string' && body.id ? body.id : randomUUID();
   const rawText: string = (body.raw_text ?? body.title ?? '').toString().trim();
   const url: string | null = typeof body.url === 'string' && body.url ? body.url : null;
-  const source: string = CAPTURE_SOURCES.has(body.source) ? body.source : 'capture';
+  const summaryUrl = urlOnlyCapture(rawText) ?? (!rawText && url ? urlOnlyCapture(url) : null);
+  const requestedSource = CAPTURE_SOURCES.has(body.source) ? body.source : 'capture';
+  const source: string = summaryUrl ? URL_SUMMARY_SOURCE : requestedSource;
   const parentTaskId: string | null =
     typeof body.parent_task_id === 'string' && body.parent_task_id ? body.parent_task_id : null;
 
-  const title = rawText || url || '';
+  const title = summaryUrl || rawText || url || '';
   if (!title) return res.status(400).json({ ok: false, error: 'empty capture' });
 
-  const notes = url && rawText ? url : null; // keep the URL as context when there's also text
+  const notes = !summaryUrl && url && rawText ? url : null; // keep the URL as context when there's also text
 
   const client = await pool.connect();
   try {

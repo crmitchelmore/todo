@@ -17,8 +17,10 @@ const LOCAL = {
 
 const env = import.meta.env ?? {};
 const defaults = env.DEV ? LOCAL : PRODUCTION;
+const backendUrl = env.VITE_BACKEND_URL ?? defaults.backendUrl;
 
 export const config = {
-  backendUrl: env.VITE_BACKEND_URL ?? defaults.backendUrl,
+  backendUrl,
   powersyncUrl: env.VITE_POWERSYNC_URL ?? defaults.powersyncUrl,
+  githubOAuthProbeEnabled: env.VITE_GITHUB_OAUTH_PROBE === '1' || !/^http:\/\/(localhost|127\.0\.0\.1):/i.test(backendUrl),
 } as const;

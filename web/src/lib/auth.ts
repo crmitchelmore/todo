@@ -251,6 +251,7 @@ export async function signInWithPasskey(email?: string): Promise<void> {
 }
 
 export async function oauthProviders(): Promise<{ github: boolean }> {
+  if (!config.githubOAuthProbeEnabled) return { github: false };
   const res = await fetch(`${config.backendUrl}/api/auth/oauth/providers`);
   const body: OAuthProvidersResponse = await res.json().catch(() => ({}));
   return { github: Boolean(res.ok && body.ok && body.github?.configured) };
