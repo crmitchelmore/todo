@@ -38,19 +38,41 @@ enum Theme {
     static var textTertiary: UIColor { light ? UIColor(hex: "8e8374")! : UIColor(white: 1, alpha: 0.34) }
 
     /// Rounded grotesque-flavoured display face (Bricolage stand-in until a bundled font ships).
-    /// Scaled with the user's Dynamic Type setting (clamped so the dense cockpit layout survives
-    /// accessibility sizes); at the default content size this is identical to the fixed size.
+    /// Scaled with the user's Dynamic Type setting using the metrics of the closest text style, so
+    /// each role scales on the right curve; clamped so the dense cockpit survives accessibility sizes.
     static func display(_ size: CGFloat, _ weight: UIFont.Weight = .bold) -> UIFont {
         let base = UIFont.systemFont(ofSize: size, weight: weight)
         let rounded = base.fontDescriptor.withDesign(.rounded).map { UIFont(descriptor: $0, size: size) } ?? base
-        return UIFontMetrics.default.scaledFont(for: rounded, maximumPointSize: size * 1.35)
+        return UIFontMetrics(forTextStyle: displayTextStyle(size)).scaledFont(for: rounded, maximumPointSize: size * 1.35)
     }
 
     /// Monospaced face for metadata (dates, hints, counts) — the JetBrains Mono role. Dynamic-Type
-    /// scaled with a tighter clamp so tabular metadata stays legible without breaking row layout.
+    /// scaled on a metadata-appropriate style with a tighter clamp so tabular rows stay legible.
     static func mono(_ size: CGFloat, _ weight: UIFont.Weight = .medium) -> UIFont {
         let base = UIFont.monospacedSystemFont(ofSize: size, weight: weight)
-        return UIFontMetrics.default.scaledFont(for: base, maximumPointSize: size * 1.3)
+        return UIFontMetrics(forTextStyle: metadataTextStyle(size)).scaledFont(for: base, maximumPointSize: size * 1.3)
+    }
+
+    /// Map a display point size to the closest UIFont.TextStyle so scaling follows the right curve.
+    private static func displayTextStyle(_ size: CGFloat) -> UIFont.TextStyle {
+        switch size {
+        case 28...: return .largeTitle
+        case 22..<28: return .title1
+        case 20..<22: return .title2
+        case 17..<20: return .headline
+        case 15..<17: return .callout
+        case 13..<15: return .subheadline
+        default: return .footnote
+        }
+    }
+
+    private static func metadataTextStyle(_ size: CGFloat) -> UIFont.TextStyle {
+        switch size {
+        case 15...: return .callout
+        case 13..<15: return .subheadline
+        case 11..<13: return .caption1
+        default: return .caption2
+        }
     }
 
     /// Style a button as the primary amber action with dark ink text.
