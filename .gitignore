@@ -19,6 +19,8 @@ web/test-results/
 .env.*
 !.env.example
 !**/.env.example
+!**/*.env.example
+!acceptance/.env.acceptance.example
 *.local
 
 # Logs / OS
