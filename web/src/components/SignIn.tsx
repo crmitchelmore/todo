@@ -30,6 +30,13 @@ export function SignIn({ initialError, onSignedIn }: { initialError?: string | n
   const [busy, setBusy] = useState(false);
   const [mfaChallenge, setMfaChallenge] = useState<string | null>(null);
   const [githubAvailable, setGithubAvailable] = useState(false);
+  const [cooldown, setCooldown] = useState(0); // seconds until a code can be resent (0 = ready)
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setInterval(() => setCooldown((c) => Math.max(0, c - 1)), 1000);
+    return () => clearInterval(t);
+  }, [cooldown]);
 
   useEffect(() => {
     let active = true;
@@ -46,6 +53,7 @@ export function SignIn({ initialError, onSignedIn }: { initialError?: string | n
     setPassword('');
     setError(null);
     setNote(null);
+    setCooldown(0);
   }
 
   async function run(fn: () => Promise<void>, after?: () => void) {
@@ -91,6 +99,7 @@ export function SignIn({ initialError, onSignedIn }: { initialError?: string | n
     if (!email.trim()) return setError('Enter your email.');
     run(() => requestEmailCode(email), () => {
       setSent(true);
+      setCooldown(60);
       setNote(`We sent a 6-digit code to ${email.trim()}.`);
     });
   }
@@ -100,12 +109,29 @@ export function SignIn({ initialError, onSignedIn }: { initialError?: string | n
     run(() => verifyEmailCode(email, code), onSignedIn);
   }
 
+  // Re-issue a sign-in / reset code. Available once the 60s cooldown elapses (matches the
+  // per-ip+email issuance throttle) so users aren't stranded when an email is slow to arrive.
+  function handleResend() {
+    if (cooldown > 0 || busy) return;
+    const request = view === 'forgot' ? requestPasswordReset : requestEmailCode;
+    run(() => request(email), () => {
+      setCooldown(60);
+      setNote(`A new code is on its way to ${email.trim()}.`);
+    });
+  }
+  const resendButton = (
+    <button type="button" className="signin-link" onClick={handleResend} disabled={busy || cooldown > 0}>
+      {cooldown > 0 ? `Resend code in ${cooldown}s` : 'Resend code'}
+    </button>
+  );
+
   // --- forgot password --------------------------------------------------------------------------
   function handleSendReset(e: React.FormEvent) {
     e.preventDefault();
     if (!email.trim()) return setError('Enter your email.');
     run(() => requestPasswordReset(email), () => {
       setSent(true);
+      setCooldown(60);
       setNote(`If an account exists for ${email.trim()}, a reset code is on its way.`);
     });
   }
@@ -237,7 +263,8 @@ export function SignIn({ initialError, onSignedIn }: { initialError?: string | n
                 <button className="signin-submit" type="submit" disabled={busy}>
                   {busy ? 'Verifying…' : 'Sign In'}
                 </button>
-                <button type="button" className="signin-link" onClick={() => { setSent(false); setNote(null); }}>
+                {resendButton}
+                <button type="button" className="signin-link" onClick={() => { setSent(false); setNote(null); setCooldown(0); }}>
                   Use a different email
                 </button>
               </form>
@@ -271,6 +298,7 @@ export function SignIn({ initialError, onSignedIn }: { initialError?: string | n
                 <button className="signin-submit" type="submit" disabled={busy}>
                   {busy ? 'Resetting…' : 'Reset & Sign In'}
                 </button>
+                {resendButton}
               </form>
             )}
             <button type="button" className="signin-alt" onClick={() => go('password')}>

@@ -22,8 +22,11 @@ final class CodeAuthViewController: UIViewController {
     private let codeField = UITextField()
     private let passwordField = UITextField()
     private let submit = UIButton(type: .system)
+    private let resend = UIButton(type: .system)
     private let status = UILabel()
     private let spinner = UIActivityIndicatorView(style: .medium)
+    private var cooldownTask: Task<Void, Never>?
+    private var cooldown = 0
 
     init(auth: AuthStore, purpose: Purpose, onSignedIn: @escaping () -> Void) {
         self.auth = auth
@@ -70,6 +73,12 @@ final class CodeAuthViewController: UIViewController {
         submit.addTarget(self, action: #selector(submitTapped), for: .touchUpInside)
         submit.translatesAutoresizingMaskIntoConstraints = false
 
+        resend.titleLabel?.font = Theme.mono(13, .medium)
+        resend.setTitleColor(Theme.textSecondary, for: .normal)
+        resend.setTitleColor(Theme.textTertiary, for: .disabled)
+        resend.addTarget(self, action: #selector(resendTapped), for: .touchUpInside)
+        resend.isHidden = true
+
         status.font = Theme.mono(13)
         status.textColor = Theme.textSecondary
         status.textAlignment = .center
@@ -77,7 +86,7 @@ final class CodeAuthViewController: UIViewController {
         status.isHidden = true
         spinner.hidesWhenStopped = true
 
-        let stack = UIStackView(arrangedSubviews: [titleLabel, subtitle, emailField, codeField, passwordField, submit, spinner, status])
+        let stack = UIStackView(arrangedSubviews: [titleLabel, subtitle, emailField, codeField, passwordField, submit, resend, spinner, status])
         stack.axis = .vertical
         stack.alignment = .fill
         stack.spacing = 16
@@ -128,6 +137,7 @@ final class CodeAuthViewController: UIViewController {
             emailField.isHidden = false
             codeField.isHidden = true
             passwordField.isHidden = true
+            resend.isHidden = true
             submit.setTitle(purpose == .login ? "Send me a code" : "Send reset code", for: .normal)
             emailField.becomeFirstResponder()
         case .enterCode:
@@ -135,6 +145,7 @@ final class CodeAuthViewController: UIViewController {
             emailField.isHidden = true
             codeField.isHidden = false
             passwordField.isHidden = purpose == .login
+            resend.isHidden = false
             submit.setTitle(purpose == .login ? "Sign In" : "Reset & Sign In", for: .normal)
             codeField.becomeFirstResponder()
         }
@@ -142,6 +153,42 @@ final class CodeAuthViewController: UIViewController {
 
     @objc private func cancelTapped() {
         dismiss(animated: true)
+    }
+
+    /// Re-issue the one-time code once the 60s cooldown elapses (a slow email shouldn't strand
+    /// the user). The countdown matches the backend's per-ip+email issuance throttle window.
+    private func startCooldown() {
+        cooldown = 60
+        updateResend()
+        cooldownTask?.cancel()
+        cooldownTask = Task { [weak self] in
+            while true {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self, !Task.isCancelled else { return }
+                self.cooldown = max(0, self.cooldown - 1)
+                self.updateResend()
+                if self.cooldown == 0 { return }
+            }
+        }
+    }
+
+    private func updateResend() {
+        resend.setTitle(cooldown > 0 ? "Resend code in \(cooldown)s" : "Resend code", for: .normal)
+        resend.isEnabled = cooldown == 0 && submit.isEnabled
+    }
+
+    @objc private func resendTapped() {
+        guard cooldown == 0, !email.isEmpty else { return }
+        setBusy(true)
+        Task {
+            do {
+                if purpose == .login { try await auth.requestEmailCode(email: email) }
+                else { try await auth.requestPasswordReset(email: email) }
+                setBusy(false)
+                startCooldown()
+                show("A new code is on its way.", isError: false)
+            } catch { fail(error) }
+        }
     }
 
     @objc private func submitTapped() {
@@ -160,6 +207,7 @@ final class CodeAuthViewController: UIViewController {
                     setBusy(false)
                     phase = .enterCode
                     render()
+                    startCooldown()
                     show("Code sent. Check your inbox.", isError: false)
                 } catch { fail(error) }
             }
@@ -197,6 +245,7 @@ final class CodeAuthViewController: UIViewController {
         codeField.isEnabled = !busy
         passwordField.isEnabled = !busy
         submit.alpha = busy ? 0.6 : 1
+        updateResend()
     }
 
     private func show(_ message: String, isError: Bool = true) {
