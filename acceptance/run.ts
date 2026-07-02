@@ -13,7 +13,7 @@ const SUITES: Record<string, { kind: "scenario" | "node-test"; path: string; nee
   sync: { kind: "scenario", path: "scenarios/sync.ts", needs: "uc" },
   mac: { kind: "scenario", path: "scenarios/mac.ts", needs: "uc" },
   ios: { kind: "scenario", path: "scenarios/ios.ts", needs: "uc" },
-  evals: { kind: "node-test", path: "evals/run.ts", needs: "none" },
+  evals: { kind: "scenario", path: "evals/run.ts", needs: "none" },
 };
 
 function ucConfigured(): boolean {
