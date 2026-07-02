@@ -314,6 +314,7 @@ final class CaptureViewModel {
     }
 
     func capture(_ text: String, attachments: [TaskAttachmentDraft] = [], options: TaskStore.CaptureOptions = .researchOnly) {
+        Haptics.tap()
         if ingestIfList(text, options: options) { return }
         store.capture(text, attachments: attachments, options: options) // instant, non-blocking
         refreshSyncSummary()
@@ -332,7 +333,10 @@ final class CaptureViewModel {
 
     func confirm(_ item: TaskItem, title: String, dueAt: Date?, category: String?, tags: [String]? = nil) {
         Task {
-            try? await store.confirm(id: item.id, title: title, dueAt: dueAt, category: category, tags: tags)
+            do {
+                try await store.confirm(id: item.id, title: title, dueAt: dueAt, category: category, tags: tags)
+                Haptics.success() // fires only once the write actually lands (mint = truly done)
+            } catch {}
             refreshTaskSnapshots(reason: "confirm")
             refreshSyncSummary()
         }
@@ -355,24 +359,27 @@ final class CaptureViewModel {
 
     func confirmDetail(_ item: TaskItem, form: IOSTaskDetailForm) {
         Task {
-            try? await store.updateTask(
-                id: item.id,
-                title: form.title,
-                notes: form.notes,
-                dueAt: form.dueAt,
-                category: form.category,
-                tags: form.tags,
-                priority: form.priority
-            )
-            try? await store.confirm(
-                id: item.id,
-                title: form.title,
-                dueAt: form.dueAt,
-                category: form.category,
-                tags: form.tags,
-                notes: form.notes,
-                priority: form.priority
-            )
+            do {
+                try await store.updateTask(
+                    id: item.id,
+                    title: form.title,
+                    notes: form.notes,
+                    dueAt: form.dueAt,
+                    category: form.category,
+                    tags: form.tags,
+                    priority: form.priority
+                )
+                try await store.confirm(
+                    id: item.id,
+                    title: form.title,
+                    dueAt: form.dueAt,
+                    category: form.category,
+                    tags: form.tags,
+                    notes: form.notes,
+                    priority: form.priority
+                )
+                Haptics.success()
+            } catch {}
             refreshTaskSnapshots(reason: "confirm detail")
             refreshSyncSummary()
         }
@@ -388,7 +395,10 @@ final class CaptureViewModel {
 
     func setDone(_ item: TaskItem, _ done: Bool) {
         Task {
-            try? await store.setDone(id: item.id, done: done)
+            do {
+                try await store.setDone(id: item.id, done: done)
+                if done { Haptics.success() } // completion confirmed by the write, not optimistic
+            } catch {}
             refreshSyncSummary()
         }
     }

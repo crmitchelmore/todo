@@ -23,8 +23,11 @@ final class CodeAuthViewController: NSViewController {
     private let passwordField = NSSecureTextField()
     private let submit = NSButton(title: "", target: nil, action: nil)
     private let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
+    private let resend = NSButton(title: "", target: nil, action: nil)
     private let status = NSTextField(labelWithString: "")
     private let spinner = NSProgressIndicator()
+    private var cooldownTask: Task<Void, Never>?
+    private var cooldown = 0
 
     init(auth: AuthStore, purpose: Purpose, onSignedIn: @escaping () -> Void) {
         self.auth = auth
@@ -75,6 +78,13 @@ final class CodeAuthViewController: NSViewController {
         cancelButton.target = self
         cancelButton.action = #selector(cancelTapped)
 
+        resend.isBordered = false
+        resend.font = Theme.mono(12)
+        resend.contentTintColor = Theme.textSecondary
+        resend.target = self
+        resend.action = #selector(resendTapped)
+        resend.isHidden = true
+
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
@@ -90,7 +100,7 @@ final class CodeAuthViewController: NSViewController {
         buttons.orientation = .horizontal
         buttons.spacing = 12
 
-        let stack = NSStackView(views: [titleLabel, subtitle, emailField, codeField, passwordField, buttons, spinner, status])
+        let stack = NSStackView(views: [titleLabel, subtitle, emailField, codeField, passwordField, buttons, resend, spinner, status])
         stack.orientation = .vertical
         stack.alignment = .centerX
         stack.spacing = 14
@@ -117,6 +127,7 @@ final class CodeAuthViewController: NSViewController {
             emailField.isHidden = false
             codeField.isHidden = true
             passwordField.isHidden = true
+            resend.isHidden = true
             submit.title = purpose == .login ? "Send me a code" : "Send reset code"
             view.window?.makeFirstResponder(emailField)
         case .enterCode:
@@ -124,6 +135,7 @@ final class CodeAuthViewController: NSViewController {
             emailField.isHidden = true
             codeField.isHidden = false
             passwordField.isHidden = purpose == .login
+            resend.isHidden = false
             submit.title = purpose == .login ? "Sign In" : "Reset & Sign In"
             view.window?.makeFirstResponder(codeField)
         }
@@ -132,6 +144,43 @@ final class CodeAuthViewController: NSViewController {
     @objc private func cancelTapped() {
         CaptureDiagnostics.record(category: "ui", name: "auth.code.cancel", message: "Code auth sheet cancelled", fields: ["purpose": purposeName])
         presentingViewController?.dismiss(self)
+    }
+
+    /// Re-issue the one-time code once the 60s cooldown elapses; the countdown matches the
+    /// backend's per-ip+email issuance throttle so a slow email never strands the user.
+    private func startCooldown() {
+        cooldown = 60
+        updateResend()
+        cooldownTask?.cancel()
+        cooldownTask = Task { [weak self] in
+            while true {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self, !Task.isCancelled else { return }
+                self.cooldown = max(0, self.cooldown - 1)
+                self.updateResend()
+                if self.cooldown == 0 { return }
+            }
+        }
+    }
+
+    private func updateResend() {
+        resend.title = cooldown > 0 ? "Resend code in \(cooldown)s" : "Resend code"
+        resend.isEnabled = cooldown == 0 && submit.isEnabled
+    }
+
+    @objc private func resendTapped() {
+        guard cooldown == 0, !email.isEmpty else { return }
+        CaptureDiagnostics.record(category: "ui", name: "auth.code.resend.clicked", message: "Code resend clicked", fields: ["purpose": purposeName])
+        setBusy(true)
+        Task {
+            do {
+                if purpose == .login { try await auth.requestEmailCode(email: email) }
+                else { try await auth.requestPasswordReset(email: email) }
+                setBusy(false)
+                startCooldown()
+                show("A new code is on its way.", isError: false)
+            } catch { fail(error) }
+        }
     }
 
     @objc private func submitTapped() {
@@ -153,6 +202,7 @@ final class CodeAuthViewController: NSViewController {
                     setBusy(false)
                     phase = .enterCode
                     render()
+                    startCooldown()
                     show("Code sent. Check your inbox.", isError: false)
                 } catch {
                     CaptureDiagnostics.actionFailed(context, startedAt: startedAt, error: error)
@@ -201,6 +251,7 @@ final class CodeAuthViewController: NSViewController {
         emailField.isEnabled = !busy
         codeField.isEnabled = !busy
         passwordField.isEnabled = !busy
+        updateResend()
     }
 
     private func show(_ message: String, isError: Bool = true) {
