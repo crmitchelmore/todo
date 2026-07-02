@@ -51,6 +51,11 @@
   --shadow-pop: 0 24px 60px -20px rgba(0, 0, 0, 0.8), 0 0 0 1px var(--line);
   --ring: 0 0 0 1px var(--signal-line), 0 0 0 5px var(--signal-soft);
 
+  /* — Motion (command-app cadence: fast, consistent, one easing) — */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur: 180ms;
+
   font-family: var(--font-ui);
   color-scheme: dark;
   -webkit-font-smoothing: antialiased;
@@ -121,6 +126,9 @@ body {
     linear-gradient(180deg, var(--bg-grad-1) 0%, var(--bg) 30%, var(--bg-grad-2) 100%);
   background-attachment: fixed;
   min-height: 100vh;
+  /* Data app: align all numerals so counts, dates and badges never jitter as they update. */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
 }
 
 /* Fine grain overlay for atmosphere — cheap, fixed, non-interactive. */
@@ -136,6 +144,19 @@ body::before {
 }
 
 ::selection { background: var(--signal-soft); color: #fff; }
+
+/* Keyboard-first focus: a single high-contrast amber ring on keyboard focus only (never on
+   mouse/touch), so every interactive surface has a consistent, visible focus state. */
+:focus:not(:focus-visible) { outline: none; }
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible,
+[role='button']:focus-visible,
+[tabindex]:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+  border-radius: var(--r-sm);
+}
 
 /* ============================ Shell ============================ */
 .app {
@@ -597,7 +618,7 @@ header h1::after {
   border: 1px solid var(--line-strong);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-card);
-  transition: box-shadow 0.25s, border-color 0.25s;
+  transition: box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 .capture-bar.dragging {
   border-color: var(--signal-line);

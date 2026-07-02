@@ -38,15 +38,19 @@ enum Theme {
     static var textTertiary: UIColor { light ? UIColor(hex: "8e8374")! : UIColor(white: 1, alpha: 0.34) }
 
     /// Rounded grotesque-flavoured display face (Bricolage stand-in until a bundled font ships).
+    /// Scaled with the user's Dynamic Type setting (clamped so the dense cockpit layout survives
+    /// accessibility sizes); at the default content size this is identical to the fixed size.
     static func display(_ size: CGFloat, _ weight: UIFont.Weight = .bold) -> UIFont {
         let base = UIFont.systemFont(ofSize: size, weight: weight)
-        guard let d = base.fontDescriptor.withDesign(.rounded) else { return base }
-        return UIFont(descriptor: d, size: size)
+        let rounded = base.fontDescriptor.withDesign(.rounded).map { UIFont(descriptor: $0, size: size) } ?? base
+        return UIFontMetrics.default.scaledFont(for: rounded, maximumPointSize: size * 1.35)
     }
 
-    /// Monospaced face for metadata (dates, hints, counts) — the JetBrains Mono role.
+    /// Monospaced face for metadata (dates, hints, counts) — the JetBrains Mono role. Dynamic-Type
+    /// scaled with a tighter clamp so tabular metadata stays legible without breaking row layout.
     static func mono(_ size: CGFloat, _ weight: UIFont.Weight = .medium) -> UIFont {
-        .monospacedSystemFont(ofSize: size, weight: weight)
+        let base = UIFont.monospacedSystemFont(ofSize: size, weight: weight)
+        return UIFontMetrics.default.scaledFont(for: base, maximumPointSize: size * 1.3)
     }
 
     /// Style a button as the primary amber action with dark ink text.
@@ -91,4 +95,14 @@ enum Theme {
         field.layer.borderColor = hairline.cgColor
         field.borderStyle = .none
     }
+}
+
+/// Subtle, restrained haptics — reserved for meaningful moments (capture, confirm, complete),
+/// never per-scroll or per-focus. Respects the system Haptics setting automatically.
+@MainActor
+enum Haptics {
+    /// A light tap on capture submit — the "it landed" confirmation of the hot path.
+    static func tap() { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+    /// Success notification when a proposal is confirmed or a task is completed.
+    static func success() { UINotificationFeedbackGenerator().notificationOccurred(.success) }
 }

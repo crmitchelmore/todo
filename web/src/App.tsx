@@ -94,10 +94,8 @@ export default function App() {
 
   useEffect(() => {
     if (notifications.length === 0 || !('Notification' in window)) return;
-    if (Notification.permission === 'default') {
-      void Notification.requestPermission();
-      return;
-    }
+    // Deliver system notifications only if the user has already opted in. We never prompt on
+    // load — permission is requested from an explicit user action (opening the notifications panel).
     if (Notification.permission !== 'granted') return;
     const delivered = new Set(JSON.parse(localStorage.getItem('capture.deliveredNotifications') ?? '[]') as string[]);
     const next = new Set(delivered);
@@ -112,6 +110,18 @@ export default function App() {
     }
     localStorage.setItem('capture.deliveredNotifications', JSON.stringify([...next].slice(-200)));
   }, [notifications]);
+
+  // Opening the notifications panel is an explicit opt-in moment — the only place we ask for
+  // system-notification permission, so the app never fires a permission prompt on load.
+  function toggleNotifications() {
+    setShowNotifications((s) => {
+      const next = !s;
+      if (next && 'Notification' in window && Notification.permission === 'default') {
+        void Notification.requestPermission();
+      }
+      return next;
+    });
+  }
 
   // Group the active list by date bucket (already sorted by due_at from the query).
   const groups = useMemo(() => {
@@ -136,7 +146,7 @@ export default function App() {
         <button className="tags-toggle" onClick={() => setShowSettings((s) => !s)}>
           {showSettings ? 'Close settings' : 'Settings'}
         </button>
-        <button className="notification-toggle" onClick={() => setShowNotifications((s) => !s)} aria-label="Notification history">
+        <button className="notification-toggle" onClick={toggleNotifications} aria-label="Notification history">
           <span>Notifications</span>
           {notifications.length > 0 && <strong>{notifications.length}</strong>}
         </button>

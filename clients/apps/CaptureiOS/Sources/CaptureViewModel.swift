@@ -314,6 +314,7 @@ final class CaptureViewModel {
     }
 
     func capture(_ text: String, attachments: [TaskAttachmentDraft] = [], options: TaskStore.CaptureOptions = .researchOnly) {
+        Haptics.tap()
         if ingestIfList(text, options: options) { return }
         store.capture(text, attachments: attachments, options: options) // instant, non-blocking
         refreshSyncSummary()
@@ -331,6 +332,7 @@ final class CaptureViewModel {
     }
 
     func confirm(_ item: TaskItem, title: String, dueAt: Date?, category: String?, tags: [String]? = nil) {
+        Haptics.success()
         Task {
             try? await store.confirm(id: item.id, title: title, dueAt: dueAt, category: category, tags: tags)
             refreshTaskSnapshots(reason: "confirm")
@@ -354,6 +356,7 @@ final class CaptureViewModel {
     }
 
     func confirmDetail(_ item: TaskItem, form: IOSTaskDetailForm) {
+        Haptics.success()
         Task {
             try? await store.updateTask(
                 id: item.id,
@@ -387,6 +390,7 @@ final class CaptureViewModel {
     }
 
     func setDone(_ item: TaskItem, _ done: Bool) {
+        if done { Haptics.success() }
         Task {
             try? await store.setDone(id: item.id, done: done)
             refreshSyncSummary()
