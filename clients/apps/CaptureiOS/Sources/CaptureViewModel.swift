@@ -12,7 +12,7 @@ struct CaptureSyncSummary: Equatable {
     static let checking = CaptureSyncSummary(
         state: .checking,
         title: "sync checking",
-        detail: "Comparing local cache with Railway."
+        detail: "Comparing local cache with the sync service."
     )
 
     static func offline(_ message: String) -> CaptureSyncSummary {

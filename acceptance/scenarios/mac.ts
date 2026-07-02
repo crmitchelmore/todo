@@ -62,7 +62,7 @@ export async function run(): Promise<{ pass: number; fail: number; skip: number;
     await mac.execSsh("tar xzf /tmp/capture/capture-mac.tgz -C /tmp/capture/mac");
     report.record({ name: "upload-mac-app", status: "pass", detail: `${(bytes.byteLength / 1e6).toFixed(1)} MB` });
 
-    await mac.execSsh(`open /tmp/capture/mac/CaptureMac.app`);
+    await mac.execSsh(`open /tmp/capture/mac/CaptureMac.app --env CAPTURE_DISABLE_UPDATER=1`);
     await sleep(9000);
     const present = await captureWindowPresent(mac);
     const shot = await (async () => { await mac.execSsh(`osascript -e 'tell application "Capture" to activate' >/dev/null 2>&1 || true`); await sleep(600); return mac.screenshot.takeCompressed(); })();

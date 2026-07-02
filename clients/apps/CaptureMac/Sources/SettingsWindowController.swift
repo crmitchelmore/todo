@@ -470,7 +470,7 @@ private struct SettingsView: View {
 
     private var diagnosticsSubhead: String {
         guard let serverDiagnostics, let localDiagnostics else {
-            return "Compares this Mac's local SQLite cache with the authenticated Railway account."
+            return "Compares this Mac's local SQLite cache with the authenticated sync-service account."
         }
         if localDiagnostics.ownerId != serverDiagnostics.owner.id {
             return "This Mac is stamping local rows with a different owner ID than the current server session."
