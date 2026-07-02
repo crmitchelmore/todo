@@ -1,0 +1,26 @@
+{
+  "name": "capture-acceptance",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Repeatable acceptance + eval suite for Capture (web, macOS, iOS) driven through use.computer sandboxes.",
+  "scripts": {
+    "smoke:uc": "tsx src/harness/smoke.ts",
+    "test": "tsx --test tests/*.test.ts",
+    "test:web": "tsx --test tests/web.*.test.ts",
+    "test:mac": "tsx --test tests/mac.*.test.ts",
+    "test:ios": "tsx --test tests/ios.*.test.ts",
+    "test:sync": "tsx --test tests/sync.*.test.ts",
+    "evals": "tsx evals/run.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "chrono-node": "^2.9.1",
+    "use-computer-sdk": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

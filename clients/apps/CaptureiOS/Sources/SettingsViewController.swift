@@ -333,7 +333,7 @@ final class SettingsViewController: UIViewController {
 
     private func loadDiagnostics() {
         diagnosticsStatus.text = "Checking sync state…"
-        diagnosticsDetail.text = "Comparing this iPhone's local cache with the authenticated Railway account."
+        diagnosticsDetail.text = "Comparing this iPhone's local cache with the authenticated sync-service account."
         diagnosticsMeta.text = ""
         diagnosticsRefresh.isEnabled = false
         Task { [weak self] in

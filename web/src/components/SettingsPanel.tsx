@@ -185,7 +185,7 @@ function SyncDiagnosticsCard({
       <div className="settings-card-title">
         <div>
           <h3>Sync diagnostics</h3>
-          <p>Confirm this web session, the local cache and Railway are looking at the same account.</p>
+          <p>Confirm this web session, the local cache and the sync service are looking at the same account.</p>
         </div>
         <button className="signin-alt" type="button" disabled={busy} onClick={onRefresh}>
           {busy ? 'Checking…' : 'Refresh'}
