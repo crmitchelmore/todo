@@ -43,6 +43,52 @@ test('adds location to location-aware queries', () => {
   assert.equal(query, 'Find a pharmacy near me Headingley');
 });
 
+test('fetches a pasted URL directly instead of requiring a search endpoint', async () => {
+  const calls: string[] = [];
+  const html = `<!doctype html><html><head>
+    <title>Write Code, Not Specs</title>
+    <meta name="description" content="Why executable code beats speculative specs.">
+  </head><body>...</body></html>`;
+  const response = new Response(html, { status: 200, headers: { 'content-type': 'text/html' } });
+
+  const discovery = await discoverTaskContext(
+    { id: 'task-url', ownerId: 'owner-1', title: 'https://softwaredoug.com/blog/2026/07/04/write-code-not-specs.html' },
+    {
+      env: {},
+      force: true,
+      instructions: 'Automatically research this newly captured item and identify the next useful action.',
+      fetchImpl: async (input) => {
+        calls.push(String(input));
+        return response;
+      },
+    },
+  );
+
+  assert.ok(discovery);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0], 'https://softwaredoug.com/blog/2026/07/04/write-code-not-specs.html');
+  assert.equal(discovery.web.source, 'direct_url');
+  assert.equal(discovery.web.results[0].title, 'Write Code, Not Specs');
+  assert.equal(discovery.web.results[0].snippet, 'Why executable code beats speculative specs.');
+  assert.ok(discovery.nextActions.some((action) => action.includes('Review top result: Write Code, Not Specs')));
+});
+
+test('suggests opening the link directly when a pasted URL cannot be fetched', async () => {
+  const discovery = await discoverTaskContext(
+    { id: 'task-url-err', ownerId: 'owner-1', title: 'https://example.invalid/post' },
+    {
+      env: {},
+      force: true,
+      fetchImpl: async () => new Response('nope', { status: 503 }),
+    },
+  );
+
+  assert.ok(discovery);
+  assert.equal(discovery.web.source, 'error');
+  assert.deepEqual(discovery.web.results, []);
+  assert.ok(discovery.nextActions.some((action) => action.includes('Open the linked page directly: https://example.invalid/post')));
+});
+
 test('discovers web context through configured endpoint', async () => {
   const calls: string[] = [];
   const response = new Response(JSON.stringify({
@@ -74,10 +120,10 @@ test('discovers web context through configured endpoint', async () => {
   assert.ok(discovery.confidence > 0.7);
 });
 
-test('falls back to a search action when web search is not configured', async () => {
+test('falls back to a manual search action when built-in search is disabled and unconfigured', async () => {
   const discovery = await discoverTaskContext(
     { id: 'task-2', ownerId: 'owner-1', title: 'Compare project management tools' },
-    { env: {} },
+    { env: { CAPTURE_WEB_SEARCH_DISABLE_BUILTIN: '1' } },
   );
 
   assert.ok(discovery);
@@ -86,10 +132,50 @@ test('falls back to a search action when web search is not configured', async ()
   assert.ok(discovery.nextActions[0].includes('Run web search'));
 });
 
+test('uses built-in DuckDuckGo search when no endpoint is configured', async () => {
+  const calls: string[] = [];
+  const html = `
+    <div class="result result--ad">
+      <a class="result__a" rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fduckduckgo.com%2Fy.js%3Fad_domain%3Dsponsor.example&rut=z">Sponsored: Buy PM Tools</a>
+      <a class="result__snippet">A paid advert that should be filtered out.</a>
+    </div>
+    <div class="result results_links_deep web-result">
+      <a class="result__a" rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Ftools&rut=x">Best PM Tools 2026</a>
+      <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Ftools">A hands-on comparison of project management tools.</a>
+    </div>
+    <div class="result results_links_deep web-result">
+      <a class="result__a" rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org%2Freview&rut=y">Second Result</a>
+      <a class="result__snippet">Another useful overview.</a>
+    </div>`;
+
+  const discovery = await discoverTaskContext(
+    { id: 'task-builtin', ownerId: 'owner-1', title: 'Compare project management tools' },
+    {
+      env: {},
+      fetchImpl: async (input) => {
+        calls.push(String(input));
+        return new Response(html, { status: 200, headers: { 'content-type': 'text/html' } });
+      },
+    },
+  );
+
+  assert.ok(discovery);
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].startsWith('https://html.duckduckgo.com/html/?q='));
+  assert.equal(discovery.web.source, 'builtin');
+  assert.equal(discovery.web.results.length, 2);
+  assert.ok(discovery.web.results.every((result) => !result.url?.includes('duckduckgo.com')));
+  assert.equal(discovery.web.results[0].title, 'Best PM Tools 2026');
+  assert.equal(discovery.web.results[0].url, 'https://example.com/tools');
+  assert.equal(discovery.web.results[0].snippet, 'A hands-on comparison of project management tools.');
+  assert.equal(discovery.web.results[1].url, 'https://example.org/review');
+  assert.ok(discovery.nextActions.some((action) => action.includes('Review top result: Best PM Tools 2026')));
+});
+
 test('explicit handoff forces discovery for ordinary task titles', async () => {
   const discovery = await discoverTaskContext(
     { id: 'task-3', ownerId: 'owner-1', title: 'Prepare board deck' },
-    { env: {}, force: true, instructions: 'find the latest metrics to include' },
+    { env: { CAPTURE_WEB_SEARCH_DISABLE_BUILTIN: '1' }, force: true, instructions: 'find the latest metrics to include' },
   );
 
   assert.ok(discovery);
@@ -102,7 +188,7 @@ test('agent handoff discovery carries user memory context into shopping research
   const discovery = await discoverTaskContext(
     { id: 'task-4', ownerId: 'owner-1', title: 'Need to buy a wok' },
     {
-      env: {},
+      env: { CAPTURE_WEB_SEARCH_DISABLE_BUILTIN: '1' },
       force: true,
       instructions: 'research options',
       memories: [
@@ -200,7 +286,7 @@ test('agent handoff discovery generalises user memory context across task domain
     const discovery = await discoverTaskContext(
       { id: `task-${item.title}`, ownerId: 'owner-1', title: item.title },
       {
-        env: {},
+        env: { CAPTURE_WEB_SEARCH_DISABLE_BUILTIN: '1' },
         force: true,
         memories: [{
           content: item.memory,
