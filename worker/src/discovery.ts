@@ -21,7 +21,7 @@ export interface WebSearchResult {
 }
 
 export interface WebContext {
-  source: 'configured_endpoint' | 'direct_url' | 'not_configured' | 'error';
+  source: 'configured_endpoint' | 'direct_url' | 'builtin' | 'not_configured' | 'error';
   query: string;
   results: WebSearchResult[];
   error?: string;
@@ -57,6 +57,7 @@ export interface DiscoveryEnv {
   readonly CAPTURE_WEB_SEARCH_ENDPOINT?: string;
   readonly CAPTURE_WEB_SEARCH_API_KEY?: string;
   readonly CAPTURE_WEB_SEARCH_TIMEOUT_MS?: string;
+  readonly CAPTURE_WEB_SEARCH_DISABLE_BUILTIN?: string;
 }
 
 const WEB_DISCOVERY_HINTS = [
@@ -158,7 +159,10 @@ export async function discoverTaskContext(
 async function fetchWebContext(query: string, env: DiscoveryEnv, fetchImpl: FetchLike): Promise<WebContext> {
   const endpoint = nonEmpty(env.CAPTURE_WEB_SEARCH_ENDPOINT);
   if (!endpoint) {
-    return { source: 'not_configured', query, results: [] };
+    if (nonEmpty(env.CAPTURE_WEB_SEARCH_DISABLE_BUILTIN)) {
+      return { source: 'not_configured', query, results: [] };
+    }
+    return fetchBuiltinSearch(query, env, fetchImpl);
   }
 
   const url = new URL(endpoint);
@@ -201,6 +205,75 @@ function parseWebResults(json: unknown): WebSearchResult[] {
     });
   }
   return out;
+}
+
+const BUILTIN_SEARCH_ENDPOINT = 'https://html.duckduckgo.com/html/';
+const BROWSER_USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+async function fetchBuiltinSearch(query: string, env: DiscoveryEnv, fetchImpl: FetchLike): Promise<WebContext> {
+  const timeoutMs = toPositiveInt(env.CAPTURE_WEB_SEARCH_TIMEOUT_MS) ?? 4000;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const url = `${BUILTIN_SEARCH_ENDPOINT}?q=${encodeURIComponent(query)}`;
+    const response = await fetchImpl(url, {
+      headers: { Accept: 'text/html', 'User-Agent': BROWSER_USER_AGENT },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      return { source: 'error', query, results: [], error: `HTTP ${response.status}` };
+    }
+    const html = (await response.text()).slice(0, HTML_MAX_PARSE_BYTES);
+    return { source: 'builtin', query, results: parseDuckDuckGoResults(html).slice(0, 5) };
+  } catch (err) {
+    return { source: 'error', query, results: [], error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function parseDuckDuckGoResults(html: string): WebSearchResult[] {
+  const results: WebSearchResult[] = [];
+  const linkPattern = /<a[^>]+class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  for (let match = linkPattern.exec(html); match && results.length < 10; match = linkPattern.exec(html)) {
+    const url = decodeDuckDuckGoHref(match[1]);
+    const title = stripHtmlTags(match[2]);
+    if (!url || !title) continue;
+    results.push({ title, url, snippet: nextSnippetAfter(html, linkPattern.lastIndex) });
+  }
+  return results;
+}
+
+function nextSnippetAfter(html: string, fromIndex: number): string | null {
+  const snippetPattern = /<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
+  snippetPattern.lastIndex = fromIndex;
+  const match = snippetPattern.exec(html);
+  return match ? stripHtmlTags(match[1]) : null;
+}
+
+function decodeDuckDuckGoHref(href: string): string | null {
+  try {
+    const wrapper = new URL(href.startsWith('//') ? `https:${href}` : href, 'https://duckduckgo.com');
+    // Organic results are wrapped as /l/?uddg=<target>; sponsored ads use /y.js redirects.
+    const uddg = wrapper.searchParams.get('uddg');
+    const target = uddg ?? (isDuckDuckGoHost(wrapper.hostname) ? null : wrapper.toString());
+    if (!target) return null;
+    const resolved = new URL(target);
+    if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') return null;
+    if (isDuckDuckGoHost(resolved.hostname)) return null;
+    return resolved.toString();
+  } catch {
+    return null;
+  }
+}
+
+function isDuckDuckGoHost(hostname: string): boolean {
+  return hostname === 'duckduckgo.com' || hostname.endsWith('.duckduckgo.com');
+}
+
+function stripHtmlTags(html: string): string | null {
+  return normalizeHtmlText(html.replace(/<[^>]+>/g, ' '));
 }
 
 const HTML_MAX_PARSE_BYTES = 200_000;
