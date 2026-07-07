@@ -43,6 +43,52 @@ test('adds location to location-aware queries', () => {
   assert.equal(query, 'Find a pharmacy near me Headingley');
 });
 
+test('fetches a pasted URL directly instead of requiring a search endpoint', async () => {
+  const calls: string[] = [];
+  const html = `<!doctype html><html><head>
+    <title>Write Code, Not Specs</title>
+    <meta name="description" content="Why executable code beats speculative specs.">
+  </head><body>...</body></html>`;
+  const response = new Response(html, { status: 200, headers: { 'content-type': 'text/html' } });
+
+  const discovery = await discoverTaskContext(
+    { id: 'task-url', ownerId: 'owner-1', title: 'https://softwaredoug.com/blog/2026/07/04/write-code-not-specs.html' },
+    {
+      env: {},
+      force: true,
+      instructions: 'Automatically research this newly captured item and identify the next useful action.',
+      fetchImpl: async (input) => {
+        calls.push(String(input));
+        return response;
+      },
+    },
+  );
+
+  assert.ok(discovery);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0], 'https://softwaredoug.com/blog/2026/07/04/write-code-not-specs.html');
+  assert.equal(discovery.web.source, 'direct_url');
+  assert.equal(discovery.web.results[0].title, 'Write Code, Not Specs');
+  assert.equal(discovery.web.results[0].snippet, 'Why executable code beats speculative specs.');
+  assert.ok(discovery.nextActions.some((action) => action.includes('Review top result: Write Code, Not Specs')));
+});
+
+test('suggests opening the link directly when a pasted URL cannot be fetched', async () => {
+  const discovery = await discoverTaskContext(
+    { id: 'task-url-err', ownerId: 'owner-1', title: 'https://example.invalid/post' },
+    {
+      env: {},
+      force: true,
+      fetchImpl: async () => new Response('nope', { status: 503 }),
+    },
+  );
+
+  assert.ok(discovery);
+  assert.equal(discovery.web.source, 'error');
+  assert.deepEqual(discovery.web.results, []);
+  assert.ok(discovery.nextActions.some((action) => action.includes('Open the linked page directly: https://example.invalid/post')));
+});
+
 test('discovers web context through configured endpoint', async () => {
   const calls: string[] = [];
   const response = new Response(JSON.stringify({
