@@ -1,3 +1,5 @@
+import { urlOnlyCapture } from './urlSummary.js';
+
 export interface DiscoveryTask {
   id: string;
   ownerId: string;
@@ -19,7 +21,7 @@ export interface WebSearchResult {
 }
 
 export interface WebContext {
-  source: 'configured_endpoint' | 'not_configured' | 'error';
+  source: 'configured_endpoint' | 'direct_url' | 'not_configured' | 'error';
   query: string;
   results: WebSearchResult[];
   error?: string;
@@ -134,7 +136,10 @@ export async function discoverTaskContext(
   const memoryQuery = memories.map((memory) => memory.content).join(' ');
   const querySeed = [task.title, options.instructions ?? '', memoryQuery].join(' ').replace(/\s+/g, ' ').trim();
   const query = discoveryQueryFor(querySeed || task.title, location).slice(0, 500);
-  const web = await fetchWebContext(query, env, options.fetchImpl ?? fetch);
+  const directUrl = urlOnlyCapture(task.title);
+  const web = directUrl
+    ? await fetchUrlContext(directUrl, env, options.fetchImpl ?? fetch)
+    : await fetchWebContext(query, env, options.fetchImpl ?? fetch);
   const nextActions = nextActionsFor(querySeed || task.title, location, web, memories);
   const confidence = discoveryConfidence(location, web);
 
@@ -198,6 +203,75 @@ function parseWebResults(json: unknown): WebSearchResult[] {
   return out;
 }
 
+const HTML_MAX_PARSE_BYTES = 200_000;
+
+async function fetchUrlContext(target: string, env: DiscoveryEnv, fetchImpl: FetchLike): Promise<WebContext> {
+  const timeoutMs = toPositiveInt(env.CAPTURE_WEB_SEARCH_TIMEOUT_MS) ?? 4000;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(target, {
+      headers: {
+        Accept: 'text/html,application/xhtml+xml',
+        'User-Agent': 'CaptureWorker/1.0 (+discovery)',
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      return { source: 'error', query: target, results: [], error: `HTTP ${response.status}` };
+    }
+    const html = (await response.text()).slice(0, HTML_MAX_PARSE_BYTES);
+    return { source: 'direct_url', query: target, results: [pageResultFromHtml(target, html)] };
+  } catch (err) {
+    return { source: 'error', query: target, results: [], error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function pageResultFromHtml(url: string, html: string): WebSearchResult {
+  return {
+    title: extractHtmlTitle(html) ?? url,
+    url,
+    snippet: extractMetaDescription(html),
+  };
+}
+
+function extractHtmlTitle(html: string): string | null {
+  const og = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i);
+  if (og) return normalizeHtmlText(og[1]);
+  const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  if (title) return normalizeHtmlText(title[1]);
+  return null;
+}
+
+function extractMetaDescription(html: string): string | null {
+  const patterns = [
+    /<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i,
+    /<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']*)["']/i,
+    /<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["']/i,
+  ];
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    const text = match ? normalizeHtmlText(match[1]) : null;
+    if (text) return text.slice(0, 400);
+  }
+  return null;
+}
+
+function normalizeHtmlText(text: string): string | null {
+  const decoded = text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0*39;|&#x0*27;|&apos;/gi, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return decoded.length > 0 ? decoded : null;
+}
+
 function nextActionsFor(title: string, location: LocationContext, web: WebContext, memories: readonly MemoryContext[] = []): string[] {
   const actions: string[] = [];
   for (const memory of memories.slice(0, 3)) {
@@ -206,6 +280,8 @@ function nextActionsFor(title: string, location: LocationContext, web: WebContex
   if (web.results.length > 0) {
     const top = web.results[0];
     actions.push(`Review top result: ${top.title}${top.url ? ` (${top.url})` : ''}`);
+  } else if (urlOnlyCapture(web.query)) {
+    actions.push(`Open the linked page directly: ${web.query}`);
   } else {
     actions.push(`Run web search for "${web.query}"`);
   }
