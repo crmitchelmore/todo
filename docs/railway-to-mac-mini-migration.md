@@ -128,6 +128,12 @@ no API key or database secret is embedded in the clients.
 the existing Railway production endpoints. That keeps local and emergency builds safe when the
 repository variables are absent.
 
+Native passkeys are the exception to the port-10000 strategy. Apple's Associated Domains service
+validates `webcredentials` on public HTTPS port 443, so the private Serve stage must use email/code
+or password sign-in. A public Funnel on port 10000 makes Capture internet-reachable but does not
+restore native passkeys; that requires a later stable custom domain on port 443 (for example through
+an outbound tunnel) and a matching entitlement release.
+
 ## Secrets
 
 Production secrets live in the macOS Keychain service `capture`. Commands run through:
@@ -325,7 +331,7 @@ Backups default to:
 Set `CAPTURE_BACKUP_DIR` to an external or replicated destination. The deployment script never
 deletes older dumps; apply an operator-managed retention policy to that destination.
 
-## Phase 7 - Public Funnel
+## Phase 7 - Interim public Funnel
 
 After the private deployment has remained stable:
 
@@ -336,6 +342,9 @@ CAPTURE_KEYCHAIN_OVERRIDE=1 scripts/with-secrets.sh \
 
 This changes only port 10000 from tailnet-only Serve to public Funnel. The hostname, port, client
 configuration, database, and Compose routing remain unchanged.
+
+This is sufficient for public web/API/sync access. Native passkeys remain disabled until Capture
+has a dedicated public port-443 domain and the Apple associated-domain entitlement is updated.
 
 Before enabling Funnel:
 
@@ -375,6 +384,7 @@ If private or public verification fails:
 | Mac reboot leaves services down | launchd restarts Colima/Compose and keeps the native worker alive. |
 | Disk fills with logs/backups | Compose log rotation is bounded; backup location/retention are explicit. |
 | Split-brain during rollback | Railway writes are frozen before the final export and remain frozen until rollback or decommission. |
+| Native passkeys fail on the port-10000 endpoint | Use email/code or password during the Tailscale stage; add a dedicated public port-443 domain before re-enabling passkeys. |
 
 ## Conformance rationale
 
