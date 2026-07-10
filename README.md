@@ -7,7 +7,7 @@ on your selected backend computer** to research and optionally *do* tasks — wi
 quick human confirmation** of every item's structure before anything is saved.
 
 > Status: **M1 (capture→suggest→confirm→sync) and M2 foundation (background enrichment worker)
-> are built and verified** on a PowerSync stack (deployed to Railway), with native UIKit/AppKit clients and a
+> are built and verified** on a self-hosted PowerSync stack on the Mac mini, with native UIKit/AppKit clients and a
 > React web client. See [Build & run](#build--run) and [Review steps](#review-steps). Remaining
 > milestones (Mini agent, Obsidian, Gmail, EventKit) are tracked in [beads](#issue-tracking-beads).
 
@@ -27,7 +27,7 @@ open-source patterns we will copy rather than reinvent.
 ## Architecture (summary)
 
 Four planes, bridged across **multiple Apple devices/accounts** (iPhone/laptop plus whichever Mac is
-selected as the local backend computer). A **hosted Postgres + PowerSync** core (deployed to Railway)
+selected as the local backend computer). A **self-hosted Postgres + PowerSync** core on that Mac
 makes sync **account-agnostic**, so the local agent shares the same database instead of trying to join iCloud.
 
 1. **Capture & sync** — native UIKit (iOS) + AppKit (macOS), no JS-wrapped frameworks, plus a React web app; one shared data model via PowerSync (native Swift SDK on Apple platforms).
@@ -113,7 +113,7 @@ urgency, better date parsing — LLM-upgradable via `OPENAI_API_KEY`) and patche
 `suggested_*` fields. It **never** changes status: the human still confirms structure before save.
 The patch syncs straight back to every client.
 
-Secrets for local agents, Railway deploys, Obsidian, Gmail, and LLM enrichment should be loaded via
+Secrets for production, local agents, migration tooling, Obsidian, Gmail, and LLM enrichment should be loaded via
 `scripts/with-secrets.sh <command>` from ignored `.env.local` files or macOS Keychain service
 `capture`. Do not add real credentials to tracked `.env.example` files.
 
@@ -153,12 +153,10 @@ same Postgres to run it on the selected backend computer.
 
 ## Deploy
 
-The backend, PowerSync, Postgres (source + bucket storage) and enrichment worker are deployed to
-**[Railway](https://railway.app)** (project `capture`, four services on one private network).
-Clients reach two public domains — `backend-production-de2f.up.railway.app` and
-`powersync-production-e560.up.railway.app`. Native apps default to these via
-`CaptureConfig.production`; the web client reads `VITE_BACKEND_URL` / `VITE_POWERSYNC_URL`.
+The backend, PowerSync, Postgres, web app, and native enrichment worker run on the Mac mini.
+Clients use one Tailscale HTTPS origin:
+`https://bravos-mac-mini.taile313a5.ts.net:10000`.
 
-See [`docs/deployment.md`](docs/deployment.md) for the full runbook, env-var table, `railway up`
-commands, verification curls, and the Railway gotchas (private-domain suffix, PowerSync `sslmode`,
-first-init Postgres password).
+See [`docs/deployment.md`](docs/deployment.md) for deployment, health, backup, client endpoint, and
+release procedures. The completed Railway migration and rollback history remain in
+[`docs/railway-to-mac-mini-migration.md`](docs/railway-to-mac-mini-migration.md).

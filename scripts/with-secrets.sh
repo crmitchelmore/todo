@@ -29,7 +29,11 @@ load_keychain_defaults() {
 
   local names=(
     RAILWAY_API_TOKEN
+    RAILWAY_PROJECT_ID
+    PG_DATABASE_PASSWORD
+    BACKEND_JWT_PRIVATE_KEY
     OPENAI_API_KEY
+    OPENAI_BASE_URL
     SENTRY_DSN
     SENTRY_ENVIRONMENT
     SENTRY_TRACES_SAMPLE_RATE
@@ -44,6 +48,7 @@ load_keychain_defaults() {
     SMTP_URL
     CAPTURE_API_SECRET
     PS_API_TOKEN
+    CAPTURE_WEB_SEARCH_API_KEY
     LOCAL_HARNESS_ENABLED
     LOCAL_HARNESS_KIND
     LOCAL_HARNESS_COMMAND
@@ -60,7 +65,9 @@ load_keychain_defaults() {
   local name current value
   for name in "${names[@]}"; do
     current="$(printenv "$name" || true)"
-    [[ -z "$current" ]] || continue
+    if [[ "${CAPTURE_KEYCHAIN_OVERRIDE:-0}" != "1" && -n "$current" ]]; then
+      continue
+    fi
     value="$(keychain_value "$name")"
     [[ -z "$value" ]] || export "$name=$value"
   done

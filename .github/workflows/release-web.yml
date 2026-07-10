@@ -1,4 +1,4 @@
-name: Release Web App
+name: Validate Web App
 
 on:
   push:
@@ -14,15 +14,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-deploy:
-    name: Build and deploy web
+  build:
+    name: Build production web bundle
     runs-on: ubuntu-latest
     env:
-      RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN || secrets.RAILWAY_TOKEN }}
-      RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
-      RAILWAY_ENVIRONMENT: production
       VITE_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
       VITE_SENTRY_ENVIRONMENT: production
+      VITE_BACKEND_URL: ${{ vars.VITE_BACKEND_URL }}
+      VITE_POWERSYNC_URL: ${{ vars.VITE_POWERSYNC_URL }}
     steps:
       - uses: actions/checkout@v4
 
@@ -36,24 +35,16 @@ jobs:
         working-directory: web
         run: npm ci
 
+      - name: Require production endpoints
+        run: |
+          if [ -z "$VITE_BACKEND_URL" ] || [ -z "$VITE_POWERSYNC_URL" ]; then
+            echo "::error::Set VITE_BACKEND_URL and VITE_POWERSYNC_URL repository variables."
+            exit 1
+          fi
+
       - name: Build and test
         working-directory: web
         run: |
           npm run typecheck
           npm test
           npm run build
-
-      - name: Install Railway CLI
-        run: npm install -g @railway/cli
-
-      - name: Deploy web service to Railway
-        run: |
-          if [ -z "$RAILWAY_API_TOKEN" ]; then
-            echo "::error::Set RAILWAY_API_TOKEN (or RAILWAY_TOKEN) to deploy the web app."
-            exit 1
-          fi
-          if [ -z "$RAILWAY_PROJECT_ID" ]; then
-            echo "::error::Set RAILWAY_PROJECT_ID to the Railway capture project id."
-            exit 1
-          fi
-          railway up --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service web

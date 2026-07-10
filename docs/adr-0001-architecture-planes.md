@@ -13,7 +13,7 @@ Capture must be instant on iOS, macOS, and web while still supporting slower AI 
 Use four planes:
 
 1. **Capture plane** — native iOS/UIKit, macOS/AppKit, and web clients write a local-first PowerSync task row immediately. Capture never waits for network or LLM work.
-2. **Sync plane** — Railway Postgres + PowerSync is the account-agnostic source of truth. Every row is owner-scoped by backend auth and sync rules, so the Mac Mini can participate without joining the user’s iCloud account.
+2. **Sync plane** — Postgres + PowerSync on the Mac mini is the account-agnostic source of truth. Every row is owner-scoped by backend auth and sync rules, so other devices can participate without joining the Mac’s iCloud account.
 3. **Enrichment/agent plane** — background workers and local harness agents read proposed work, add suggestions/events, and request approval for consequential actions.
 4. **Confirmation plane** — users confirm or edit task structure before a proposed item becomes active. AI/agent output lands as proposals or task history, not silent irreversible changes.
 

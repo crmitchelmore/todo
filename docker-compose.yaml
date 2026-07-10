@@ -1,14 +1,22 @@
 # Local sync stack for the Capture todo system.
 # Brings up: Postgres (source + PowerSync bucket storage) + PowerSync service + backend connector + worker.
-# The web client runs on the host via `npm run dev` for the fastest dev loop.
+# The web client runs on the host via `npm run dev` for the fastest dev loop. The `production`
+# profile also builds the web client and fronts web/backend/PowerSync through one loopback edge.
 #
 #   docker compose up -d
 #   (cd web && npm install && npm run dev)
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
 
 services:
   pg-db:
     image: postgres:18
     restart: unless-stopped
+    logging: *default-logging
     environment:
       - POSTGRES_USER=${PG_DATABASE_USER}
       - POSTGRES_DB=${PG_DATABASE_NAME}
@@ -18,7 +26,7 @@ services:
       - pg_data:/var/lib/postgresql
       - ./db/init:/docker-entrypoint-initdb.d
     ports:
-      - "${PG_DATABASE_PORT}:${PG_DATABASE_PORT}"
+      - "${CAPTURE_BIND_HOST:-127.0.0.1}:${PG_HOST_PORT:-5432}:${PG_DATABASE_PORT}"
     command: ["postgres", "-c", "wal_level=logical"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${PG_DATABASE_USER} -d ${PG_DATABASE_NAME}"]
@@ -31,24 +39,57 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       pg-db:
         condition: service_healthy
     environment:
       BACKEND_PORT: ${BACKEND_PORT}
       BACKEND_DATABASE_URI: ${BACKEND_DATABASE_URI}
+      BACKEND_JWT_PRIVATE_KEY: ${BACKEND_JWT_PRIVATE_KEY:-}
       JWT_ISSUER: ${JWT_ISSUER}
       JWT_AUDIENCE: ${JWT_AUDIENCE}
       DEV_USER_ID: ${DEV_USER_ID}
       CAPTURE_API_SECRET: ${CAPTURE_API_SECRET:-}
+      NODE_ENV: ${NODE_ENV:-development}
+      POWERSYNC_PUBLIC_URL: ${POWERSYNC_PUBLIC_URL:-http://localhost:8080}
+      PUBLIC_WEB_ORIGIN: ${PUBLIC_WEB_ORIGIN:-http://localhost:3030}
+      PUBLIC_BACKEND_ORIGIN: ${PUBLIC_BACKEND_ORIGIN:-http://localhost:6060}
+      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-localhost}
+      WEBAUTHN_RP_NAME: ${WEBAUTHN_RP_NAME:-Capture}
+      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
+      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-}
+      OAUTH_STATE_SECRET: ${OAUTH_STATE_SECRET:-}
+      MAIL_PROVIDER: ${MAIL_PROVIDER:-}
+      MAIL_FROM: ${MAIL_FROM:-Capture <onboarding@resend.dev>}
+      SMTP_URL: ${SMTP_URL:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      BREVO_API_KEY: ${BREVO_API_KEY:-}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      POSTMARK_SERVER_TOKEN: ${POSTMARK_SERVER_TOKEN:-}
+      POSTMARK_MESSAGE_STREAM: ${POSTMARK_MESSAGE_STREAM:-outbound}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-development}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
     ports:
-      - "${BACKEND_PORT}:${BACKEND_PORT}"
+      - "${CAPTURE_BIND_HOST:-127.0.0.1}:${BACKEND_HOST_PORT:-6060}:${BACKEND_PORT}"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "healthcheck.mjs"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
   worker:
     build:
       context: ./worker
       dockerfile: Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       pg-db:
         condition: service_healthy
@@ -56,19 +97,43 @@ services:
       WORKER_DATABASE_URI: ${BACKEND_DATABASE_URI}
       ENRICH_POLL_MS: ${ENRICH_POLL_MS:-2000}
       ENRICH_BATCH: ${ENRICH_BATCH:-20}
-      # Optional: set OPENAI_API_KEY to upgrade suggestions from deterministic to LLM.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       ENRICH_LLM_MODEL: ${ENRICH_LLM_MODEL:-gpt-4o-mini}
+      CAPTURE_WORK_ROOT: ${CAPTURE_WORK_ROOT:-}
+      CAPTURE_WORK_ROOT_MAX_REPOS: ${CAPTURE_WORK_ROOT_MAX_REPOS:-200}
+      CAPTURE_WEB_SEARCH_ENDPOINT: ${CAPTURE_WEB_SEARCH_ENDPOINT:-}
+      CAPTURE_WEB_SEARCH_API_KEY: ${CAPTURE_WEB_SEARCH_API_KEY:-}
+      CAPTURE_WEB_SEARCH_TIMEOUT_MS: ${CAPTURE_WEB_SEARCH_TIMEOUT_MS:-}
+      CAPTURE_WEB_SEARCH_DISABLE_BUILTIN: ${CAPTURE_WEB_SEARCH_DISABLE_BUILTIN:-}
+      OBSIDIAN_CLI_ENABLED: ${OBSIDIAN_CLI_ENABLED:-}
+      OBSIDIAN_CLI_COMMAND: ${OBSIDIAN_CLI_COMMAND:-}
+      OBSIDIAN_VAULT: ${OBSIDIAN_VAULT:-}
+      OBSIDIAN_SUMMARY_FOLDER: ${OBSIDIAN_SUMMARY_FOLDER:-}
+      LOCAL_HARNESS_ENABLED: ${LOCAL_HARNESS_ENABLED:-0}
+      LOCAL_HARNESS_KIND: ${LOCAL_HARNESS_KIND:-}
+      LOCAL_HARNESS_COMMAND: ${LOCAL_HARNESS_COMMAND:-}
+      LOCAL_HARNESS_WORKDIR: ${LOCAL_HARNESS_WORKDIR:-}
+      LOCAL_HARNESS_TIMEOUT_SECONDS: ${LOCAL_HARNESS_TIMEOUT_SECONDS:-120}
+      LOCAL_HARNESS_ARGS_JSON: ${LOCAL_HARNESS_ARGS_JSON:-}
+      LOCAL_HARNESS_AGENT: ${LOCAL_HARNESS_AGENT:-}
+      LOCAL_HARNESS_THINKING: ${LOCAL_HARNESS_THINKING:-}
+      LOCAL_HARNESS_DEVICE_ID: ${LOCAL_HARNESS_DEVICE_ID:-}
+      LOCAL_HARNESS_DEVICE_NAME: ${LOCAL_HARNESS_DEVICE_NAME:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-development}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
 
   powersync:
-    image: journeyapps/powersync-service:latest
+    image: ${POWERSYNC_IMAGE:-journeyapps/powersync-service:latest}
     restart: unless-stopped
+    logging: *default-logging
     command: ["start", "-r", "unified"]
     depends_on:
       pg-db:
         condition: service_healthy
       backend:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - ./infra/powersync:/config
     environment:
@@ -84,14 +149,59 @@ services:
         [
           "CMD",
           "node",
-          "-e",
-          "fetch('http://localhost:${PS_PORT}/probes/liveness').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
+          "/config/healthcheck.mjs"
         ]
       interval: 5s
       timeout: 2s
       retries: 15
     ports:
-      - "${PS_PORT}:${PS_PORT}"
+      - "${CAPTURE_BIND_HOST:-127.0.0.1}:${PS_HOST_PORT:-8080}:${PS_PORT}"
+
+  web:
+    profiles: ["production"]
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        VITE_BACKEND_URL: ${VITE_BACKEND_URL}
+        VITE_POWERSYNC_URL: ${VITE_POWERSYNC_URL}
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        VITE_SENTRY_ENVIRONMENT: ${VITE_SENTRY_ENVIRONMENT:-production}
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      PORT: 3000
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "healthcheck.mjs"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  capture-edge:
+    profiles: ["production"]
+    image: caddy:2.10.0-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      backend:
+        condition: service_healthy
+      powersync:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "${CAPTURE_BIND_HOST:-127.0.0.1}:${CAPTURE_EDGE_PORT:-10000}:10000"
 
 volumes:
   pg_data:
+  caddy_data:
+  caddy_config:

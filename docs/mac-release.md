@@ -67,12 +67,10 @@ Prefer reusing a valid existing Developer ID Application certificate and private
 Apple certificates for routine CI retries can exhaust the account certificate limit and block both
 Mac and iOS releases.
 
-The checked-in Mac entitlements include Associated Domains for passkeys/webcredentials. That
-capability requires a provisioning profile, which is appropriate for development/App Store-style
-signing but brittle for Developer ID Sparkle releases. The GitHub workflow therefore archives with
-a temporary minimal entitlements plist for Developer ID distribution. Email/code sign-in remains the
-reliable release path; native passkey support can be revisited if a reusable Developer ID provisioning
-profile for Associated Domains is added as an explicit signing asset.
+The GitHub workflow archives with a temporary minimal entitlements plist for Developer ID
+distribution. Email/code sign-in remains the reliable release path; native passkey support can be
+revisited after Capture has a public port-443 domain and a reusable provisioning profile for
+Associated Domains.
 
 ## Feed URL constraint
 

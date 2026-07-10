@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>dev.crmitchelmore.capture.backup</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>__REPO_ROOT__/scripts/with-secrets.sh</string>
+		<string>__REPO_ROOT__/scripts/mac-mini.sh</string>
+		<string>backup</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>__REPO_ROOT__</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>CAPTURE_KEYCHAIN_OVERRIDE</key>
+		<string>1</string>
+		<key>PATH</key>
+		<string>__HOME__/.local/bin:/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>3</integer>
+		<key>Minute</key>
+		<integer>15</integer>
+	</dict>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>StandardOutPath</key>
+	<string>__HOME__/Library/Logs/Capture/backup.log</string>
+	<key>StandardErrorPath</key>
+	<string>__HOME__/Library/Logs/Capture/backup.error.log</string>
+</dict>
+</plist>

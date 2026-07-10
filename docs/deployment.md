@@ -17,163 +17,160 @@ Clients only ever talk to **backend** and **powersync**. Everything else is inte
 
 ---
 
-## Production: Railway (current deployment)
+## Production: Mac mini over Tailscale
 
-The live stack runs on [Railway](https://railway.app) in the **`capture`** project, four services
-in one private network:
+The live origin is:
 
-| Railway service | Image / source | Public domain |
-|---|---|---|
-| `postgres` | `postgres:18` (custom start: `wal_level=logical`) | TCP proxy only |
-| `backend` | `backend/` (node:20-slim) | `backend-production-de2f.up.railway.app` |
-| `powersync` | `infra/powersync/Dockerfile` | `powersync-production-e560.up.railway.app` |
-| `worker` | `worker/` (node:20-slim) | none (no inbound) |
+```text
+https://bravos-mac-mini.taile313a5.ts.net:10000
+```
 
-### How services connect
+Caddy exposes one client-facing origin and preserves the existing service boundaries:
 
-Services reach each other over Railway's **private network** using each service's
-`RAILWAY_PRIVATE_DOMAIN`. **Important:** use the service's *actual* private domain
-(e.g. `postgres-22d88df1.railway.internal`), **not** the bare `postgres.railway.internal` —
-the un-suffixed name can be reserved/misroute and will fail auth. Read the real value from the
-service's `RAILWAY_PRIVATE_DOMAIN` variable.
+| Path | Destination |
+|---|---|
+| `/api/*` | backend |
+| `/sync/*`, `/probes/*` | PowerSync |
+| everything else | web |
 
-Key environment variables:
-
-| Service | Variable | Value (shape) |
-|---|---|---|
-| postgres | `POSTGRES_USER` / `POSTGRES_DB` / `POSTGRES_PASSWORD` | `postgres` / `postgres` / *(secret)* |
-| backend | `BACKEND_DATABASE_URI` | `postgres://postgres:<pw>@<pg-private>:5432/postgres` |
-| backend | `POWERSYNC_PUBLIC_URL` | `https://powersync-production-e560.up.railway.app` |
-| backend | `MAIL_PROVIDER` | optional: `smtp`, `resend`, `brevo`, `sendgrid`, or `postmark` |
-| backend | `MAIL_FROM` | sender identity, e.g. `Capture <hello@example.com>` |
-| backend | `SMTP_URL` / provider key | one of `SMTP_URL`, `RESEND_API_KEY`, `BREVO_API_KEY`, `SENDGRID_API_KEY`, `POSTMARK_SERVER_TOKEN` |
-| backend/worker | `SENTRY_DSN` / `SENTRY_ENVIRONMENT` / `SENTRY_TRACES_SAMPLE_RATE` | optional Sentry errors/traces/log correlation; services still emit JSON wide events locally when unset |
-| web | `VITE_SENTRY_DSN` / `VITE_SENTRY_ENVIRONMENT` | optional browser Sentry errors/traces/replay |
-| iOS/Mac | `SENTRY_DSN` / `SENTRY_ENVIRONMENT` | optional native Sentry errors/traces baked into release builds; local OSLog wide events still emit when unset |
-| powersync | `PS_DATA_SOURCE_URI` | `postgres://postgres:<pw>@<pg-private>:5432/postgres` |
-| powersync | `PS_STORAGE_URI` | `postgres://postgres:<pw>@<pg-private>:5432/powersync` |
-| powersync | `PS_JWKS_URL` | `http://backend.railway.internal:6060/api/auth/keys` |
-| powersync | `PS_PORT` | `8080` |
-| worker | `WORKER_DATABASE_URI` | `postgres://postgres:<pw>@<pg-private>:5432/postgres` |
-| worker (local/Mac) | `CAPTURE_WORK_ROOT` | optional Git repo root to scan for engineering-task GitHub associations; macOS falls back to `~/work` |
-| worker (local/Mac) | `LOCAL_HARNESS_ENABLED` | set to `1` only on the local computer assigned to execute approved agent attempts |
-| worker (local/Mac) | `LOCAL_HARNESS_KIND` | `copilot-cli`, `hermes`, `openclaw`, or `custom` |
-| worker (local/Mac) | `LOCAL_HARNESS_COMMAND` / `LOCAL_HARNESS_WORKDIR` | local harness binary and working directory on that computer |
-| worker (local/Mac) | `LOCAL_HARNESS_ARGS_JSON` | optional JSON `{ "args": [...] }` template; `{prompt}` and `{timeout}` are substituted as argv values, not shell-interpolated |
-| worker (local/Mac) | `LOCAL_HARNESS_AGENT` / `LOCAL_HARNESS_THINKING` | optional OpenClaw-style adapter settings when `LOCAL_HARNESS_KIND=openclaw` |
-| worker (local/Mac) | `LOCAL_HARNESS_DEVICE_ID` / `LOCAL_HARNESS_DEVICE_NAME` | stable label recorded in task events so multiple Macs are distinguishable |
-
-> **Postgres without TLS on the private network.** `sslmode` is **not** read from the connection
-> URI by PowerSync — it must be set explicitly. `infra/powersync/service.yaml` sets
-> `sslmode: disable` on **both** the replication connection and the storage block. Leaving it off
-> makes PowerSync default to `verify-full`, which fails against the non-TLS private Postgres.
-
-> **First-init password.** `POSTGRES_PASSWORD` only sets the role password on the *first* volume
-> init. If you change it later, the running cluster keeps the old password and internal
-> (scram) auth fails even though the proxy (loopback `trust`) still works. Fix with
-> `ALTER USER postgres WITH PASSWORD '<pw>';` over the TCP proxy.
+Postgres, backend, PowerSync, web, and Caddy run in the production Compose profile. The canonical
+worker runs natively through launchd so approved work can invoke OpenClaw on the same Mac. Host
+ports remain bound to `127.0.0.1`; Tailscale exposes only the Caddy edge on port 10000.
 
 ### Deploying code
 
-Source builds use the Railway CLI authenticated with a Railway token. In this repo, prefer
-`RAILWAY_API_TOKEN` for non-interactive agent/shell deploys:
+Deploy from the canonical checkout on the Mac mini:
 
 ```bash
 cd /path/to/todo
-scripts/with-secrets.sh railway up --ci --service backend
-scripts/with-secrets.sh railway up --ci --service powersync
-scripts/with-secrets.sh railway up ./worker --path-as-root --ci --service worker
+git pull --rebase
+scripts/with-secrets.sh scripts/mac-mini.sh deploy
+scripts/with-secrets.sh scripts/mac-mini.sh health
 ```
 
-Use `scripts/with-secrets.sh` rather than calling `railway` directly. Railway CLI 5.x gives
-`RAILWAY_TOKEN` precedence over `RAILWAY_API_TOKEN`; a stale legacy `RAILWAY_TOKEN` will make the
-CLI report "Unauthorized" even when `RAILWAY_API_TOKEN` is valid. The wrapper normalises this by
-unsetting `RAILWAY_TOKEN` whenever `RAILWAY_API_TOKEN` is available.
+Run `scripts/mac-mini.sh install-launchd` after changing the checkout path or launchd templates.
+The command installs the stack watchdog, native worker, and nightly backup agents.
 
-To open production Postgres from local terminal:
+`.github/workflows/release-web.yml` validates the production web bundle on `main`; it deliberately
+does not deploy from a GitHub-hosted runner into the private Mac. Production deployment remains an
+operator action until an authenticated private runner or equivalent deployment channel is adopted.
+
+### Secrets
+
+The deployed Mac reads production values from ignored `.env.local`, mode `600`, through
+`scripts/with-secrets.sh`. macOS Keychain entries remain supported as optional overrides, but the
+login Keychain is not the canonical source on this headless deployment.
+
+Required production values include:
+
+- `PG_DATABASE_PASSWORD`
+- `CAPTURE_API_SECRET`
+- `PS_API_TOKEN`
+- `BACKEND_JWT_PRIVATE_KEY`
+- the configured mail-provider credential
+- local-harness values when approved execution is enabled
+
+Never put credentials in tracked env files, client bundles, issue text, or command output.
+
+### Exposure
+
+Private tailnet access:
 
 ```bash
-scripts/with-secrets.sh railway connect postgres
+scripts/with-secrets.sh scripts/mac-mini.sh tailscale-private
 ```
 
-The `postgres` service is a custom container, not Railway's managed database plugin, so the raw
-Railway CLI looks for `DATABASE_PUBLIC_URL` and fails. The wrapper handles this repo-specific case
-by reading the Postgres service's TCP proxy variables and executing `psql` with `PGSSLMODE=disable`.
-
-For local/dev commands that need credentials, keep secrets in ignored `.env.local` files or in the
-macOS Keychain service `capture` using the env var as the account name:
+Public Funnel access:
 
 ```bash
-security add-generic-password -U -s capture -a RAILWAY_API_TOKEN -w "$RAILWAY_API_TOKEN"
-scripts/with-secrets.sh railway status
+scripts/with-secrets.sh scripts/mac-mini.sh tailscale-public --confirm-public
 ```
 
-> **Upload-root gotcha.** Do not use `--path-as-root` for services that already have a Railway
-> root directory configured (`backend`, `powersync`): Railway will look for `/backend` inside the
-> uploaded archive and fail. Conversely, uploading the repo root for `worker` makes Railpack inspect
-> the monorepo root and fail to infer the Node app; use `./worker --path-as-root` until the service
-> gets a root directory configured in Railway settings.
-
-`infra/powersync/Dockerfile` bakes `service.yaml` + `sync-config.yaml` into the image (so no
-volume mount is needed) and points `POWERSYNC_CONFIG_PATH` at `/config/service.yaml`.
+Both commands modify only port 10000 and verify that OpenClaw's existing Tailscale listeners on
+ports 443 and 8443 remain unchanged.
 
 ### Verifying
 
 ```bash
-curl https://backend-production-de2f.up.railway.app/api/auth/keys          # 200 JWKS
-curl https://powersync-production-e560.up.railway.app/probes/liveness       # {"ready":true,...}
-# End-to-end capture:
-curl -X POST https://backend-production-de2f.up.railway.app/api/capture \
-  -H 'Content-Type: application/json' -d '{"raw_text":"buy milk tomorrow 5pm"}'
+ORIGIN=https://bravos-mac-mini.taile313a5.ts.net:10000
+curl --fail "$ORIGIN/"
+curl --fail "$ORIGIN/api/health"
+curl --fail "$ORIGIN/api/auth/keys"
+curl --fail "$ORIGIN/probes/liveness"
 ```
 
----
+For behavioural verification, run the acceptance suite with the same origin for
+`CAPTURE_WEB_URL`, `CAPTURE_BACKEND_URL`, and `CAPTURE_POWERSYNC_URL`.
 
-## Pointing clients at the deployment
+### Backups and restore
 
-**Native (iOS/macOS):** the apps resolve config via `CaptureConfig.fromEnvironment()`, which
-defaults to `CaptureConfig.production` (the Railway domains above). To target a local stack in
-dev, set both `CAPTURE_BACKEND_HOST` and `CAPTURE_POWERSYNC_HOST` (e.g. to `localhost:6060` /
-`localhost:8080`) in the Xcode scheme or Info.plist.
-
-**Web:** set the two Vite vars (see `web/.env.example`):
-
-```
-VITE_BACKEND_URL=https://backend-production-de2f.up.railway.app
-VITE_POWERSYNC_URL=https://powersync-production-e560.up.railway.app
-```
-
----
-
-## Local development (docker-compose)
-
-For local iteration the whole stack runs from `docker-compose.yaml` (Postgres source + Postgres
-bucket storage + backend + powersync + worker):
+Nightly backups contain a custom-format dump, deterministic source manifest, and SHA-256 files:
 
 ```bash
-cp .env.example .env        # fill in secrets
+scripts/with-secrets.sh scripts/mac-mini.sh backup
+```
+
+Restore is guarded, takes another pre-restore backup, rebuilds derived PowerSync storage, compares
+the manifest exactly, and runs integrity SQL before restarting services:
+
+```bash
+scripts/with-secrets.sh scripts/mac-mini.sh restore \
+  --dump /path/to/capture-postgres-<timestamp>.dump \
+  --manifest /path/to/capture-postgres-<timestamp>.manifest \
+  --confirm-restore
+```
+
+### Pointing clients at production
+
+Native release builds receive host values without a scheme:
+
+```text
+CAPTURE_BACKEND_HOST=bravos-mac-mini.taile313a5.ts.net:10000
+CAPTURE_POWERSYNC_HOST=bravos-mac-mini.taile313a5.ts.net:10000
+```
+
+The web build receives full URLs:
+
+```text
+VITE_BACKEND_URL=https://bravos-mac-mini.taile313a5.ts.net:10000
+VITE_POWERSYNC_URL=https://bravos-mac-mini.taile313a5.ts.net:10000
+```
+
+These values are GitHub Actions repository variables, not secrets. Swift and web production
+fallbacks use the same origin so missing release injection cannot silently target Railway.
+
+Web passkeys can use the HTTPS origin. Native passkeys require a later public custom domain on
+port 443 because Apple Associated Domains validation does not support this port-10000 endpoint.
+Email/password and email-code authentication remain supported on every client.
+
+---
+
+## Local development
+
+For local iteration, run the Compose development stack and point clients at localhost:
+
+```bash
+cp .env.example .env
 docker compose up --build
 ```
 
-Then run the clients against `localhost` by setting the env/Vite vars to the `localhost:6060`
-(backend) and `localhost:8080` (powersync) pair.
+Use `localhost:6060` for the backend and `localhost:8080` for PowerSync. The production profile,
+launchd worker, Tailscale exposure, and production `.env.local` are not required for development.
 
 ---
 
-## Alternatives
+## Railway migration archive
 
-- **PowerSync Cloud** — instead of self-hosting the `powersync` service, point PowerSync Cloud at
-  the Railway Postgres source. Removes the `powersync` service + bucket-storage database from your
-  ops surface; adds a vendor/cost. The client model is unchanged.
-- **Any container host** — the same four images (Postgres, `backend/`, `infra/powersync`,
-  `worker/`) run on Fly.io, Render, a single VM with docker-compose, etc. Only the private host
-  names and public domains differ.
+Railway application deployments were removed after the final verified database cutover. Migration,
+snapshot, integrity, and historical rollback procedures remain in
+[`railway-to-mac-mini-migration.md`](railway-to-mac-mini-migration.md); they are not the current
+deployment path.
 
 ---
 
 ## Client distribution
 
-The backend deploy (above) covers the servers. The three clients ship on their own tracks:
+The Mac deployment above covers the servers. The three clients ship on their own tracks:
 
 ### iOS app + Share Extension + App Intents
 - **TestFlight (recommended)** — archive `CaptureiOS` in Xcode (or `xcodebuild archive`), upload to
@@ -218,16 +215,10 @@ automation create fresh Apple certificates on every run; certificate churn block
 releases for the whole account.
 
 ### Web app
-- **Static host** — `cd web && npm run build` produces a static bundle; deploy `web/dist` to any
-  static host (Vercel, Netlify, Cloudflare Pages, or a Railway static service). Set
-  `VITE_BACKEND_URL` / `VITE_POWERSYNC_URL` at build time to the Railway domains.
-- **Same-project on Railway** — add a static/Nginx service to the `capture` project so everything
-  lives in one place.
+- `scripts/mac-mini.sh deploy` rebuilds the web image with the production endpoint variables and
+  restarts the Caddy-backed service.
+- Merging changes under `web/` to `main` runs `release-web.yml` to typecheck, test, and build the
+  production bundle. It does not contact Railway or mutate production.
 
-Merging changes under `web/` to `main` automatically runs `release-web.yml`, validates the Vite build,
-and deploys the Railway `web` service. The workflow requires `RAILWAY_API_TOKEN` (or `RAILWAY_TOKEN`)
-and `RAILWAY_PROJECT_ID` repository secrets so it deploys into the existing `capture` project without
-interactive Railway linking.
-
-> Whichever track: the clients only need the two public HTTPS domains. No client embeds secrets —
-> the backend mints short-lived JWTs and the capture endpoint is the only write path.
+> Clients need only the single HTTPS origin. No client embeds database credentials — the backend
+> mints short-lived JWTs and the capture endpoint is the only write path.

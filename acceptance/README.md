@@ -1,7 +1,7 @@
 # Capture acceptance & eval suite
 
 Repeatable, evidence-producing acceptance tests for the **web, macOS, and iOS** Capture apps,
-driven through [use.computer](https://use.computer) sandboxes against **production Railway**, plus
+driven through [use.computer](https://use.computer) sandboxes against **production on the Mac mini**, plus
 **LLM-as-judge evals** for the non-deterministic agentic steps.
 
 Tracked in beads under epic `cap-rdr`. Feature source-of-truth: [`features/`](features/).
@@ -43,10 +43,8 @@ Every sandbox suite writes screenshots + `report.md`/`report.json` under `report
 
 - **Web is served locally inside the sandbox.** The web app is built once with the production
   backend/PowerSync baked in, uploaded to the sandbox, and served on `localhost` for Safari to
-  drive. This is deliberate: the shipped Railway web edge intermittently returns `upstream error`
-  / a blank `#root`, which made direct driving flaky. Serving the same build locally is repeatable
-  and still exercises the **real production backend + PowerSync**, so sync is genuinely tested.
-  (The Railway web-edge flakiness is itself a finding — see the run summary / `cap-rdr`.)
+  drive. This keeps browser automation repeatable while still exercising the **real production
+  backend + PowerSync**, so sync is genuinely tested.
 - **DOM-level driving, not pixels.** Safari's web content is not exposed in the accessibility tree,
   so the driver injects JavaScript via `osascript … do JavaScript` (file-based, no shell-quoting
   hazards) to click by visible text/selector and read state. Robust against layout shifts.

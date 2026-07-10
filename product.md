@@ -68,6 +68,6 @@ short-lived per-user sync-JWT backbone, with database-level per-user isolation.
 ## Status
 
 M1 (capture → suggest → confirm → sync) and the M2 enrichment worker are built and verified on
-the PowerSync stack (deployed to Railway), with native UIKit/AppKit clients and a React web
-client. Remaining milestones — Mac Mini agent, Obsidian, Gmail, EventKit — are tracked in beads.
+the Mac mini PowerSync stack, with native UIKit/AppKit clients and a React web client. Remaining
+milestones — Obsidian, Gmail, and EventKit — are tracked in beads.
 See `README.md` and `docs/architecture.md` for detail.
