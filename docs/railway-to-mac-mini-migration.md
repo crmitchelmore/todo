@@ -286,8 +286,8 @@ At the agreed quiet window:
 scripts/with-secrets.sh scripts/railway-write-gate.sh freeze --confirm-freeze
 ```
 
-This scales Railway `backend` and `worker` to zero. PowerSync remains online for read-only rollback
-visibility.
+This removes the Railway `backend` and `worker` deployments. PowerSync remains online for
+read-only rollback visibility.
 
 Take a final export, transfer it, and run the same guarded restore command. Then verify:
 
@@ -307,7 +307,7 @@ Behavioural gate:
 Keep Railway frozen, not deleted.
 
 When the replacement has passed its final gates and the Railway rollback is no longer required,
-pause every service while retaining the Postgres volume:
+pause every service by removing its deployment while retaining the Postgres volume:
 
 ```bash
 scripts/with-secrets.sh scripts/railway-write-gate.sh \

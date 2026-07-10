@@ -28,16 +28,14 @@ command -v jq >/dev/null 2>&1 || die "jq is required"
 action="${1:-}"
 confirmation="${2:-}"
 environment="${RAILWAY_ENVIRONMENT:-production}"
-region="${RAILWAY_REGION:-eu-west}"
 
-scale_service() {
+stop_service() {
   local service="$1"
-  local replicas="$2"
-  railway scale \
+  railway down \
     -p "$RAILWAY_PROJECT_ID" \
     -e "$environment" \
     -s "$service" \
-    "${region}=${replicas}"
+    -y || true
 }
 
 service_status() {
@@ -46,6 +44,28 @@ service_status() {
     --environment "$environment" \
     --service "$1" \
     --json
+}
+
+redeploy_service() {
+  railway redeploy \
+    -p "$RAILWAY_PROJECT_ID" \
+    -e "$environment" \
+    -s "$1" \
+    -y
+}
+
+wait_service_ready() {
+  local service="$1"
+  local attempt status
+  for attempt in $(seq 1 60); do
+    status="$(service_status "$service")"
+    if [[ "$(jq -r '.stopped' <<<"$status")" == "false" &&
+          "$(jq -r '.status' <<<"$status")" == "SUCCESS" ]]; then
+      return 0
+    fi
+    sleep 5
+  done
+  die "$service did not become ready"
 }
 
 case "$action" in
@@ -65,33 +85,34 @@ case "$action" in
     ;;
   freeze)
     [[ "$confirmation" == "--confirm-freeze" ]] || die "freeze requires --confirm-freeze"
-    scale_service backend 0
-    scale_service worker 0
-    printf 'Railway backend and worker are scaled to zero; PowerSync remains available for reads.\n'
+    stop_service backend
+    stop_service worker
+    printf 'Railway backend and worker deployments are removed; PowerSync remains available for reads.\n'
     ;;
   unfreeze)
     [[ "$confirmation" == "--confirm-unfreeze" ]] || die "unfreeze requires --confirm-unfreeze"
-    scale_service backend 1
-    scale_service worker 1
-    printf 'Railway backend and worker are scaled to one replica.\n'
+    redeploy_service backend
+    redeploy_service worker
+    printf 'Railway backend and worker are redeploying.\n'
     ;;
   pause-all)
     [[ "$confirmation" == "--confirm-pause-all" ]] || die "pause-all requires --confirm-pause-all"
-    scale_service backend 0
-    scale_service worker 0
-    scale_service web 0
-    scale_service powersync 0
-    scale_service postgres 0
-    printf 'All Railway services are scaled to zero; the Postgres volume is retained.\n'
+    stop_service backend
+    stop_service worker
+    stop_service web
+    stop_service powersync
+    stop_service postgres
+    printf 'All Railway deployments are removed; the Postgres volume is retained.\n'
     ;;
   resume-all)
     [[ "$confirmation" == "--confirm-resume-all" ]] || die "resume-all requires --confirm-resume-all"
-    scale_service postgres 1
-    scale_service backend 1
-    scale_service powersync 1
-    scale_service worker 1
-    scale_service web 1
-    printf 'All Railway services are scaled to one replica.\n'
+    redeploy_service postgres
+    wait_service_ready postgres
+    redeploy_service backend
+    redeploy_service powersync
+    redeploy_service worker
+    redeploy_service web
+    printf 'All Railway services are redeploying.\n'
     ;;
   *)
     usage
