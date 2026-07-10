@@ -187,7 +187,7 @@ start_stack() {
   args+=("${STACK_SERVICES[@]}")
   compose "${args[@]}"
   if [[ "$build" == "1" ]]; then
-    (cd "$ROOT_DIR/worker" && npm ci)
+    (cd "$ROOT_DIR/worker" && npm ci --include=dev)
   fi
   health
 }
