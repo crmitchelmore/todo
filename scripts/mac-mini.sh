@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+export PATH="$HOME/.local/bin:/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE=(docker compose --profile production)
@@ -132,7 +132,7 @@ bootstrap() {
   [[ "$(uname -s)" == "Darwin" ]] || die "bootstrap is supported only on macOS"
   require_command brew
 
-  HOMEBREW_NO_AUTO_UPDATE=1 brew install colima docker docker-compose jq node
+  HOMEBREW_NO_AUTO_UPDATE=1 brew install colima docker docker-compose jq node@22
 
   local plugin
   plugin="$(brew --prefix)/lib/docker/cli-plugins/docker-compose"
