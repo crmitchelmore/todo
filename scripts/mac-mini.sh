@@ -405,10 +405,11 @@ restore() {
 render_launchd_template() {
   local template="$1"
   local destination="$2"
-  local escaped_root escaped_home
-  escaped_root="$(printf '%s' "$ROOT_DIR" | sed 's/[&|]/\\&/g')"
-  escaped_home="$(printf '%s' "$HOME" | sed 's/[&|]/\\&/g')"
-  sed -e "s|__REPO_ROOT__|$escaped_root|g" -e "s|__HOME__|$escaped_home|g" "$template" >"$destination"
+  local content
+  content="$(<"$template")"
+  content="${content//__REPO_ROOT__/$ROOT_DIR}"
+  content="${content//__HOME__/$HOME}"
+  printf '%s\n' "$content" >"$destination"
 }
 
 install_launchd() {

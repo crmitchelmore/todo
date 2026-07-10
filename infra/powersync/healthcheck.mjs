@@ -1,4 +1,4 @@
-const port = process.env.PS_PORT ?? '8080';
+const port = process.env.PS_PORT || '8080';
 
 try {
   const response = await fetch(`http://127.0.0.1:${port}/probes/liveness`);

@@ -57,7 +57,7 @@ redeploy_service() {
 wait_service_ready() {
   local service="$1"
   local attempt status
-  for attempt in $(seq 1 60); do
+  for ((attempt = 1; attempt <= 60; attempt++)); do
     status="$(service_status "$service")"
     if [[ "$(jq -r '.stopped' <<<"$status")" == "false" &&
           "$(jq -r '.status' <<<"$status")" == "SUCCESS" ]]; then

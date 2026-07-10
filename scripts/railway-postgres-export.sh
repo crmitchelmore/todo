@@ -100,7 +100,7 @@ docker run --rm -d \
   "${POSTGRES_TOOLS_IMAGE:-postgres:18}" \
   -c wal_level=logical >/dev/null
 
-for attempt in $(seq 1 60); do
+for ((attempt = 1; attempt <= 60; attempt++)); do
   if docker exec "$manifest_container" pg_isready -U postgres -d postgres >/dev/null 2>&1; then
     break
   fi
