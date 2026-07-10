@@ -32,9 +32,9 @@ scale_service() {
   local service="$1"
   local replicas="$2"
   railway scale \
-    --project "$RAILWAY_PROJECT_ID" \
-    --environment "$environment" \
-    --service "$service" \
+    -p "$RAILWAY_PROJECT_ID" \
+    -e "$environment" \
+    -s "$service" \
     "${region}=${replicas}"
 }
 
