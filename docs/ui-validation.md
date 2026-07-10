@@ -11,7 +11,7 @@ scripts/ui-validate.sh mac      # build, launch macOS app, screenshot
 scripts/ui-validate.sh all
 ```
 
-Artefacts are written to `.ui-artifacts/<timestamp>/`. Set `UI_ARTIFACT_DIR` to control the output path. For web against production, set `E2E_BASE_URL=https://web-production-9267a.up.railway.app`.
+Artefacts are written to `.ui-artifacts/<timestamp>/`. Set `UI_ARTIFACT_DIR` to control the output path. For web against production, set `E2E_BASE_URL=https://bravos-mac-mini.taile313a5.ts.net:10000`.
 
 The web smoke test specifically checks the auth gate that previously broke: email/password fields must be visible, editable, non-collapsed, and console-clean across desktop and mobile Chrome.
 

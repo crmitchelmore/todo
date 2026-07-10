@@ -45,9 +45,9 @@ function optional(name: string, fallback = ""): string {
 
 export const config = {
   useComputerApiKey: () => required("USE_COMPUTER_API_KEY"),
-  webUrl: optional("CAPTURE_WEB_URL", "https://web-production-9267a.up.railway.app"),
-  backendUrl: optional("CAPTURE_BACKEND_URL", "https://backend-production-de2f.up.railway.app"),
-  powersyncUrl: optional("CAPTURE_POWERSYNC_URL", "https://powersync-production-e560.up.railway.app"),
+  webUrl: optional("CAPTURE_WEB_URL", "https://bravos-mac-mini.taile313a5.ts.net:10000"),
+  backendUrl: optional("CAPTURE_BACKEND_URL", "https://bravos-mac-mini.taile313a5.ts.net:10000"),
+  powersyncUrl: optional("CAPTURE_POWERSYNC_URL", "https://bravos-mac-mini.taile313a5.ts.net:10000"),
   account: {
     email: optional("ACCEPTANCE_ACCOUNT_EMAIL"),
     password: optional("ACCEPTANCE_ACCOUNT_PASSWORD"),

@@ -60,22 +60,24 @@ and login both require WebAuthn user verification.
 | GET | `/api/auth/keys` | JWKS for PowerSync to verify the sync JWT |
 
 A pre-bcrypt in-memory throttle (10 failed logins / 15 min per ip+email) runs **before** the
-hash compare. `trust proxy` is on so the client IP is the real one behind Railway.
+hash compare. `trust proxy` is on so the client IP is the real one behind Caddy and Tailscale.
 
 Passkeys require the backend to know the exact browser origin and relying-party ID. For production,
 set `PUBLIC_WEB_ORIGIN=https://<web-host>` and `WEBAUTHN_RP_ID=<web-hostname>` on the backend
 before enabling the web UI broadly. Native iOS/macOS passkeys additionally require Apple Associated
 Domains (`webcredentials:<WEBAUTHN_RP_ID>`) and a real device/signed build to verify end-to-end;
-the current native code is build-verified but not live-device verified.
+the current `*.ts.net:10000` deployment supports web passkeys but cannot support native passkeys
+because Apple validates Associated Domains on public HTTPS port 443.
 
 GitHub OAuth is optional and config-gated. Set `GITHUB_OAUTH_CLIENT_ID` and
 `GITHUB_OAUTH_CLIENT_SECRET` on the backend; the web button stays hidden until both are present.
-The callback URL is `https://backend-production-de2f.up.railway.app/api/auth/oauth/github/callback`.
+The callback URL is
+`https://bravos-mac-mini.taile313a5.ts.net:10000/api/auth/oauth/github/callback`.
 New GitHub identities create accounts only when GitHub returns a verified email that is not already
 owned by an email/password account; existing accounts must explicitly link identities rather than
 being auto-linked by email.
 
-## Go-live (DONE on 2026-06-03)
+## Initial Railway go-live (historical, completed 2026-06-03)
 
 1. **Migration** — `db/migrations/002-auth.sql` applied to live PG over the TCP proxy. Additive +
    idempotent: creates `users` (+`password_hash`) / `user_identities` / `sessions`, partial unique
@@ -94,7 +96,7 @@ being auto-linked by email.
 ## Verify after a redeploy
 
 ```bash
-BE=https://backend-production-de2f.up.railway.app
+BE=https://bravos-mac-mini.taile313a5.ts.net:10000
 EMAIL="you+test@example.com"
 # register
 curl -s -X POST $BE/api/auth/register -H 'content-type: application/json' \
@@ -113,7 +115,7 @@ shared todos; a second account is fully isolated; sign-out clears the local list
 ## Deferred (non-blocking for a single trusted user)
 
 Email verification, web HttpOnly-cookie sessions (localStorage XSS risk accepted while web is still
-low-risk), and persistent (Redis/PG) rate-limiting (in-memory is fine for one Railway instance).
+low-risk), and persistent (Redis/PG) rate-limiting (in-memory is fine for one production instance).
 `register` reveals email existence via 409 (acceptable for a small user base); `login`, `forgot`,
 and code issuance do not enumerate. Social sign-in attaches later via `user_identities` — purely
 additive.

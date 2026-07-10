@@ -247,11 +247,15 @@ backup() {
   require_production_secrets
   ensure_colima
 
-  local backup_dir timestamp partial final
+  local backup_dir timestamp partial final manifest_partial manifest verification_database
   backup_dir="${CAPTURE_BACKUP_DIR:-$HOME/Library/Application Support/Capture/backups}"
   timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
   partial="$backup_dir/.capture-postgres-${timestamp}.dump.partial"
   final="$backup_dir/capture-postgres-${timestamp}.dump"
+  manifest_partial="$backup_dir/.capture-postgres-${timestamp}.manifest.partial"
+  manifest="$backup_dir/capture-postgres-${timestamp}.manifest"
+  verification_database="capture_backup_${timestamp}"
+  validate_identifier "$verification_database"
 
   umask 077
   mkdir -p "$backup_dir"
@@ -263,9 +267,55 @@ backup() {
     -d "$PG_DATABASE_NAME" >"$partial"
   compose exec -T pg-db pg_restore --list <"$partial" >/dev/null
   mv -f "$partial" "$final"
+
+  compose exec -T pg-db psql \
+    -X \
+    -v ON_ERROR_STOP=1 \
+    -U "$PG_DATABASE_USER" \
+    -d template1 \
+    -c "drop database if exists \"$verification_database\" with (force);" \
+    -c "create database \"$verification_database\" owner \"$PG_DATABASE_USER\";"
+
+  if ! compose exec -T pg-db pg_restore \
+    --exit-on-error \
+    --no-owner \
+    --no-privileges \
+    -U "$PG_DATABASE_USER" \
+    -d "$verification_database" <"$final"; then
+    compose exec -T pg-db psql \
+      -X \
+      -U "$PG_DATABASE_USER" \
+      -d template1 \
+      -c "drop database if exists \"$verification_database\" with (force);" >/dev/null 2>&1 || true
+    die "backup verification restore failed"
+  fi
+
+  if ! compose exec -T pg-db psql \
+    -X \
+    -q \
+    -v ON_ERROR_STOP=1 \
+    -U "$PG_DATABASE_USER" \
+    -d "$verification_database" <"$ROOT_DIR/scripts/sql/production-manifest.sql" >"$manifest_partial"; then
+    compose exec -T pg-db psql \
+      -X \
+      -U "$PG_DATABASE_USER" \
+      -d template1 \
+      -c "drop database if exists \"$verification_database\" with (force);" >/dev/null 2>&1 || true
+    die "backup manifest generation failed"
+  fi
+
+  compose exec -T pg-db psql \
+    -X \
+    -v ON_ERROR_STOP=1 \
+    -U "$PG_DATABASE_USER" \
+    -d template1 \
+    -c "drop database \"$verification_database\" with (force);"
+  mv -f "$manifest_partial" "$manifest"
+
   (
     cd "$backup_dir"
     shasum -a 256 "$(basename "$final")" >"$(basename "$final").sha256"
+    shasum -a 256 "$(basename "$manifest")" >"$(basename "$manifest").sha256"
   )
 
   printf '%s\n' "$final"

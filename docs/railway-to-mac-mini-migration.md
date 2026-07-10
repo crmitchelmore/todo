@@ -19,12 +19,18 @@ release.
 - [x] Railway export, target restore, manifest comparison, integrity checks, backups, and write
       freeze tooling implemented.
 - [x] Existing OpenClaw Tailscale services identified and protected.
-- [ ] Mac mini container runtime bootstrapped.
-- [ ] Dry-run Railway snapshot restored and verified on the Mac mini.
-- [ ] iOS, macOS, Share Extension, App Intents, and web verified against private Tailscale Serve.
-- [ ] Final write freeze, export, restore, and production cutover completed.
-- [ ] Tailscale Funnel enabled after the private soak.
-- [ ] Railway retained frozen for at least seven days, then decommissioned.
+- [x] Mac mini container runtime bootstrapped.
+- [x] Dry-run Railway snapshot restored and verified on the Mac mini.
+- [x] iOS, macOS, Share Extension, App Intents, and web verified against private Tailscale Serve.
+- [x] Final write freeze, export, restore, and production cutover completed.
+- [x] Railway application deployments removed after the replacement passed its gates.
+- [x] Tailscale Funnel enabled on port 10000 without changing OpenClaw's protected listeners.
+- [ ] Public flow verified from outside the tailnet (`cap-3c1.3`).
+- [ ] PR #25 merged and production promoted to the canonical `main` checkout (`cap-3c1.2`).
+- [ ] Backups replicated and restore-rehearsed off-device (`cap-3c1.4`).
+- [ ] Secure Mac mini production deployment automated (`cap-3c1.5`).
+- [ ] Railway Hobby subscription cancellation confirmed in the authenticated billing dashboard
+      (`cap-3c1.1`).
 
 ## Design constraints
 
@@ -39,7 +45,8 @@ release.
 
 - Postgres and the PowerSync admin API remain loopback/container-only.
 - The background worker must run natively on macOS so it can invoke the local OpenClaw harness.
-- Railway remains the rollback system until the Mac mini has completed a seven-day soak.
+- The final Railway dump, manifest, checksums, and retained volume are migration archives; Railway
+  is no longer the active production or rollback runtime.
 
 ## Target architecture
 
@@ -83,7 +90,7 @@ does not own authentication, writes, sync rules, or task lifecycle behaviour.
 | D5 | Run the canonical worker natively through launchd. | A Linux container cannot invoke the Mac's OpenClaw binary or local worktree safely. |
 | D6 | Use a short write freeze plus custom-format dump/restore. | The database is small; the simplest recoverable migration is preferable to live logical replication. |
 | D7 | Rebuild the `powersync` database from source data. | It is derived state; rebuilding avoids stale checkpoints and replication positions. |
-| D8 | Keep Railway backend/worker at zero replicas for at least seven days. | Rollback is a controlled re-enable, not a reconstruction under pressure. |
+| D8 | Remove Railway deployments after the Mac replacement passes data and behaviour gates. | Stops compute spend while retaining the verified export and volume until billing cancellation. |
 
 ## Canonical homes
 
@@ -125,8 +132,8 @@ Set these as GitHub Actions repository variables. The hostname is configuration,
 no API key or database secret is embedded in the clients.
 
 `CaptureConfig.fromEnvironment()` ignores unresolved `$(...)` build placeholders and falls back to
-the existing Railway production endpoints. That keeps local and emergency builds safe when the
-repository variables are absent.
+the same Mac mini production origin. This prevents a missing release variable from silently
+targeting a decommissioned environment.
 
 Native passkeys are the exception to the port-10000 strategy. Apple's Associated Domains service
 validates `webcredentials` on public HTTPS port 443, so the private Serve stage must use email/code
@@ -136,14 +143,14 @@ an outbound tunnel) and a matching entitlement release.
 
 ## Secrets
 
-Production secrets live in the macOS Keychain service `capture`. Commands run through:
+Production secrets live in ignored `.env.local`, mode `600`, on the Mac mini. Commands run through:
 
 ```bash
-CAPTURE_KEYCHAIN_OVERRIDE=1 scripts/with-secrets.sh <command>
+scripts/with-secrets.sh <command>
 ```
 
-The override is intentional on the production Mac: Keychain values must win over ignored local
-development env files.
+The macOS Keychain service `capture` remains an optional source where non-GUI Keychain access is
+reliable; it is not the canonical source on this headless deployment.
 
 Required production values:
 
@@ -151,7 +158,7 @@ Required production values:
 - `CAPTURE_API_SECRET`
 - `PS_API_TOKEN`
 - `BACKEND_JWT_PRIVATE_KEY`
-- `RAILWAY_API_TOKEN` and `RAILWAY_PROJECT_ID` while migration/rollback remains available
+- `RAILWAY_API_TOKEN` and `RAILWAY_PROJECT_ID` only for historical migration or billing inspection
 - the configured mail-provider credential
 - `OPENAI_API_KEY` when LLM enrichment is enabled
 - local harness settings when approved execution is enabled
@@ -164,7 +171,7 @@ Run on the Mac mini:
 
 ```bash
 cd ~/work/todo
-CAPTURE_KEYCHAIN_OVERRIDE=1 scripts/with-secrets.sh scripts/mac-mini.sh bootstrap
+scripts/with-secrets.sh scripts/mac-mini.sh bootstrap
 ```
 
 This installs/starts Colima, Docker CLI, Docker Compose, jq, and Node. It does not touch the
@@ -173,7 +180,7 @@ existing Tailscale Serve/Funnel configuration.
 Build and start the stack:
 
 ```bash
-CAPTURE_KEYCHAIN_OVERRIDE=1 scripts/with-secrets.sh scripts/mac-mini.sh deploy
+scripts/with-secrets.sh scripts/mac-mini.sh deploy
 ```
 
 The production command starts only:
@@ -190,7 +197,7 @@ against loopback Postgres.
 Verify the loopback edge:
 
 ```bash
-CAPTURE_KEYCHAIN_OVERRIDE=1 scripts/with-secrets.sh scripts/mac-mini.sh health
+scripts/with-secrets.sh scripts/mac-mini.sh health
 ```
 
 ## Phase 2 - Private Tailscale Serve
@@ -198,8 +205,7 @@ CAPTURE_KEYCHAIN_OVERRIDE=1 scripts/with-secrets.sh scripts/mac-mini.sh health
 Add only Capture's port 10000 listener:
 
 ```bash
-CAPTURE_KEYCHAIN_OVERRIDE=1 scripts/with-secrets.sh \
-  scripts/mac-mini.sh tailscale-private
+scripts/with-secrets.sh scripts/mac-mini.sh tailscale-private
 ```
 
 The command snapshots all non-10000 Tailscale configuration before and after the change and fails
@@ -241,7 +247,7 @@ The export produces:
 Copy the dump and manifest to the Mac mini over an encrypted channel, then restore:
 
 ```bash
-CAPTURE_KEYCHAIN_OVERRIDE=1 scripts/with-secrets.sh scripts/mac-mini.sh restore \
+scripts/with-secrets.sh scripts/mac-mini.sh restore \
   --dump <capture-railway-...dump> \
   --manifest <capture-railway-...manifest> \
   --confirm-restore
@@ -264,8 +270,8 @@ If any comparison or integrity gate fails, dependent services remain stopped.
 
 ## Phase 4 - Release and private verification
 
-Set the four GitHub Actions variables, then run the iOS, macOS, and web release workflows. On each
-surface verify:
+Set the four GitHub Actions variables, run the iOS and macOS release workflows, validate the web
+bundle with `release-web.yml`, and deploy the Mac stack. On each surface verify:
 
 1. Sign-in succeeds.
 2. A new capture becomes `proposed`.
@@ -304,10 +310,8 @@ Behavioural gate:
 4. Worker enrichment completes.
 5. The local harness executes one approved smoke attempt and records its outcome.
 
-Keep Railway frozen, not deleted.
-
-When the replacement has passed its final gates and the Railway rollback is no longer required,
-pause every service by removing its deployment while retaining the Postgres volume:
+After the replacement passes its final gates, remove every Railway deployment while retaining the
+Postgres volume until billing cancellation:
 
 ```bash
 scripts/with-secrets.sh scripts/railway-write-gate.sh \
@@ -319,8 +323,7 @@ scripts/with-secrets.sh scripts/railway-write-gate.sh \
 Install the user agents:
 
 ```bash
-CAPTURE_KEYCHAIN_OVERRIDE=1 scripts/with-secrets.sh \
-  scripts/mac-mini.sh install-launchd
+scripts/with-secrets.sh scripts/mac-mini.sh install-launchd
 ```
 
 Installed services:
@@ -336,16 +339,17 @@ Backups default to:
 ~/Library/Application Support/Capture/backups
 ```
 
-Set `CAPTURE_BACKUP_DIR` to an external or replicated destination. The deployment script never
-deletes older dumps; apply an operator-managed retention policy to that destination.
+Each run writes a custom-format dump, deterministic manifest, and SHA-256 files, so the guarded
+restore command can consume the backup directly. Set `CAPTURE_BACKUP_DIR` to an external or
+replicated destination. The deployment script never deletes older backups; apply an
+operator-managed retention policy to that destination.
 
 ## Phase 7 - Interim public Funnel
 
 After the private deployment has remained stable:
 
 ```bash
-CAPTURE_KEYCHAIN_OVERRIDE=1 scripts/with-secrets.sh \
-  scripts/mac-mini.sh tailscale-public --confirm-public
+scripts/with-secrets.sh scripts/mac-mini.sh tailscale-public --confirm-public
 ```
 
 This changes only port 10000 from tailnet-only Serve to public Funnel. The hostname, port, client
@@ -364,19 +368,22 @@ Before enabling Funnel:
 
 ## Rollback
 
-If private or public verification fails:
+If public verification fails:
 
-1. Stop using the Mac endpoint.
-2. Re-enable Railway writes:
+1. Switch port 10000 back to tailnet-only Serve:
 
    ```bash
-   scripts/with-secrets.sh scripts/railway-write-gate.sh \
-     unfreeze --confirm-unfreeze
+   scripts/with-secrets.sh scripts/mac-mini.sh tailscale-private
    ```
 
-3. Release/revert client endpoint variables to Railway if clients cannot be redirected immediately.
-4. Compare writes made after the freeze timestamp before replaying anything.
-5. Preserve the Mac database and logs for diagnosis; do not overwrite Railway with unreviewed data.
+2. Keep clients on the same origin; only its reachability changes.
+3. If application code is faulty, deploy the last known-good commit on the Mac.
+4. If durable state is faulty, restore a verified local dump and matching manifest with
+   `scripts/mac-mini.sh restore --confirm-restore`.
+5. Preserve the failed database and logs for diagnosis before restoring or replaying writes.
+
+Railway is no longer an active rollback target. Reactivating its archived project would be a
+separate recovery decision requiring a write comparison against the Mac source of truth.
 
 ## Risk register
 
@@ -391,7 +398,7 @@ If private or public verification fails:
 | Container dependency mismatch | Backend/worker Docker contexts exclude host `node_modules` and use lockfile-based `npm ci`. |
 | Mac reboot leaves services down | launchd restarts Colima/Compose and keeps the native worker alive. |
 | Disk fills with logs/backups | Compose log rotation is bounded; backup location/retention are explicit. |
-| Split-brain during rollback | Railway writes are frozen before the final export and remain frozen until rollback or decommission. |
+| Split-brain during rollback | Only the Mac accepts writes; recovery restores a verified local backup rather than starting a second writer. |
 | Native passkeys fail on the port-10000 endpoint | Use email/code or password during the Tailscale stage; add a dedicated public port-443 domain before re-enabling passkeys. |
 
 ## Conformance rationale

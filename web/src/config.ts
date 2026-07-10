@@ -6,8 +6,8 @@
  * dev (`vite dev`) falls back to the docker-compose stack on localhost.
  */
 const PRODUCTION = {
-  backendUrl: 'https://backend-production-de2f.up.railway.app',
-  powersyncUrl: 'https://powersync-production-e560.up.railway.app',
+  backendUrl: 'https://bravos-mac-mini.taile313a5.ts.net:10000',
+  powersyncUrl: 'https://bravos-mac-mini.taile313a5.ts.net:10000',
 } as const;
 
 const LOCAL = {

@@ -5,7 +5,7 @@ import { ensureTestAccount, captureViaApi, confirmViaApi, rejectViaApi, applyDat
 import { config } from "../src/harness/env.js";
 
 /**
- * Deterministic acceptance for the backend write path (production Railway). Fast, no sandbox.
+ * Deterministic acceptance for the production backend write path. Fast, no sandbox.
  * Delta-based assertions (the dedicated account accumulates state across runs).
  */
 let account: TestAccount;

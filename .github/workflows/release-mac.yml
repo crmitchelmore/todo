@@ -138,10 +138,9 @@ jobs:
         run: |
           # CAPTURE_API_SECRET is baked into Info.plist via the $(CAPTURE_API_SECRET)
           # build setting so the app can authenticate to the gated backend.
-          # The project entitlements include Associated Domains for passkeys/webcredentials,
-          # which requires a provisioning profile. Developer ID distribution is for Sparkle
-          # updates outside the Mac App Store, so archive with a minimal entitlements file to
-          # avoid provisioning-profile churn and certificate creation during routine releases.
+          # Developer ID distribution is for Sparkle updates outside the Mac App Store, so archive
+          # with a minimal entitlements file to avoid provisioning-profile churn and certificate
+          # creation during routine releases.
           DEVELOPER_ID_ENTITLEMENTS="$RUNNER_TEMP/DeveloperID.entitlements"
           cat > "$DEVELOPER_ID_ENTITLEMENTS" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>

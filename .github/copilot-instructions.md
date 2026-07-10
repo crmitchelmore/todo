@@ -34,12 +34,13 @@
 - After UI changes, run `scripts/ui-validate.sh web ios mac` or the narrow affected surface, then inspect the generated `.ui-artifacts/<timestamp>/design-review.md` checklist and screenshots/logs.
 - Use Playwright/Webwright for browser interaction, iOS Simulator for iOS, and the built Mac app screenshot/log path for macOS. Fix usability/design issues before claiming parity.
 
-## PowerSync/Railway rollouts
+## PowerSync/Mac mini rollouts
 
 - Schema changes that sync to clients must be rolled out across every layer together: Postgres migration/publication, PowerSync sync rules, backend upload allow-list, and web/Swift local schemas.
-- Deploy Railway services from the repository root; only use service-specific paths where existing scripts document them.
-- Railway deploy path exception: deploy `backend` and `powersync` from the repository root, but deploy `worker` with `scripts/with-secrets.sh railway up ./worker --path-as-root --ci --service worker` because Railway cannot infer the worker from the monorepo root.
-- Do not ship App Store/TestFlight clients with a schema-writing change until the live Railway backend and PowerSync service have been migrated and redeployed.
+- Deploy the production Compose stack from the repository root with `scripts/with-secrets.sh scripts/mac-mini.sh deploy`.
+- Keep the production worker native through the launchd template; do not add a parallel container worker that cannot invoke the local harness.
+- Do not ship App Store/TestFlight clients with a schema-writing change until the live Mac mini Postgres and PowerSync services have been migrated and redeployed.
+- Railway scripts are retained only for migration history and archived recovery; Railway is not the current deployment target.
 
 ## Apple signing
 
@@ -48,7 +49,7 @@
 
 ## Local harness executor
 
-- Approved AI attempt checkpoints are executed only by the worker running on the selected local backend computer when `LOCAL_HARNESS_ENABLED=1`; keep production/Railway safe-by-default unless a local harness is explicitly configured.
+- Approved AI attempt checkpoints are executed only by the worker running on the selected local backend computer when `LOCAL_HARNESS_ENABLED=1`; keep production safe-by-default unless a local harness is explicitly configured.
 - Supported harness kinds are `copilot-cli`, `hermes`, `openclaw`, and `custom`; use `LOCAL_HARNESS_COMMAND`, `LOCAL_HARNESS_WORKDIR`, and optional `LOCAL_HARNESS_ARGS_JSON` to point at whatever CLI is installed on that Mac.
 - Pass prompts as argv placeholders (`{prompt}`), not shell-interpolated strings, and keep timeouts bounded with `LOCAL_HARNESS_TIMEOUT_SECONDS`.
 - Do not close local harness execution work until the configured harness smoke succeeds and a completed or failed attempt is recorded back into `task_events` with harness kind/device metadata.

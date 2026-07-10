@@ -35,12 +35,12 @@ public struct CaptureConfig: Sendable {
         appGroupId: "group.dev.crmitchelmore.capture"
     )
 
-    /// Remote deployment where the backend connector and the PowerSync service are reachable on
-    /// two separate HTTPS origins (the Railway model: each service gets its own public domain).
+    /// Remote deployment where the backend connector and PowerSync service are reachable over
+    /// HTTPS. Both hosts may be the same when a single edge routes by path.
     ///
     ///   CaptureConfig.remote(
-    ///     backendHost: "backend-production-de2f.up.railway.app",
-    ///     powersyncHost: "powersync-production-e560.up.railway.app")
+    ///     backendHost: "capture.example.com",
+    ///     powersyncHost: "capture.example.com")
     public static func remote(
         backendHost: String,
         powersyncHost: String,
@@ -57,14 +57,14 @@ public struct CaptureConfig: Sendable {
         )
     }
 
-    /// The live Railway deployment. Each service is fronted by its own Railway public domain.
+    /// The live Mac mini deployment, routed through one Tailscale HTTPS origin.
     public static let production = CaptureConfig.remote(
-        backendHost: "backend-production-de2f.up.railway.app",
-        powersyncHost: "powersync-production-e560.up.railway.app"
+        backendHost: "bravos-mac-mini.taile313a5.ts.net:10000",
+        powersyncHost: "bravos-mac-mini.taile313a5.ts.net:10000"
     )
 
     /// Reads `CAPTURE_BACKEND_HOST` / `CAPTURE_POWERSYNC_HOST` from the environment (or the
-    /// matching Info.plist keys), falling back to the live Railway `production` deployment when
+    /// matching Info.plist keys), falling back to the live Mac mini `production` deployment when
     /// unset. Set both to a localhost pair (and run docker-compose) to target the local stack in
     /// dev without code changes.
     public static func fromEnvironment(
