@@ -14,9 +14,11 @@ private final class SpyToken: TokenProviding, @unchecked Sendable {
 /// Returns a configurable status code for the auth/token request.
 private final class AuthMockURLProtocol: URLProtocol {
     nonisolated(unsafe) static var statusCode = 401
+    nonisolated(unsafe) static var lastRequestURL: URL?
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        Self.lastRequestURL = request.url
         let resp = HTTPURLResponse(url: request.url!, statusCode: Self.statusCode,
                                    httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)
@@ -84,5 +86,36 @@ final class BackendConnectorTests: XCTestCase {
         do { _ = try await connector.fetchCredentials() } catch {}
 
         XCTAssertEqual(token.invalidateCount, 0, "an interleaved success must reset the 401 run")
+    }
+
+    func testSingleOriginWithPortPreservesBackendTokenPath() async {
+        AuthMockURLProtocol.statusCode = 200
+        AuthMockURLProtocol.lastRequestURL = nil
+        let token = SpyToken()
+        let connector = BackendConnector(
+            config: .remote(
+                backendHost: "capture-mini.example.test:10000",
+                powersyncHost: "capture-mini.example.test:10000"
+            ),
+            token: token,
+            session: session()
+        )
+
+        _ = try? await connector.fetchCredentials()
+
+        XCTAssertEqual(
+            AuthMockURLProtocol.lastRequestURL?.absoluteString,
+            "https://capture-mini.example.test:10000/api/auth/token"
+        )
+    }
+
+    func testFromEnvironmentIgnoresUnexpandedBuildSettings() {
+        let config = CaptureConfig.fromEnvironment(
+            backendHost: "$(CAPTURE_BACKEND_HOST)",
+            powersyncHost: "$(CAPTURE_POWERSYNC_HOST)"
+        )
+
+        XCTAssertEqual(config.backendURL, CaptureConfig.production.backendURL)
+        XCTAssertEqual(config.powersyncURL, CaptureConfig.production.powersyncURL)
     }
 }

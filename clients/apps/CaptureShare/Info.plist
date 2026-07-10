@@ -10,8 +10,12 @@
 	<string>$(PRODUCT_NAME)</string>
 	<key>CAPTURE_API_SECRET</key>
 	<string>$(CAPTURE_API_SECRET)</string>
+	<key>CAPTURE_BACKEND_HOST</key>
+	<string>$(CAPTURE_BACKEND_HOST)</string>
 	<key>CAPTURE_KEYCHAIN_ACCESS_GROUP</key>
 	<string>$(AppIdentifierPrefix)dev.crmitchelmore.capture.session</string>
+	<key>CAPTURE_POWERSYNC_HOST</key>
+	<string>$(CAPTURE_POWERSYNC_HOST)</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>

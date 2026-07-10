@@ -129,6 +129,8 @@ jobs:
         env:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           CAPTURE_API_SECRET: ${{ secrets.CAPTURE_API_SECRET }}
+          CAPTURE_BACKEND_HOST: ${{ vars.CAPTURE_BACKEND_HOST }}
+          CAPTURE_POWERSYNC_HOST: ${{ vars.CAPTURE_POWERSYNC_HOST }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           SENTRY_ENVIRONMENT: production
           KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
@@ -164,6 +166,8 @@ jobs:
             ENABLE_HARDENED_RUNTIME=YES \
             SENTRY_DSN="$SENTRY_DSN" \
             SENTRY_ENVIRONMENT="$SENTRY_ENVIRONMENT" \
+            CAPTURE_BACKEND_HOST="$CAPTURE_BACKEND_HOST" \
+            CAPTURE_POWERSYNC_HOST="$CAPTURE_POWERSYNC_HOST" \
             CAPTURE_API_SECRET="$CAPTURE_API_SECRET"
 
       - name: Export Developer ID App

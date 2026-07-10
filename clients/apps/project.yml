@@ -63,6 +63,8 @@ targets:
               - capture
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CAPTURE_API_SECRET: $(CAPTURE_API_SECRET)
+        CAPTURE_BACKEND_HOST: $(CAPTURE_BACKEND_HOST)
+        CAPTURE_POWERSYNC_HOST: $(CAPTURE_POWERSYNC_HOST)
         CAPTURE_KEYCHAIN_ACCESS_GROUP: $(AppIdentifierPrefix)dev.crmitchelmore.capture.session
         SENTRY_DSN: $(SENTRY_DSN)
         SENTRY_ENVIRONMENT: $(SENTRY_ENVIRONMENT)
@@ -151,6 +153,8 @@ targets:
       properties:
         CFBundleDisplayName: Capture
         CAPTURE_API_SECRET: $(CAPTURE_API_SECRET)
+        CAPTURE_BACKEND_HOST: $(CAPTURE_BACKEND_HOST)
+        CAPTURE_POWERSYNC_HOST: $(CAPTURE_POWERSYNC_HOST)
         SENTRY_DSN: $(SENTRY_DSN)
         SENTRY_ENVIRONMENT: $(SENTRY_ENVIRONMENT)
         NSCalendarsUsageDescription: Capture reads your calendar availability to suggest realistic due dates and show whether you have time for a task.

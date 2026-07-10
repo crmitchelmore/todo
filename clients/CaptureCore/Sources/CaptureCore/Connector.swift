@@ -97,6 +97,7 @@ public struct CaptureConfig: Sendable {
         guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
             return nil
         }
+        guard !trimmed.contains("$(") else { return nil }
         return trimmed
     }
 

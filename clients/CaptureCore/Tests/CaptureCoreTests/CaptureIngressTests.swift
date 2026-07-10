@@ -66,6 +66,22 @@ final class CaptureIngressTests: XCTestCase {
         XCTAssertEqual(json["id"] as? String, input.id)
     }
 
+    func testHTTPIngressPreservesConfiguredOriginAndPort() async throws {
+        MockURLProtocol.statusCode = 200
+        MockURLProtocol.lastRequestURL = nil
+        let ingress = HTTPCaptureIngress(
+            backendURL: URL(string: "https://capture-mini.example.test:10000")!,
+            session: mockedSession()
+        )
+
+        try await ingress.capture(CaptureInput(rawText: "buy milk", source: "share-extension"))
+
+        XCTAssertEqual(
+            MockURLProtocol.lastRequestURL?.absoluteString,
+            "https://capture-mini.example.test:10000/api/capture"
+        )
+    }
+
     func testHTTPIngressThrowsOnServerError() async {
         MockURLProtocol.statusCode = 500
         let session = mockedSession()
