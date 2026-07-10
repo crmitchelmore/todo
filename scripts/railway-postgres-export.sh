@@ -127,7 +127,10 @@ manifest_container=""
 
 mv -f "$manifest_partial" "$manifest_file"
 mv -f "$dump_partial" "$dump_file"
-shasum -a 256 "$dump_file" >"${dump_file}.sha256"
-shasum -a 256 "$manifest_file" >"${manifest_file}.sha256"
+(
+  cd "$output_dir"
+  shasum -a 256 "$(basename "$dump_file")" >"$(basename "$dump_file").sha256"
+  shasum -a 256 "$(basename "$manifest_file")" >"$(basename "$manifest_file").sha256"
+)
 
 printf 'DUMP=%s\nMANIFEST=%s\n' "$dump_file" "$manifest_file"

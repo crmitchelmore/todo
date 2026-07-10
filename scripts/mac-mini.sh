@@ -263,7 +263,10 @@ backup() {
     -d "$PG_DATABASE_NAME" >"$partial"
   compose exec -T pg-db pg_restore --list <"$partial" >/dev/null
   mv -f "$partial" "$final"
-  shasum -a 256 "$final" >"${final}.sha256"
+  (
+    cd "$backup_dir"
+    shasum -a 256 "$(basename "$final")" >"$(basename "$final").sha256"
+  )
 
   printf '%s\n' "$final"
 }
