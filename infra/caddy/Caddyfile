@@ -1,0 +1,26 @@
+{
+	auto_https off
+	servers {
+		trusted_proxies static 127.0.0.1/32 ::1/128
+		trusted_proxies_strict
+		client_ip_headers X-Forwarded-For X-Real-IP
+	}
+}
+
+:10000 {
+	@backend path /api/*
+	handle @backend {
+		reverse_proxy backend:6060
+	}
+
+	@powersync path /sync/* /probes/*
+	handle @powersync {
+		reverse_proxy powersync:8080 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+}
