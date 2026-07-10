@@ -57,11 +57,21 @@ Key environment variables:
 | worker | `WORKER_DATABASE_URI` | `postgres://postgres:<pw>@<pg-private>:5432/postgres` |
 | worker (local/Mac) | `CAPTURE_WORK_ROOT` | optional Git repo root to scan for engineering-task GitHub associations; macOS falls back to `~/work` |
 | worker (local/Mac) | `LOCAL_HARNESS_ENABLED` | set to `1` only on the local computer assigned to execute approved agent attempts |
-| worker (local/Mac) | `LOCAL_HARNESS_KIND` | `copilot-cli`, `hermes`, `openclaw`, or `custom` |
+| worker (local/Mac) | `LOCAL_HARNESS_KIND` | `codex`, `hermes`, `openclaw`, or `custom`; legacy `copilot-cli` rows remain readable |
 | worker (local/Mac) | `LOCAL_HARNESS_COMMAND` / `LOCAL_HARNESS_WORKDIR` | local harness binary and working directory on that computer |
 | worker (local/Mac) | `LOCAL_HARNESS_ARGS_JSON` | optional JSON `{ "args": [...] }` template; `{prompt}` and `{timeout}` are substituted as argv values, not shell-interpolated |
 | worker (local/Mac) | `LOCAL_HARNESS_AGENT` / `LOCAL_HARNESS_THINKING` | optional OpenClaw-style adapter settings when `LOCAL_HARNESS_KIND=openclaw` |
 | worker (local/Mac) | `LOCAL_HARNESS_DEVICE_ID` / `LOCAL_HARNESS_DEVICE_NAME` | stable label recorded in task events so multiple Macs are distinguishable |
+
+For this machine, prefer the Codex harness so approved local attempts use the logged-in OpenAI
+subscription instead of a Copilot CLI token:
+
+```bash
+LOCAL_HARNESS_ENABLED=1
+LOCAL_HARNESS_KIND=codex
+LOCAL_HARNESS_COMMAND=codex
+LOCAL_HARNESS_WORKDIR=/Users/bravostation/work/todo
+```
 
 > **Postgres without TLS on the private network.** `sslmode` is **not** read from the connection
 > URI by PowerSync — it must be set explicitly. `infra/powersync/service.yaml` sets

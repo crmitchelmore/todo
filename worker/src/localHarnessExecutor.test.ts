@@ -62,6 +62,22 @@ test('known harness adapters build local commands without SSH', () => {
     ['run', '{prompt}', '--output', 'json']
   );
   assert.deepEqual(
+    localHarnessConfigFromEnv({
+      LOCAL_HARNESS_ENABLED: '1',
+      LOCAL_HARNESS_KIND: 'codex',
+      LOCAL_HARNESS_WORKDIR: '/Users/cm/work/todo',
+    })?.argsTemplate,
+    ['exec', '--json', '--sandbox', 'danger-full-access', '--cd', '{workdir}', '{prompt}']
+  );
+  assert.deepEqual(
+    buildLocalHarnessArgs(localHarnessConfigFromEnv({
+      LOCAL_HARNESS_ENABLED: '1',
+      LOCAL_HARNESS_KIND: 'codex',
+      LOCAL_HARNESS_WORKDIR: '/Users/cm/work/todo',
+    })!, prompt).slice(0, 6),
+    ['exec', '--json', '--sandbox', 'danger-full-access', '--cd', '/Users/cm/work/todo']
+  );
+  assert.deepEqual(
     localHarnessConfigFromEnv({ LOCAL_HARNESS_ENABLED: '1', LOCAL_HARNESS_KIND: 'copilot-cli' })?.argsTemplate,
     ['-p', '{prompt}', '--json']
   );
@@ -110,6 +126,32 @@ test('runLocalHarnessAttempt parses JSON response from local harnesses', async (
   assert.equal(result.reply, 'Drafted the reply.');
   assert.equal(result.harnessKind, 'openclaw');
   assert.equal(result.deviceId, 'mac-mini');
+});
+
+test('runLocalHarnessAttempt extracts the final Codex JSONL agent message', async () => {
+  const config: LocalHarnessConfig = {
+    ...baseConfig,
+    kind: 'codex',
+    command: 'codex',
+    argsTemplate: ['exec', '--json', '--sandbox', 'danger-full-access', '--cd', '{workdir}', '{prompt}'],
+    workdir: '/Users/cm/work/todo',
+  };
+  const result = await runLocalHarnessAttempt(config, attemptInput, async (file, args) => {
+    assert.equal(file, 'codex');
+    assert.deepEqual(args.slice(0, 6), ['exec', '--json', '--sandbox', 'danger-full-access', '--cd', '/Users/cm/work/todo']);
+    return {
+      stdout: [
+        JSON.stringify({ type: 'thread.started', thread_id: 'thread-1' }),
+        JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: '{"status":"ok","reply":"Codex completed it."}' } }),
+        JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 5 } }),
+      ].join('\n'),
+      stderr: '',
+    };
+  });
+
+  assert.equal(result.status, 'ok');
+  assert.equal(result.reply, 'Codex completed it.');
+  assert.equal(result.harnessKind, 'codex');
 });
 
 test('runLocalHarnessAttempt reports failures without echoing the full prompt command', async () => {

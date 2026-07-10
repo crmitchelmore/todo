@@ -1138,7 +1138,7 @@ function normalizeAgentDeviceWrite(data: Record<string, unknown>): void {
   if (data.status === 'disabled') data.is_selected_backend = 0;
   if (Object.hasOwn(data, 'harness_kind') && typeof data.harness_kind === 'string') {
     const kind = data.harness_kind.trim();
-    data.harness_kind = ['copilot-cli', 'hermes', 'openclaw', 'custom'].includes(kind) ? kind : null;
+    data.harness_kind = ['codex', 'copilot-cli', 'hermes', 'openclaw', 'custom'].includes(kind) ? kind : null;
   }
 }
 

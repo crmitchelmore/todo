@@ -5,7 +5,7 @@ import type { AgentHandoffRequest } from './handoff.js';
 
 const execFileAsync = promisify(execFile);
 
-export type LocalHarnessKind = 'copilot-cli' | 'hermes' | 'openclaw' | 'custom';
+export type LocalHarnessKind = 'codex' | 'copilot-cli' | 'hermes' | 'openclaw' | 'custom';
 
 export interface LocalHarnessEnv {
   readonly LOCAL_HARNESS_ENABLED?: string;
@@ -118,6 +118,7 @@ export function buildLocalHarnessArgs(config: LocalHarnessConfig, prompt: string
       .replaceAll('{timeout}', String(config.timeoutSeconds))
       .replaceAll('{deviceId}', config.deviceId)
       .replaceAll('{deviceName}', config.deviceName)
+      .replaceAll('{workdir}', config.workdir)
   );
 }
 
@@ -157,13 +158,15 @@ export async function runLocalHarnessAttempt(
 
 function readHarnessKind(value: string | undefined): LocalHarnessKind {
   const normalized = value?.trim().toLowerCase();
-  return normalized === 'copilot-cli' || normalized === 'hermes' || normalized === 'openclaw' || normalized === 'custom'
+  return normalized === 'codex' || normalized === 'copilot-cli' || normalized === 'hermes' || normalized === 'openclaw' || normalized === 'custom'
     ? normalized
     : 'custom';
 }
 
 function defaultCommand(kind: LocalHarnessKind): string {
   switch (kind) {
+    case 'codex':
+      return 'codex';
     case 'copilot-cli':
       return 'copilot';
     case 'hermes':
@@ -183,6 +186,8 @@ function readArgsTemplate(env: LocalHarnessEnv, kind: LocalHarnessKind): string[
   }
 
   switch (kind) {
+    case 'codex':
+      return ['exec', '--json', '--sandbox', 'danger-full-access', '--cd', '{workdir}', '{prompt}'];
     case 'openclaw': {
       const args = ['agent', '--message', '{prompt}', '--json', '--timeout', '{timeout}'];
       const agent = env.LOCAL_HARNESS_AGENT?.trim();
@@ -217,12 +222,64 @@ function safeExecutionError(config: LocalHarnessConfig, err: unknown): string {
 }
 
 function parseHarnessJSON(stdout: string): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(stdout) as unknown;
-    return readRecord(parsed);
-  } catch {
-    return { status: 'unknown', reply: stdout };
+  const parsed = parseRecord(stdout);
+  if (parsed) return parsed;
+
+  const events = stdout
+    .split(/\r?\n/)
+    .map((line) => parseRecord(line.trim()))
+    .filter((event): event is Record<string, unknown> => event !== null);
+
+  if (events.length > 0) {
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const item = readRecord(events[i].item);
+      if (events[i].type === 'item.completed' && item.type === 'agent_message' && typeof item.text === 'string') {
+        const embedded = parseRecord(item.text.trim());
+        if (embedded) return embedded;
+        return {
+          status: 'ok',
+          reply: item.text,
+          events: summarizeEvents(events),
+        };
+      }
+      if (item.type === 'error' && typeof item.message === 'string') {
+        return {
+          status: 'error',
+          reply: item.message,
+          events: summarizeEvents(events),
+        };
+      }
+    }
+    return {
+      status: 'unknown',
+      reply: stdout,
+      events: summarizeEvents(events),
+    };
   }
+
+  return { status: 'unknown', reply: stdout };
+}
+
+function parseRecord(value: string): Record<string, unknown> | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    const record = readRecord(parsed);
+    return Object.keys(record).length > 0 ? record : null;
+  } catch {
+    return null;
+  }
+}
+
+function summarizeEvents(events: Record<string, unknown>[]): Record<string, unknown>[] {
+  return events.slice(-20).map((event) => {
+    const item = readRecord(event.item);
+    return {
+      type: event.type,
+      item_type: item.type,
+      message: typeof item.message === 'string' ? item.message.slice(0, 500) : undefined,
+    };
+  });
 }
 
 function extractHarnessReply(raw: Record<string, unknown>): string | null {

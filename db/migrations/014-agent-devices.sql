@@ -21,7 +21,7 @@ create table if not exists public.agent_devices (
   constraint agent_devices_status_chk check (status in ('active', 'disabled')),
   constraint agent_devices_selected_chk check (is_selected_backend in (0, 1)),
   constraint agent_devices_harness_kind_chk
-    check (harness_kind is null or harness_kind in ('copilot-cli', 'hermes', 'openclaw', 'custom')),
+    check (harness_kind is null or harness_kind in ('codex', 'copilot-cli', 'hermes', 'openclaw', 'custom')),
   constraint agent_devices_harness_label_len_chk
     check (harness_label is null or char_length(harness_label) between 1 and 120),
   constraint agent_devices_capabilities_len_chk

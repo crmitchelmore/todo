@@ -18,8 +18,8 @@ final class AgentDeviceTests: XCTestCase {
         try await store.upsertAgentDevice(
             id: id,
             deviceName: "Renamed Mac",
-            harnessKind: .copilotCLI,
-            harnessLabel: "Copilot CLI",
+            harnessKind: .codex,
+            harnessLabel: "Codex",
             capabilities: ["attempt"],
             selectedBackend: false
         )
@@ -31,8 +31,8 @@ final class AgentDeviceTests: XCTestCase {
         )
         XCTAssertEqual(devices.count, 1)
         XCTAssertEqual(devices.first?.deviceName, "Renamed Mac")
-        XCTAssertEqual(devices.first?.harnessKind, .copilotCLI)
-        XCTAssertEqual(devices.first?.harnessLabel, "Copilot CLI")
+        XCTAssertEqual(devices.first?.harnessKind, .codex)
+        XCTAssertEqual(devices.first?.harnessLabel, "Codex")
         XCTAssertEqual(devices.first?.capabilities, ["attempt"])
         XCTAssertEqual(devices.first?.isSelectedBackend, false)
 

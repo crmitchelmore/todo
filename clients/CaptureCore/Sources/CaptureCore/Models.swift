@@ -243,10 +243,13 @@ public enum AgentDeviceStatus: String, Sendable, Equatable {
 }
 
 public enum AgentHarnessKind: String, Sendable, Equatable, CaseIterable {
+    case codex
     case copilotCLI = "copilot-cli"
     case hermes
     case openclaw
     case custom
+
+    public static let registrationOptions: [AgentHarnessKind] = [.codex, .hermes, .openclaw, .custom]
 }
 
 /// A synced local-computer registration row. Multiple Macs can install Capture, but at most one

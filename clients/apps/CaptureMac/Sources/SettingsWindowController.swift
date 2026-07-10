@@ -773,8 +773,8 @@ private struct DiagnosticSeverityPill: View {
 
 private struct AgentBackendSettingsView: View {
     @ObservedObject var taxonomy: TaxonomySettingsStore
-    @State private var harnessKind: AgentHarnessKind = .openclaw
-    @State private var harnessLabel = "OpenClaw"
+    @State private var harnessKind: AgentHarnessKind = .codex
+    @State private var harnessLabel = "Codex"
     @State private var capabilities = "research, attempt"
     @State private var selectThisMac = true
 
@@ -789,7 +789,7 @@ private struct AgentBackendSettingsView: View {
             }
             HStack {
                 Picker("Harness", selection: $harnessKind) {
-                    ForEach(AgentHarnessKind.allCases, id: \.rawValue) { kind in
+                    ForEach(AgentHarnessKind.registrationOptions, id: \.rawValue) { kind in
                         Text(label(for: kind)).tag(kind)
                     }
                 }
@@ -883,7 +883,8 @@ private struct AgentBackendSettingsView: View {
 
     private func label(for kind: AgentHarnessKind) -> String {
         switch kind {
-        case .copilotCLI: return "Copilot CLI"
+        case .codex: return "Codex"
+        case .copilotCLI: return "Copilot CLI (legacy)"
         case .hermes: return "Hermes"
         case .openclaw: return "OpenClaw"
         case .custom: return "Custom"

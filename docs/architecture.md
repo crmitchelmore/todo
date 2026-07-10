@@ -118,7 +118,7 @@ accept, quick inline edit, and reject. Agent proposals carry **confidence + prov
 
 ## Agent & HITL
 
-The selected backend computer runs a local harness adapter (Copilot CLI, Hermes, OpenClaw, or custom)
+The selected backend computer runs a local harness adapter (Codex, Hermes, OpenClaw, or custom)
 against durable approval checkpoints. Flow: agent proposes → state serialised → pushed to a confirm
 card / approval queue → resume or abort on the human decision. An **autonomy policy engine**
 classifies actions by risk/reversibility: low-risk auto-executes; consequential actions require
