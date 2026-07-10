@@ -306,6 +306,14 @@ Behavioural gate:
 
 Keep Railway frozen, not deleted.
 
+When the replacement has passed its final gates and the Railway rollback is no longer required,
+pause every service while retaining the Postgres volume:
+
+```bash
+scripts/with-secrets.sh scripts/railway-write-gate.sh \
+  pause-all --confirm-pause-all
+```
+
 ## Phase 6 - Launchd and backups
 
 Install the user agents:
