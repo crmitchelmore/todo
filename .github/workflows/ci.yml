@@ -35,6 +35,10 @@ jobs:
   web:
     name: Web
     runs-on: ubuntu-latest
+    env:
+      VITE_BACKEND_URL: http://127.0.0.1:6060
+      VITE_POWERSYNC_URL: http://127.0.0.1:8080
+      VITE_GITHUB_OAUTH_PROBE: "0"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
