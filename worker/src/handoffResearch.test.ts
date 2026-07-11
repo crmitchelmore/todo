@@ -65,6 +65,57 @@ test('runAgentResearch calls the configured LLM with task, prompt, memories, and
   assert.equal(brief.confidence, 0.82);
 });
 
+test('runAgentResearch can use Codex subscription JSONL with GPT-5.6 Sol', async () => {
+  const calls: Array<{ file: string; args: readonly string[]; cwd: string; timeout: number }> = [];
+  const brief = await runAgentResearch(
+    'Need to buy a wok',
+    { requestId: '11111111-1111-5111-8111-111111111111', mode: 'research', instructions: 'find sensible options' },
+    discovery,
+    {
+      env: {
+        RESEARCH_LLM_PROVIDER: 'codex',
+        RESEARCH_LLM_MODEL: 'gpt-5.6-sol',
+        CODEX_RESEARCH_COMMAND: 'codex',
+        CODEX_RESEARCH_WORKDIR: '/Users/cm/work/todo',
+        CODEX_RESEARCH_TIMEOUT_SECONDS: '240',
+      },
+      execImpl: async (file, args, options) => {
+        calls.push({ file, args, cwd: options.cwd, timeout: options.timeout });
+        return {
+          stdout: [
+            JSON.stringify({ type: 'thread.started', thread_id: 'thread-1' }),
+            JSON.stringify({ type: 'item.completed', item: { type: 'error', message: 'unstable feature warning' } }),
+            JSON.stringify({
+              type: 'item.completed',
+              item: {
+                type: 'agent_message',
+                text: JSON.stringify({
+                  summary: 'A flat-bottom carbon steel wok is the strongest fit.',
+                  recommendations: ['Avoid non-stick coatings.', 'Check handle shape for the hob.'],
+                  next_actions: ['Shortlist UK carbon steel options.'],
+                  confidence: 0.87,
+                }),
+              },
+            }),
+            JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 100, output_tokens: 20 } }),
+          ].join('\n'),
+          stderr: '',
+        };
+      },
+      now: new Date('2026-07-11T07:00:00Z'),
+    }
+  );
+
+  assert.equal(calls[0].file, 'codex');
+  assert.deepEqual(calls[0].args.slice(0, 6), ['exec', '--json', '--sandbox', 'read-only', '--model', 'gpt-5.6-sol']);
+  assert.equal(calls[0].cwd, '/Users/cm/work/todo');
+  assert.equal(calls[0].timeout, 240_000);
+  assert.equal(brief.model, 'gpt-5.6-sol');
+  assert.match(brief.body, /carbon steel wok/i);
+  assert.deepEqual(brief.nextActions, ['Shortlist UK carbon steel options.']);
+  assert.equal(brief.confidence, 0.87);
+});
+
 test('runAgentResearch fails loudly when LLM credentials are missing', async () => {
   await assert.rejects(
     () => runAgentResearch(
@@ -80,4 +131,14 @@ test('runAgentResearch fails loudly when LLM credentials are missing', async () 
 test('parseResearchResponse rejects template-shaped or invalid LLM output', () => {
   assert.throws(() => parseResearchResponse('not json'), /invalid JSON/);
   assert.throws(() => parseResearchResponse(JSON.stringify({ recommendations: [] })), /missing summary/);
+});
+
+test('parseResearchResponse keeps body inside agent proposal limits', () => {
+  const brief = parseResearchResponse(JSON.stringify({
+    summary: 'A'.repeat(2100),
+    recommendations: ['B'.repeat(500)],
+    next_actions: ['C'.repeat(500)],
+    confidence: 0.9,
+  }), 'gpt-5.6-sol');
+  assert.equal(brief.body.length, 2000);
 });

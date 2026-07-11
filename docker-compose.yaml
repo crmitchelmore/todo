@@ -56,9 +56,14 @@ services:
       WORKER_DATABASE_URI: ${BACKEND_DATABASE_URI}
       ENRICH_POLL_MS: ${ENRICH_POLL_MS:-2000}
       ENRICH_BATCH: ${ENRICH_BATCH:-20}
-      # Optional: set OPENAI_API_KEY to upgrade suggestions from deterministic to LLM.
+      # Optional: set OPENAI_API_KEY to upgrade suggestions and API-backed research from deterministic to LLM.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ENRICH_LLM_MODEL: ${ENRICH_LLM_MODEL:-gpt-4o-mini}
+      RESEARCH_LLM_PROVIDER: ${RESEARCH_LLM_PROVIDER:-api}
+      RESEARCH_LLM_MODEL: ${RESEARCH_LLM_MODEL:-gpt-5.6-sol}
+      CODEX_RESEARCH_COMMAND: ${CODEX_RESEARCH_COMMAND:-codex}
+      CODEX_RESEARCH_WORKDIR: ${CODEX_RESEARCH_WORKDIR:-/app}
+      CODEX_RESEARCH_TIMEOUT_SECONDS: ${CODEX_RESEARCH_TIMEOUT_SECONDS:-180}
 
   powersync:
     image: journeyapps/powersync-service:latest

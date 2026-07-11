@@ -26,7 +26,10 @@ export function needsInterview(discovery: TaskDiscovery, brief: AgentResearchBri
   if (!brief) return true;
   if (brief.confidence < 0.62) return true;
   if (discovery.confidence < 0.5 && discovery.memories.length === 0) return true;
-  if (discovery.web.source !== 'configured_endpoint' && discovery.memories.length === 0 && discovery.location.source === 'unavailable') {
+  const hasContext = discovery.memories.length > 0
+    || discovery.location.source !== 'unavailable'
+    || discovery.web.results.length > 0;
+  if (!hasContext && discovery.web.source !== 'configured_endpoint') {
     return true;
   }
   return false;

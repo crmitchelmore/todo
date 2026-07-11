@@ -1481,9 +1481,19 @@ async function tick(): Promise<number> {
 }
 
 async function main() {
+  const researchProvider = process.env.RESEARCH_LLM_PROVIDER?.trim().toLowerCase() === 'codex'
+    ? 'codex'
+    : process.env.OPENAI_API_KEY
+      ? 'api'
+      : 'off';
+  const researchModel = process.env.RESEARCH_LLM_MODEL?.trim()
+    || process.env.HANDOFF_LLM_MODEL?.trim()
+    || process.env.ENRICH_LLM_MODEL?.trim()
+    || 'gpt-5.6-sol';
   console.log(
     `[worker] capture enrichment worker up. poll=${POLL_MS}ms batch=${BATCH} ` +
       `llm=${process.env.OPENAI_API_KEY ? 'on' : 'off'} ` +
+      `research=${researchProvider}:${researchModel} ` +
       `local_harness=${LOCAL_HARNESS_CONFIG ? `${LOCAL_HARNESS_CONFIG.kind}:${LOCAL_HARNESS_CONFIG.deviceName}` : 'off'} ` +
       `once=${RUN_ONCE}`
   );

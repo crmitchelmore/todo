@@ -55,6 +55,10 @@ Key environment variables:
 | powersync | `PS_JWKS_URL` | `http://backend.railway.internal:6060/api/auth/keys` |
 | powersync | `PS_PORT` | `8080` |
 | worker | `WORKER_DATABASE_URI` | `postgres://postgres:<pw>@<pg-private>:5432/postgres` |
+| worker | `RESEARCH_LLM_MODEL` | model for automatic/manual research briefs; default `gpt-5.6-sol` |
+| worker | `RESEARCH_LLM_PROVIDER` | `api` for OpenAI API key usage, or `codex` for a host worker using logged-in Codex subscription auth |
+| worker | `OPENAI_API_KEY` | required when `RESEARCH_LLM_PROVIDER=api`; also enables optional LLM enrichment |
+| worker | `CODEX_RESEARCH_COMMAND` / `CODEX_RESEARCH_WORKDIR` | Codex CLI command and repo workdir when `RESEARCH_LLM_PROVIDER=codex` |
 | worker (local/Mac) | `CAPTURE_WORK_ROOT` | optional Git repo root to scan for engineering-task GitHub associations; macOS falls back to `~/work` |
 | worker (local/Mac) | `LOCAL_HARNESS_ENABLED` | set to `1` only on the local computer assigned to execute approved agent attempts |
 | worker (local/Mac) | `LOCAL_HARNESS_KIND` | `codex`, `hermes`, `openclaw`, or `custom`; legacy `copilot-cli` rows remain readable |
@@ -71,6 +75,16 @@ LOCAL_HARNESS_ENABLED=1
 LOCAL_HARNESS_KIND=codex
 LOCAL_HARNESS_COMMAND=codex
 LOCAL_HARNESS_WORKDIR=/Users/bravostation/work/todo
+```
+
+For automatic research on newly added items from this Mac without an API key, run the worker on the
+host with Codex subscription auth:
+
+```bash
+RESEARCH_LLM_PROVIDER=codex
+RESEARCH_LLM_MODEL=gpt-5.6-sol
+CODEX_RESEARCH_COMMAND=codex
+CODEX_RESEARCH_WORKDIR=/Users/bravostation/work/todo
 ```
 
 > **Postgres without TLS on the private network.** `sslmode` is **not** read from the connection

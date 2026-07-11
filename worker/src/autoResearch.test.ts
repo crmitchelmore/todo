@@ -42,6 +42,20 @@ test('needsInterview pauses when evidence is thin or research failed', () => {
   }), false);
 });
 
+test('needsInterview accepts high-confidence research with built-in web results', () => {
+  assert.equal(needsInterview({
+    ...discovery,
+    web: { source: 'builtin' as const, query: 'carbon steel wok UK', results: [{ title: 'Wok guide', url: 'https://example.invalid/wok', snippet: 'Carbon steel options.' }] },
+    confidence: 0.7,
+  }, {
+    source: 'llm',
+    body: 'Evidence-backed answer',
+    nextActions: ['Compare the top options'],
+    confidence: 0.91,
+    model: 'gpt-5.6-sol',
+  }), false);
+});
+
 test('interviewPromptFor prefers clickable options with free-text fallback', () => {
   const prompt = interviewPromptFor(discovery, 'web search unavailable');
   assert.match(prompt.question, /Find a dentist/);

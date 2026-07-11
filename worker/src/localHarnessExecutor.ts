@@ -1,9 +1,5 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
+import { runCommand, type CommandRunner } from './commandRunner.js';
 import type { AgentHandoffRequest } from './handoff.js';
-
-const execFileAsync = promisify(execFile);
 
 export type LocalHarnessKind = 'codex' | 'copilot-cli' | 'hermes' | 'openclaw' | 'custom';
 
@@ -48,14 +44,6 @@ export interface LocalHarnessRunResult {
   harnessKind: LocalHarnessKind;
   deviceId: string;
   deviceName: string;
-}
-
-interface CommandRunner {
-  (
-    file: string,
-    args: readonly string[],
-    options: { cwd: string; timeout: number; maxBuffer: number }
-  ): Promise<{ stdout: string; stderr: string }>;
 }
 
 export function localHarnessConfigFromEnv(env: LocalHarnessEnv = process.env): LocalHarnessConfig | null {
@@ -125,7 +113,7 @@ export function buildLocalHarnessArgs(config: LocalHarnessConfig, prompt: string
 export async function runLocalHarnessAttempt(
   config: LocalHarnessConfig,
   input: LocalHarnessAttemptInput,
-  runner: CommandRunner = execFileAsync
+  runner: CommandRunner = runCommand
 ): Promise<LocalHarnessRunResult> {
   const prompt = buildHarnessPrompt(input);
   const args = buildLocalHarnessArgs(config, prompt);
