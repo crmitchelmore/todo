@@ -79,7 +79,7 @@ test('generateUrlSummaryDocument fetches content, calls LLM, and writes through 
           }],
         }), { status: 200, headers: { 'content-type': 'application/json' } });
       }
-      return new Response('<script>SCRIPT_SENTINEL</script ><article><h1>Example &amp;lt;literal&amp;gt;</h1><p>This page has enough readable article content to summarise for Capture users, including clear claims, supporting context, and practical implications.</p><p>It includes meaningful details that should survive extraction.</p></article>', {
+      return new Response('<script>SCRIPT_SENTINEL</script\t\n bar><article><h1>Example &amp;lt;literal&amp;gt;</h1><p>This page has enough readable article content to summarise for Capture users, including clear claims, supporting context, and practical implications.</p><p>It includes meaningful details that should survive extraction.</p></article>', {
         status: 200,
         headers: { 'content-type': 'text/html' },
       });

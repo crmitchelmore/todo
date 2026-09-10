@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { convert } from 'html-to-text';
 
 const execFileAsync = promisify(execFile);
 
@@ -270,29 +271,17 @@ function runCommand(command?: RunCommand): RunCommand {
 }
 
 function htmlToReadableText(html: string): string {
-  return decodeEntities(
-    html
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, ' ')
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, ' ')
-      .replace(/<nav\b[^>]*>[\s\S]*?<\/nav\s*>/gi, ' ')
-      .replace(/<header\b[^>]*>[\s\S]*?<\/header\s*>/gi, ' ')
-      .replace(/<footer\b[^>]*>[\s\S]*?<\/footer\s*>/gi, ' ')
-      .replace(/<\/(h[1-6]|p|li|blockquote|article|section|div)>/gi, '\n\n')
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/[ \t]{2,}/g, ' ')
-      .replace(/\n[ \t]+/g, '\n')
-  );
-}
-
-function decodeEntities(value: string): string {
-  return value
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, '&');
+  // Parse HTML rather than treating tag syntax as a regular language. The parser
+  // decodes entities once and handles malformed-but-valid closing tag syntax.
+  return convert(html, {
+    wordwrap: false,
+    limits: { maxInputLength: 1_000_000, maxDepth: 100, maxChildNodes: 10_000 },
+    selectors: [
+      ...['script', 'style', 'nav', 'header', 'footer', 'img'].map((selector) => ({ selector, format: 'skip' })),
+      ...['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].map((selector) => ({ selector, options: { uppercase: false } })),
+      { selector: 'a', options: { ignoreHref: true } },
+    ],
+  });
 }
 
 function paragraphArray(value: unknown): string[] {
