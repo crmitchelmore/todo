@@ -164,7 +164,7 @@ test('uses built-in DuckDuckGo search when no endpoint is configured', async () 
   assert.ok(calls[0].startsWith('https://html.duckduckgo.com/html/?q='));
   assert.equal(discovery.web.source, 'builtin');
   assert.equal(discovery.web.results.length, 2);
-  assert.ok(discovery.web.results.every((result) => !result.url?.includes('duckduckgo.com')));
+  assert.ok(discovery.web.results.every((result) => result.url && new URL(result.url).hostname !== 'duckduckgo.com'));
   assert.equal(discovery.web.results[0].title, 'Best PM Tools 2026');
   assert.equal(discovery.web.results[0].url, 'https://example.com/tools');
   assert.equal(discovery.web.results[0].snippet, 'A hands-on comparison of project management tools.');

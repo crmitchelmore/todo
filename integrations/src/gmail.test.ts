@@ -46,7 +46,7 @@ test("configured connector defaults to Gmail IMAP host/port and reports ok", asy
   assert.equal(connector.isConfigured(), true);
   const health = await connector.healthCheck();
   assert.equal(health.status, "ok");
-  assert.match(health.message ?? "", new RegExp(`${GMAIL_DEFAULT_HOST}:${GMAIL_DEFAULT_PORT}`));
+  assert.ok((health.message ?? "").includes(`${GMAIL_DEFAULT_HOST}:${GMAIL_DEFAULT_PORT}`));
 });
 
 test("configured connector can use an OAuth2 access token instead of an app password", async () => {

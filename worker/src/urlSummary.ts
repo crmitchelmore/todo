@@ -272,11 +272,11 @@ function runCommand(command?: RunCommand): RunCommand {
 function htmlToReadableText(html: string): string {
   return decodeEntities(
     html
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<nav\b[^>]*>[\s\S]*?<\/nav>/gi, ' ')
-      .replace(/<header\b[^>]*>[\s\S]*?<\/header>/gi, ' ')
-      .replace(/<footer\b[^>]*>[\s\S]*?<\/footer>/gi, ' ')
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, ' ')
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, ' ')
+      .replace(/<nav\b[^>]*>[\s\S]*?<\/nav\s*>/gi, ' ')
+      .replace(/<header\b[^>]*>[\s\S]*?<\/header\s*>/gi, ' ')
+      .replace(/<footer\b[^>]*>[\s\S]*?<\/footer\s*>/gi, ' ')
       .replace(/<\/(h[1-6]|p|li|blockquote|article|section|div)>/gi, '\n\n')
       .replace(/<br\s*\/?>/gi, '\n')
       .replace(/<[^>]+>/g, ' ')
@@ -288,11 +288,11 @@ function htmlToReadableText(html: string): string {
 function decodeEntities(value: string): string {
   return value
     .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');
 }
 
 function paragraphArray(value: unknown): string[] {

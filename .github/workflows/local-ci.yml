@@ -1,5 +1,5 @@
 name: Local CI
-run-name: Local CI / ${{ inputs.mode }} / ${{ inputs.ref }}
+run-name: Local CI / ${{ inputs.mode }} / ${{ github.ref }}
 on:
   workflow_dispatch:
     inputs:
@@ -8,10 +8,6 @@ on:
         type: choice
         options: [verify, build]
         default: build
-      ref:
-        description: 'Trusted branch, tag or commit in this repository'
-        type: string
-        default: main
 permissions:
   contents: read
 concurrency:
@@ -37,7 +33,6 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         if: inputs.mode != 'verify'
         with:
-          ref: ${{ inputs.ref }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020

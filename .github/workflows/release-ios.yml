@@ -36,6 +36,9 @@ on:
 #   IOS_APP_STORE_PROFILE                 base64 App Store profile for dev.crmitchelmore.capture.ios
 #   IOS_SHARE_APP_STORE_PROFILE           base64 App Store profile for dev.crmitchelmore.capture.ios.share
 #   IOS_WIDGET_APP_STORE_PROFILE          base64 App Store profile for dev.crmitchelmore.capture.ios.widget
+permissions:
+  contents: read
+
 jobs:
   build-and-upload:
     name: Build and upload TestFlight
