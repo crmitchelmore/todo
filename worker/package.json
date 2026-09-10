@@ -14,9 +14,11 @@
   "dependencies": {
     "@sentry/node": "^10.57.0",
     "chrono-node": "^2.7.7",
+    "html-to-text": "^10.0.1",
     "pg": "^8.13.1"
   },
   "devDependencies": {
+    "@types/html-to-text": "^9.0.4",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.11.10",
     "tsx": "^4.19.2",

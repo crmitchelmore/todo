@@ -61,9 +61,12 @@ test('generateUrlSummaryDocument fetches content, calls LLM, and writes through 
       URL_SUMMARY_DISABLE_DEFUDDLE: '1',
     },
     runCommand,
-    fetchImpl: async (input) => {
+    fetchImpl: async (input, init) => {
       const url = String(input);
       if (url.includes('/chat/completions')) {
+        const prompt = String(init?.body);
+        assert.ok(prompt.includes('&lt;literal&gt;'));
+        assert.ok(!prompt.includes('SCRIPT_SENTINEL'));
         return new Response(JSON.stringify({
           choices: [{
             message: {
@@ -76,7 +79,7 @@ test('generateUrlSummaryDocument fetches content, calls LLM, and writes through 
           }],
         }), { status: 200, headers: { 'content-type': 'application/json' } });
       }
-      return new Response('<article><h1>Example</h1><p>This page has enough readable article content to summarise for Capture users, including clear claims, supporting context, and practical implications.</p><p>It includes meaningful details that should survive extraction.</p></article>', {
+      return new Response('<script>SCRIPT_SENTINEL</script\t\n bar><article><h1>Example &amp;lt;literal&amp;gt;</h1><p>This page has enough readable article content to summarise for Capture users, including clear claims, supporting context, and practical implications.</p><p>It includes meaningful details that should survive extraction.</p></article>', {
         status: 200,
         headers: { 'content-type': 'text/html' },
       });

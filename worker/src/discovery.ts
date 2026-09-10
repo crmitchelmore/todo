@@ -334,12 +334,12 @@ function extractMetaDescription(html: string): string | null {
 
 function normalizeHtmlText(text: string): string | null {
   const decoded = text
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#0*39;|&#x0*27;|&apos;/gi, "'")
     .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
     .replace(/\s+/g, ' ')
     .trim();
   return decoded.length > 0 ? decoded : null;

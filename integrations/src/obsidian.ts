@@ -264,7 +264,10 @@ function authHeaders(apiKey: string, headers: Record<string, string> = {}): Head
 
 function normaliseBaseUrl(value: string | undefined): string | undefined {
   const url = nonEmpty(value);
-  return url?.replace(/\/+$/, "");
+  if (!url) return url;
+  let end = url.length;
+  while (end > 0 && url[end - 1] === "/") end--;
+  return url.slice(0, end);
 }
 
 function nonEmpty(value: string | undefined): string | undefined {
@@ -330,7 +333,12 @@ function normaliseTags(tags: readonly string[] | undefined): string[] {
   if (!tags) return [];
   const out: string[] = [];
   for (const tag of tags) {
-    const cleaned = tag.trim().toLowerCase().replace(/^#+/, "").replace(/[^a-z0-9/_-]+/g, "-").replace(/^-+|-+$/g, "");
+    const normalized = tag.trim().toLowerCase().replace(/^#+/, "").replace(/[^a-z0-9/_-]+/g, "-");
+    let start = 0;
+    let end = normalized.length;
+    while (start < end && normalized[start] === "-") start++;
+    while (end > start && normalized[end - 1] === "-") end--;
+    const cleaned = normalized.slice(start, end);
     if (cleaned.length > 0 && !out.includes(cleaned)) out.push(cleaned);
   }
   return out.slice(0, 8);

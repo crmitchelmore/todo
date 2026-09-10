@@ -2,6 +2,7 @@ version: 2
 updates:
   - package-ecosystem: npm
     directory: /backend
+    open-pull-requests-limit: 0
     schedule:
       interval: weekly
     groups:
@@ -10,6 +11,7 @@ updates:
         patterns: ["*"]
   - package-ecosystem: npm
     directory: /web
+    open-pull-requests-limit: 0
     schedule:
       interval: weekly
     groups:
@@ -18,6 +20,7 @@ updates:
         patterns: ["*"]
   - package-ecosystem: npm
     directory: /integrations
+    open-pull-requests-limit: 0
     schedule:
       interval: weekly
     groups:
@@ -26,6 +29,7 @@ updates:
         patterns: ["*"]
   - package-ecosystem: npm
     directory: /worker
+    open-pull-requests-limit: 0
     schedule:
       interval: weekly
     groups:
@@ -34,6 +38,7 @@ updates:
         patterns: ["*"]
   - package-ecosystem: npm
     directory: /acceptance
+    open-pull-requests-limit: 0
     schedule:
       interval: weekly
     groups:
@@ -42,6 +47,7 @@ updates:
         patterns: ["*"]
   - package-ecosystem: github-actions
     directory: /
+    open-pull-requests-limit: 0
     schedule:
       interval: weekly
     groups:

@@ -1,5 +1,6 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
 import cors from 'cors';
+import { apiRateLimiter } from './rateLimit.js';
 import pg from 'pg';
 import { SignJWT } from 'jose';
 import { createHash, randomUUID } from 'crypto';
@@ -99,6 +100,7 @@ const app = express();
 app.set('trust proxy', 1);
 app.use(requestWideEventMiddleware());
 app.use(cors());
+app.use('/api', apiRateLimiter());
 app.use(express.json({ limit: '5mb' }));
 
 // --- Brute-force throttle: cap failed credential attempts before doing expensive bcrypt work. ---
@@ -1438,7 +1440,7 @@ function taskEventForOp(
  */
 async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Promise<boolean> {
   const table = op.type;
-  if (!ALLOWED_COLUMNS[table]) {
+  if (!Object.hasOwn(ALLOWED_COLUMNS, table)) {
     if (READ_ONLY_SYNC_TABLES.has(table)) return false;
     throw new Error(`table not allowed: ${table}`);
   }
@@ -1447,6 +1449,7 @@ async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Prom
     return applyAttachmentOp(client, op, ownerId);
   }
 
+  const sqlTable = pg.escapeIdentifier(table);
   if (op.op === 'DELETE') {
     if (table === 'tasks') {
       await markLinkedAgentProposals(client, ownerId, op.id, 'rejected', false);
@@ -1473,7 +1476,7 @@ async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Prom
       );
       return (result.rowCount ?? 0) > 0;
     }
-    const result = await client.query(`DELETE FROM ${table} WHERE id = $1 AND owner_id = $2`, [op.id, ownerId]);
+    const result = await client.query(`DELETE FROM ${sqlTable} WHERE id = $1 AND owner_id = $2`, [op.id, ownerId]);
     return (result.rowCount ?? 0) > 0;
   }
 
@@ -1488,12 +1491,12 @@ async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Prom
     // owner_id is immutable on update; the WHERE guard prevents overwriting another user's row.
     const updates = cols
       .filter((c) => c !== 'id' && c !== 'owner_id')
-      .map((c) => `${c} = EXCLUDED.${c}`);
+      .map((c) => `${pg.escapeIdentifier(c)} = EXCLUDED.${pg.escapeIdentifier(c)}`);
     const ownerParam = `$${vals.length + 1}`;
     const sql =
-      `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) ` +
+      `INSERT INTO ${sqlTable} (${cols.map((c) => pg.escapeIdentifier(c)).join(', ')}) VALUES (${placeholders.join(', ')}) ` +
       `ON CONFLICT (id) DO UPDATE SET ${updates.join(', ')} ` +
-      `WHERE ${table}.owner_id = ${ownerParam}`;
+      `WHERE ${sqlTable}.owner_id = ${ownerParam}`;
     const result = await client.query(sql, [...vals, ownerId]);
     const applied = (result.rowCount ?? 0) > 0;
     if (applied && table === 'tasks') await markTaskProposalDecision(client, ownerId, op.id, data);
@@ -1504,11 +1507,11 @@ async function applyOp(client: pg.PoolClient, op: CrudOp, ownerId: string): Prom
     if (table === 'agent_devices') await prepareAgentDeviceSelection(client, ownerId, op.id, data);
     const cols = Object.keys(data).filter((c) => c !== 'id' && c !== 'owner_id');
     if (cols.length === 0) return false;
-    const setClause = cols.map((c, i) => `${c} = $${i + 1}`).join(', ');
+    const setClause = cols.map((c, i) => `${pg.escapeIdentifier(c)} = $${i + 1}`).join(', ');
     const vals = cols.map((c) => data[c]);
     vals.push(op.id, ownerId);
     const result = await client.query(
-      `UPDATE ${table} SET ${setClause} WHERE id = $${vals.length - 1} AND owner_id = $${vals.length}`,
+      `UPDATE ${sqlTable} SET ${setClause} WHERE id = $${vals.length - 1} AND owner_id = $${vals.length}`,
       vals
     );
     const applied = (result.rowCount ?? 0) > 0;

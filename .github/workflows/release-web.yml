@@ -13,6 +13,9 @@ concurrency:
   group: release-web-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   build-and-deploy:
     name: Build and deploy web
