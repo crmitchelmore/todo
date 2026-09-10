@@ -7,6 +7,10 @@ test('sign-in gate is visible, editable, and console-clean', async ({ page }, te
     if (message.type() === 'error') runtimeErrors.push(message.text());
   });
 
+  // This UI smoke test runs against the local preview, not the production backend.
+  await page.route('**/api/auth/oauth/providers', (route) => route.fulfill({
+    json: { ok: true, github: { configured: false } },
+  }));
   await page.goto('/');
 
   await expect(page.getByRole('heading', { name: 'Capture' })).toBeVisible();
