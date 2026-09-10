@@ -13,12 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Checkout conformance catalogue
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: crmitchelmore/quality-software
           path: .conformance-catalogue
