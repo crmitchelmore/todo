@@ -15,7 +15,7 @@
     "typescript": "^5.7.2"
   },
   "dependencies": {
-    "imapflow": "^1.3.5",
-    "mailparser": "^3.9.9"
+    "imapflow": "^1.7.8",
+    "mailparser": "^3.9.24"
   }
 }
