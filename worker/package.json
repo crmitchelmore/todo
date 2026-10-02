@@ -13,12 +13,12 @@
   },
   "dependencies": {
     "@sentry/node": "^11.1.0",
-    "chrono-node": "^2.7.7",
-    "pg": "^8.13.1"
+    "chrono-node": "^2.10.1",
+    "pg": "^8.23.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",
-    "@types/pg": "^8.11.10",
+    "@types/pg": "^8.23.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }

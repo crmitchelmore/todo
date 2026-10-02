@@ -9,13 +9,13 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/mailparser": "^3.4.6",
+    "@types/mailparser": "^3.9.0",
     "@types/node": "^26.6.3",
     "tsx": "^4.23.15",
     "typescript": "^5.7.2"
   },
   "dependencies": {
     "imapflow": "^2.1.2",
-    "mailparser": "^3.9.30"
+    "mailparser": "^3.9.31"
   }
 }
