@@ -1,4 +1,4 @@
-import { PowerSyncDatabase } from '@powersync/web';
+import { PowerSyncDatabase, SyncStreamConnectionMethod } from '@powersync/web';
 import { AppSchema } from './schema';
 import { BackendConnector } from './connector';
 import { ownerId as sessionOwnerId } from '../lib/auth';
@@ -17,7 +17,10 @@ let connected = false;
 export async function initPowerSync(): Promise<void> {
   if (connected) return;
   connected = true;
-  await db.connect(new BackendConnector());
+  // @powersync/web v2 changed the default sync transport from WebSockets to HTTP streaming. Keep the
+  // WebSocket transport the production PowerSync deployment has been serving web clients over;
+  // moving to HTTP is a separate, deliberate change.
+  await db.connect(new BackendConnector(), { connectionMethod: SyncStreamConnectionMethod.WEB_SOCKET });
 }
 
 /** Wipe the local DB + upload queue. Called on real account boundaries (sign-out, or sign-in as a
