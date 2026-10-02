@@ -3,7 +3,6 @@ import {
   importPKCS8,
   generateKeyPair,
   type JWK,
-  type KeyLike,
 } from 'jose';
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'crypto';
 import bcrypt from 'bcryptjs';
@@ -556,7 +555,7 @@ export async function findUserIdByEmail(pool: pg.Pool, email: string): Promise<s
 // --- RS256 signing key for PowerSync tokens ---------------------------------------------------
 
 export interface SigningKey {
-  privateKey: KeyLike;
+  privateKey: CryptoKey;
   publicJwk: JWK;
   kid: string;
 }
@@ -569,9 +568,11 @@ export interface SigningKey {
 export async function loadSigningKey(): Promise<SigningKey> {
   const kid = process.env.JWT_KID ?? 'capture-key-1';
   const pem = process.env.BACKEND_JWT_PRIVATE_KEY;
-  let privateKey: KeyLike;
+  let privateKey: CryptoKey;
   if (pem && pem.includes('PRIVATE KEY')) {
-    privateKey = await importPKCS8(pem.replace(/\\n/g, "\n"), "RS256");
+    // jose v6 imports private keys as non-extractable CryptoKeys by default; the public JWK is
+    // derived via exportJWK below, so the key must be extractable.
+    privateKey = await importPKCS8(pem.replace(/\\n/g, "\n"), "RS256", { extractable: true });
   } else {
     if (process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT) {
       console.warn(
