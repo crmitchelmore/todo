@@ -9,7 +9,6 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
   type AuthenticationResponseJSON,
-  type AuthenticatorTransportFuture,
   type RegistrationResponseJSON,
 } from '@simplewebauthn/server';
 import {
@@ -843,7 +842,7 @@ app.post('/api/auth/passkeys/register/options', requireAuth, async (req: AuthedR
       authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' },
       excludeCredentials: credentials.rows.map((row) => ({
         id: row.credential_id as string,
-        transports: row.transports as AuthenticatorTransportFuture[],
+        transports: row.transports as string[],
       })),
     });
     await pool.query(
@@ -900,7 +899,7 @@ app.post('/api/auth/passkeys/login/options', async (req: Request, res: Response)
   const email = normalizeEmail(typeof req.body?.email === 'string' ? req.body.email : '');
   try {
     let userId: string | null = null;
-    let allowCredentials: { id: string; transports?: AuthenticatorTransportFuture[] }[] | undefined;
+    let allowCredentials: { id: string; transports?: string[] }[] | undefined;
     if (email) {
       const user = await pool.query(`SELECT id FROM public.users WHERE lower(email) = $1`, [email]);
       if ((user.rowCount ?? 0) > 0) {
@@ -912,7 +911,7 @@ app.post('/api/auth/passkeys/login/options', async (req: Request, res: Response)
         );
         allowCredentials = creds.rows.map((row) => ({
           id: row.credential_id as string,
-          transports: row.transports as AuthenticatorTransportFuture[],
+          transports: row.transports as string[],
         }));
       }
     }
@@ -962,7 +961,7 @@ app.post('/api/auth/passkeys/login/verify', async (req: Request, res: Response) 
         id: row.credential_id,
         publicKey: new Uint8Array(row.public_key),
         counter: Number(row.counter),
-        transports: row.transports as AuthenticatorTransportFuture[],
+        transports: row.transports,
       },
     });
     if (!verification.verified) {
