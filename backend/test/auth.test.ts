@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { generateKeyPairSync } from 'node:crypto';
 import { generateKeyPair, SignJWT, jwtVerify, importJWK, type JWK } from 'jose';
 import {
   hashToken,
@@ -93,6 +94,36 @@ test('PowerSync token verifies with the public JWKS and is rejected for the wron
   const { payload } = await jwtVerify(token, key, { audience: 'powersync', issuer: 'capture' });
   assert.equal(payload.sub, 'user-xyz');
   await assert.rejects(() => jwtVerify(token, key, { audience: 'capture-api' }));
+});
+
+test('a persisted PKCS8 signing key (BACKEND_JWT_PRIVATE_KEY) loads, signs and yields a stable public JWK', async () => {
+  const { privateKey: pemKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const pem = pemKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+  const prev = process.env.BACKEND_JWT_PRIVATE_KEY;
+  // Railway stores the PEM with literal "\n" sequences; loadSigningKey must unescape them.
+  process.env.BACKEND_JWT_PRIVATE_KEY = pem.replace(/\n/g, '\\n');
+  try {
+    const a = await loadSigningKey();
+    const b = await loadSigningKey();
+    assert.deepEqual(a.publicJwk, b.publicJwk, 'same PEM -> same JWKS across restarts');
+    for (const field of ['d', 'p', 'q', 'dp', 'dq', 'qi']) {
+      assert.equal((a.publicJwk as Record<string, unknown>)[field], undefined);
+    }
+    const token = await new SignJWT({})
+      .setProtectedHeader({ alg: 'RS256', kid: a.kid })
+      .setSubject('user-pem')
+      .setIssuer('capture')
+      .setAudience('powersync')
+      .setIssuedAt()
+      .setExpirationTime('5m')
+      .sign(a.privateKey);
+    const key = await importJWK(b.publicJwk as JWK, 'RS256');
+    const { payload } = await jwtVerify(token, key, { audience: 'powersync', issuer: 'capture' });
+    assert.equal(payload.sub, 'user-pem');
+  } finally {
+    if (prev === undefined) delete process.env.BACKEND_JWT_PRIVATE_KEY;
+    else process.env.BACKEND_JWT_PRIVATE_KEY = prev;
+  }
 });
 
 test('public JWK exposes no private key material', async () => {
