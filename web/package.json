@@ -13,8 +13,8 @@
     "validate:ui": "npm run build && playwright test"
   },
   "dependencies": {
-    "@powersync/react": "^1.5.3",
-    "@powersync/web": "^1.20.0",
+    "@powersync/react": "^2.0.2",
+    "@powersync/web": "^2.4.2",
     "@sentry/react": "^10.57.0",
     "@simplewebauthn/browser": "^13.3.0",
     "chrono-node": "^2.7.7",
@@ -26,9 +26,9 @@
     "@playwright/test": "^1.63.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react": "^6.1.1",
     "tsx": "^4.23.13",
     "typescript": "^5.7.2",
-    "vite": "^6.4.3"
+    "vite": "^8.3.1"
   }
 }

@@ -1,4 +1,4 @@
-import type { AbstractPowerSyncDatabase, PowerSyncBackendConnector } from '@powersync/web';
+import type { CommonPowerSyncDatabase, PowerSyncBackendConnector } from '@powersync/web';
 import { config } from '../config';
 import { getToken, clearSession } from '../lib/auth';
 import { captureException, startSpan, wideEvent } from '../observability';
@@ -39,7 +39,7 @@ export class BackendConnector implements PowerSyncBackendConnector {
     });
   }
 
-  async uploadData(database: AbstractPowerSyncDatabase): Promise<void> {
+  async uploadData(database: CommonPowerSyncDatabase): Promise<void> {
     const tx = await database.getNextCrudTransaction();
     if (!tx) return;
     const started = performance.now();

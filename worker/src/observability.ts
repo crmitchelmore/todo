@@ -13,7 +13,25 @@ export function initObservability(): void {
     environment: ENVIRONMENT,
     release: `${SERVICE_NAME}@${SERVICE_VERSION}`,
     tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE ?? 0.1),
-    enableLogs: true,
+    // SDK v11 removed `enableLogs` (logs are captured only via Sentry.logger.* or a logging
+    // integration, neither of which the worker uses) and made `dataCollection` default to
+    // collecting user info, cookies, HTTP bodies, DB query data, queue payloads and GenAI
+    // inputs/outputs. The worker handles users' raw task text, so pin the v10 (sendDefaultPii
+    // off) baseline explicitly rather than inherit the broader default.
+    dataCollection: {
+      userInfo: false,
+      cookies: false,
+      httpHeaders: {
+        request: { deny: ['forwarded', '-ip', 'remote-', 'via', '-user'] },
+        response: { deny: ['forwarded', '-ip', 'remote-', 'via', '-user'] },
+      },
+      httpBodies: [],
+      urlQueryParams: { deny: ['forwarded', '-ip', 'remote-', 'via', '-user'] },
+      genAI: { inputs: false, outputs: false },
+      databaseQueryData: false,
+      queues: false,
+      graphQL: { document: false, variables: false },
+    },
   });
 }
 
