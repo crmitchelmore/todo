@@ -1,50 +1,69 @@
+# Weekly patch and minor updates arrive as one grouped pull request per
+# ecosystem and directory; security fixes are grouped the same way. Major
+# updates open individually for review.
 version: 2
 updates:
-  - package-ecosystem: npm
-    directory: /backend
+  - package-ecosystem: "npm"
+    directories:
+      - "/acceptance"
+      - "/backend"
+      - "/integrations"
+      - "/web"
+      - "/worker"
     schedule:
-      interval: weekly
+      interval: "weekly"
+    open-pull-requests-limit: 5
     groups:
       security:
         applies-to: security-updates
         patterns: ["*"]
-  - package-ecosystem: npm
-    directory: /web
+      minor-and-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "swift"
+    directory: "/clients/CaptureCore"
     schedule:
-      interval: weekly
+      interval: "weekly"
+    open-pull-requests-limit: 5
     groups:
       security:
         applies-to: security-updates
         patterns: ["*"]
-  - package-ecosystem: npm
-    directory: /integrations
+      minor-and-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "docker"
+    directories:
+      - "/backend"
+      - "/infra/powersync"
+      - "/web"
+      - "/worker"
     schedule:
-      interval: weekly
+      interval: "weekly"
+    open-pull-requests-limit: 5
     groups:
       security:
         applies-to: security-updates
         patterns: ["*"]
-  - package-ecosystem: npm
-    directory: /worker
+      minor-and-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
     schedule:
-      interval: weekly
+      interval: "weekly"
+    open-pull-requests-limit: 5
     groups:
       security:
         applies-to: security-updates
         patterns: ["*"]
-  - package-ecosystem: npm
-    directory: /acceptance
-    schedule:
-      interval: weekly
-    groups:
-      security:
-        applies-to: security-updates
+      minor-and-patch:
+        applies-to: version-updates
         patterns: ["*"]
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: weekly
-    groups:
-      security:
-        applies-to: security-updates
-        patterns: ["*"]
+        update-types: ["minor", "patch"]
