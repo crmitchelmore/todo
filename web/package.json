@@ -13,22 +13,22 @@
     "validate:ui": "npm run build && playwright test"
   },
   "dependencies": {
-    "@powersync/react": "^2.0.2",
-    "@powersync/web": "^2.4.2",
+    "@powersync/react": "^2.1.0",
+    "@powersync/web": "^2.5.0",
     "@sentry/react": "^10.57.0",
     "@simplewebauthn/browser": "^13.3.0",
-    "chrono-node": "^2.7.7",
+    "chrono-node": "^2.10.3",
     "js-logger": "^1.6.1",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
   },
   "devDependencies": {
-    "@playwright/test": "^1.63.0",
+    "@playwright/test": "^1.64.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^6.1.1",
-    "tsx": "^4.23.13",
+    "@vitejs/plugin-react": "^6.1.2",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.2",
-    "vite": "^8.3.1"
+    "vite": "^8.3.4"
   }
 }
