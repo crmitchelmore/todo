@@ -30,6 +30,9 @@ struct CaptureTodoIntent: AppIntent {
         guard !trimmed.isEmpty else {
             return .result(dialog: "Nothing to capture.")
         }
+        guard AIDataConsent().isGranted else {
+            return .result(dialog: "Open Capture and review AI data sharing before capturing.")
+        }
         let config = CaptureConfig.fromEnvironment()
         let ingress = config.makeIngress(token: AuthStore(config: config))
         let input = CaptureInput(rawText: trimmed, source: "app-intent")

@@ -19,6 +19,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     private let config = CaptureConfig.fromEnvironment()
     private lazy var auth = AuthStore(config: config)
     private lazy var viewModel = CaptureViewModel(auth: auth, config: config)
+    private let aiConsent = AIDataConsent()
     private var startedSync = false
     private var shouldFocusQuickCapture = false
 
@@ -38,6 +39,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         auth.onChange = { [weak self] in
             Task { @MainActor in self?.refreshRoot() }
         }
+        NotificationCenter.default.addObserver(forName: .captureAIConsentChanged, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.refreshRoot() }
+        }
         refreshRoot()
         window.makeKeyAndVisible()
         handle(urlContexts: connectionOptions.urlContexts)
@@ -47,7 +51,27 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     private func refreshRoot() {
         guard let window else { return }
         if auth.isAuthenticated {
-            if !startedSync {
+            guard aiConsent.isGranted else {
+                window.rootViewController = AIConsentViewController(
+                    consent: aiConsent,
+                    onAccept: { [weak self] in self?.refreshRoot() },
+                    onSignOut: { [weak self] in
+                        guard let self else { return }
+                        Task {
+                            await self.auth.signOut()
+                            await self.viewModel.store.clearActiveUser()
+                        }
+                    })
+                return
+            }
+            if startedSync {
+                let showingCapture = (window.rootViewController as? UINavigationController)?
+                    .viewControllers.first is CaptureViewController
+                if !showingCapture {
+                    window.rootViewController = UINavigationController(
+                        rootViewController: CaptureViewController(viewModel: viewModel))
+                }
+            } else {
                 startedSync = true
                 Task {
                     await viewModel.store.prepareForActiveUser()

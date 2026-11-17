@@ -95,6 +95,15 @@ final class ShareViewController: UIViewController {
     @objc private func save() {
         let text = textView.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { cancel(); return }
+        guard AIDataConsent().isGranted else {
+            let alert = UIAlertController(
+                title: AIDataConsent.title,
+                message: "Open Capture and review AI data sharing before capturing from the Share Sheet.",
+                preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in self?.cancel() })
+            present(alert, animated: true)
+            return
+        }
         spinner.startAnimating()
         let input = CaptureInput(rawText: text, url: sharedURL, source: "share-extension")
         Task {
