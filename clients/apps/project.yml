@@ -30,6 +30,8 @@ targets:
     sources:
       - CaptureiOS/Sources
       - CaptureiOS/Assets.xcassets
+      - path: CaptureiOS/PrivacyInfo.xcprivacy
+        buildPhase: resources
     dependencies:
       - package: CaptureCore
         product: CaptureCore
@@ -131,6 +133,8 @@ targets:
     sources:
       - CaptureMac/Sources
       - CaptureMac/Assets.xcassets
+      - path: CaptureMac/PrivacyInfo.xcprivacy
+        buildPhase: resources
     dependencies:
       - package: CaptureCore
         product: CaptureCore
