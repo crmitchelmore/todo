@@ -27,15 +27,17 @@ private struct CaptureWidgetView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Image(systemName: "bolt.fill")
-                .font(.system(size: 24, weight: .bold))
+                .font(.title2.weight(.bold))
                 .foregroundStyle(Color(red: 1.0, green: 0.62, blue: 0.18))
 
             Text("Capture")
-                .font(.system(size: 23, weight: .bold, design: .rounded))
+                .font(.system(.title2, design: .rounded).weight(.bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
                 .foregroundStyle(.white)
 
             Text("Tap to open the instant inbox.")
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .font(.system(.caption, design: .monospaced).weight(.medium))
                 .foregroundStyle(.white.opacity(0.68))
                 .lineLimit(2)
         }

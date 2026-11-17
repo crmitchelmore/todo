@@ -14,7 +14,7 @@ public final class TaskStore: @unchecked Sendable {
     private let config: CaptureConfig
     private let auth: AuthStore?
 
-    public init(config: CaptureConfig = .localDev, auth: AuthStore? = nil) {
+    public init(config: CaptureConfig = .fromEnvironment(), auth: AuthStore? = nil) {
         self.config = config
         self.auth = auth
         self.db = PowerSyncDatabase(schema: AppSchema, dbFilename: "capture.sqlite")

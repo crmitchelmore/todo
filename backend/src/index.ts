@@ -539,6 +539,23 @@ app.post('/api/auth/logout', requireAuth, async (req: AuthedRequest, res: Respon
   }
 });
 
+// Permanently deletes the signed-in account (App Store Guideline 5.1.1(v)). Every owned table
+// references users(id) with ON DELETE CASCADE, so one owner-scoped delete removes sessions,
+// credentials, tasks, events, attachments, memories and agent state.
+app.delete('/api/auth/account', requireAuth, async (req: AuthedRequest, res: Response) => {
+  try {
+    const result = await pool.query('DELETE FROM public.users WHERE id = $1', [req.ownerId]);
+    if (result.rowCount === 0) {
+      res.status(404).json({ ok: false, error: 'account not found' });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('account deletion failed:', err);
+    res.status(500).json({ ok: false, error: 'account deletion failed' });
+  }
+});
+
 app.get('/api/auth/oauth/providers', (_req: Request, res: Response) => {
   res.json({
     ok: true,

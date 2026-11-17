@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var quickAppMenuItem: NSMenuItem?
     private let updater = UpdaterController.shared   // starts Sparkle scheduled checks
     private var started = false
+    private let aiConsent = AIDataConsent(defaults: .standard)
     private let passkeys = NativePasskeyAuthorizer()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -34,13 +35,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         statusItemController = StatusItemController(
             viewModel: model,
-            onQuickCapture: { [weak self] in self?.quick.show() },
+            onQuickCapture: { [weak self] in self?.showQuickCaptureIfAllowed() },
             onOpenMain: { [weak self] in self?.showMainWindow() }
         )
 
         // Configurable global hotkey (default ⌥Space) from anywhere → Spotlight-style quick
         // capture (does not steal focus context).
-        hotKey = GlobalHotKey(hotKey: hotKeyStore.hotKey) { [weak self] in self?.quick.toggle() }
+        hotKey = GlobalHotKey(hotKey: hotKeyStore.hotKey) { [weak self] in
+            guard let self else { return }
+            if self.aiConsent.isGranted { self.quick.toggle() } else { self.showMainWindow() }
+        }
         statusItemController?.setShortcutDisplay(hotKeyStore.hotKey.displayString)
         if hotKey?.isRegistered == false {
             NSLog("[Capture] global hotkey registration failed; use the menu bar item to capture.")
@@ -51,6 +55,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         auth.onChange = { [weak self] in
             Task { @MainActor in self?.refreshAuthUI() }
         }
+        NotificationCenter.default.addObserver(forName: .captureAIConsentChanged, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.refreshAuthUI() }
+        }
         refreshAuthUI()
         showMainWindow()
     }
@@ -59,6 +66,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// data (so a previous account's optimistic writes can't leak) and start syncing.
     private func refreshAuthUI() {
         if auth.isAuthenticated {
+            guard aiConsent.isGranted else {
+                window.contentViewController = AIConsentViewController(
+                    consent: aiConsent,
+                    onAccept: { [weak self] in self?.refreshAuthUI() },
+                    onSignOut: { [weak self] in self?.signOut() })
+                return
+            }
             window.contentViewController = captureVC
             if !started {
                 started = true
@@ -101,6 +115,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // Hand the capture field our paste-aware editor so pasting a markdown list ingests items.
     func windowWillReturnFieldEditor(_ sender: NSWindow, to client: Any?) -> Any? {
         captureVC.fieldEditor(for: client)
+    }
+
+    private func showQuickCaptureIfAllowed() {
+        if aiConsent.isGranted { quick.show() } else { showMainWindow() }
     }
 
     private func showMainWindow() {
@@ -171,6 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc private func quickCapture() {
         CaptureDiagnostics.record(category: "ui", name: "menu.app.quick_capture", message: "App menu quick capture clicked")
+        guard aiConsent.isGranted else { showMainWindow(); return }
         quick.show()
     }
 

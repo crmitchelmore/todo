@@ -276,3 +276,15 @@ export async function signOut(): Promise<void> {
   }
   clearSession();
 }
+
+/** Permanently deletes the signed-in account and all server data; keeps the session if the server refuses. */
+export async function deleteAccount(): Promise<void> {
+  const token = getToken();
+  if (!token) throw new Error('Not signed in.');
+  const res = await fetch(`${config.backendUrl}/api/auth/account`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!res.ok) throw new Error(`Account deletion failed (HTTP ${res.status}). Try again.`);
+  clearSession();
+}

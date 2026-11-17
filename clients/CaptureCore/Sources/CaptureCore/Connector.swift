@@ -28,12 +28,15 @@ public struct CaptureConfig: Sendable {
         self.keychainAccessGroup = keychainAccessGroup
     }
 
-    /// Sensible default for a simulator/desktop talking to the local stack.
+    #if DEBUG
+    /// Sensible default for a simulator/desktop talking to the local stack. Debug-only so Release
+    /// binaries never compile in a localhost endpoint.
     public static let localDev = CaptureConfig(
         backendURL: URL(string: "http://localhost:6060")!,
         powersyncURL: URL(string: "http://localhost:8080")!,
         appGroupId: "group.dev.crmitchelmore.capture"
     )
+    #endif
 
     /// Remote deployment where the backend connector and the PowerSync service are reachable on
     /// two separate HTTPS origins (the Railway model: each service gets its own public domain).
