@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AuthSecurity } from './AuthSecurity';
+import { deleteAccount } from '../lib/auth';
 import { UserMemoryManager } from './UserMemoryManager';
 import {
   fetchCombinedSyncDiagnostics,
@@ -25,6 +26,7 @@ const APPEARANCE_OPTIONS: Array<{ value: AppearanceMode; label: string; hint: st
 export function SettingsPanel({ onSignOut }: { onSignOut: () => Promise<void> }) {
   const [appearance, setAppearanceState] = useState<AppearanceMode>(() => getAppearance());
   const [busy, setBusy] = useState(false);
+  const [accountError, setAccountError] = useState<string | null>(null);
   const [diagnostics, setDiagnostics] = useState<CombinedSyncDiagnostics | null>(null);
   const [diagnosticsBusy, setDiagnosticsBusy] = useState(false);
   const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
@@ -57,6 +59,23 @@ export function SettingsPanel({ onSignOut }: { onSignOut: () => Promise<void> })
       setDiagnosticsError(error instanceof Error ? error.message : 'Diagnostics failed.');
     } finally {
       setDiagnosticsBusy(false);
+    }
+  }
+
+  async function removeAccount() {
+    const confirmed = window.confirm(
+      'Delete your Capture account? This permanently deletes your account, tasks, history, attachments and memories on every device. It can\'t be undone.'
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    setAccountError(null);
+    try {
+      await deleteAccount();
+      await onSignOut();
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : 'Account deletion failed.');
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -157,9 +176,19 @@ export function SettingsPanel({ onSignOut }: { onSignOut: () => Promise<void> })
         <div>
           <h3>Account</h3>
           <p>Password changes use the emailed reset flow from the sign-in screen.</p>
+          <p>
+            Task text, notes and shared links are sent to OpenAI for categorisation and research.{' '}
+            <a href="https://github.com/crmitchelmore/todo/blob/main/docs/privacy-policy.md" target="_blank" rel="noreferrer">
+              Privacy policy
+            </a>
+          </p>
+          {accountError && <p role="alert">{accountError}</p>}
         </div>
-        <button className="signin-alt danger-action" type="button" disabled={busy} onClick={() => void signOut()}>
+        <button className="signin-alt" type="button" disabled={busy} onClick={() => void signOut()}>
           Sign out
+        </button>
+        <button className="signin-alt danger-action" type="button" disabled={busy} onClick={() => void removeAccount()}>
+          Delete account
         </button>
       </div>
 

@@ -317,6 +317,9 @@ private struct SettingsView: View {
     @State private var localDiagnostics: LocalSyncDiagnostics?
     @State private var diagnosticsError: String?
     @State private var diagnosticsBusy = false
+    @State private var confirmingAccountDeletion = false
+    @State private var accountDeletionBusy = false
+    @State private var accountDeletionError: String?
     @ObservedObject private var appDiagnostics = CaptureDiagnostics.shared
 
     var body: some View {
@@ -434,6 +437,27 @@ private struct SettingsView: View {
                     .padding(.top, 4)
                 }
 
+                GroupBox("Privacy & AI") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("AI processing by \(AIDataConsent.providerName): allowed")
+                            .font(.system(.body, design: .rounded).weight(.semibold))
+                        Text(AIDataConsent.summary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        HStack {
+                            Link("Privacy policy", destination: AIDataConsent.privacyPolicyURL)
+                            Spacer()
+                            Button("Withdraw AI consent", role: .destructive) {
+                                AIDataConsent(defaults: .standard).revoke()
+                                NotificationCenter.default.post(name: .captureAIConsentChanged, object: nil)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 4)
+                }
+
                 GroupBox("Account") {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
@@ -444,9 +468,25 @@ private struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button("Sign Out", role: .destructive, action: onSignOut)
+                        Button("Sign Out", action: onSignOut)
+                        Button("Delete Account…", role: .destructive) { confirmingAccountDeletion = true }
+                            .disabled(accountDeletionBusy)
                     }
                     .padding(.top, 4)
+                    if let accountDeletionError {
+                        Text(accountDeletionError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+                .confirmationDialog(
+                    "Delete your Capture account?",
+                    isPresented: $confirmingAccountDeletion
+                ) {
+                    Button("Delete Account and All Data", role: .destructive) { deleteAccount() }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("This permanently deletes your account, tasks, history, attachments and memories on every device. It can't be undone.")
                 }
 
                 Spacer(minLength: 0)
@@ -456,6 +496,20 @@ private struct SettingsView: View {
         .frame(width: 760, height: 920, alignment: .topLeading)
         .task { taxonomy.start() }
         .task { await loadDiagnostics() }
+    }
+
+    private func deleteAccount() {
+        accountDeletionBusy = true
+        accountDeletionError = nil
+        Task {
+            do {
+                try await auth.deleteAccount()
+                await taskStore.clearActiveUser()
+            } catch {
+                accountDeletionError = (error as? CaptureError)?.message ?? error.localizedDescription
+            }
+            accountDeletionBusy = false
+        }
     }
 
     private var diagnosticsHeadline: String {

@@ -275,6 +275,21 @@ public final class AuthStore: @unchecked Sendable, TokenProviding {
         clear()
     }
 
+    /// Permanently deletes the signed-in account and all of its server data, then drops the local
+    /// session. Throws (and keeps the session) when the server doesn't confirm the deletion.
+    public func deleteAccount() async throws {
+        guard let token = currentToken() else { throw CaptureError.auth("not signed in") }
+        var req = URLRequest(url: backendURL.appendingPathComponent("api/auth/account"))
+        req.httpMethod = "DELETE"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 20
+        let (_, http) = try await performDataRequest(req, operation: "auth.delete_account")
+        guard (200..<300).contains(http.statusCode) else {
+            throw CaptureError.auth("Account deletion failed (HTTP \(http.statusCode)). Try again.")
+        }
+        clear()
+    }
+
     private func performDataRequest(_ request: URLRequest, operation: String) async throws -> (Data, HTTPURLResponse) {
         let startedAt = CaptureDiagnostics.recordHTTPRequestStart(
             request,

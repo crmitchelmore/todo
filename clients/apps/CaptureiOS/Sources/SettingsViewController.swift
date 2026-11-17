@@ -261,7 +261,16 @@ final class SettingsViewController: UIViewController {
         stack.addArrangedSubview(section(title: "AI Categorisation Rules", controls: [makeAddButton(title: "Add rule", action: { [weak self] in self?.promptCreateRule() }), rulesStack]))
         stack.addArrangedSubview(section(title: "Tags", controls: [makeAddButton(title: "Add tag", action: { [weak self] in self?.promptCreateTag() }), tagsStack]))
         stack.addArrangedSubview(section(title: "Sync Diagnostics", controls: [diagnosticsStatus, diagnosticsDetail, diagnosticsMeta, diagnosticsRefresh]))
-        stack.addArrangedSubview(section(title: "Account", controls: [accountNote, signOutButton]))
+        stack.addArrangedSubview(section(title: "Privacy & AI", controls: privacyControls()))
+        let deleteAccountButton = UIButton(type: .system)
+        deleteAccountButton.setTitle("Delete Account", for: .normal)
+        deleteAccountButton.setTitleColor(Theme.danger, for: .normal)
+        deleteAccountButton.backgroundColor = Theme.surfaceHi
+        deleteAccountButton.layer.cornerRadius = 12
+        deleteAccountButton.accessibilityIdentifier = "deleteAccount"
+        deleteAccountButton.addAction(UIAction { [weak self] _ in self?.confirmDeleteAccount() }, for: .touchUpInside)
+        deleteAccountButton.heightAnchor.constraint(equalToConstant: 44).isActive = true
+        stack.addArrangedSubview(section(title: "Account", controls: [accountNote, signOutButton, deleteAccountButton]))
         categoriesStack.axis = .vertical
         categoriesStack.spacing = 8
         tagsStack.axis = .vertical
@@ -378,6 +387,71 @@ final class SettingsViewController: UIViewController {
         Local owners: \(local.ownerIds.joined(separator: ", ").nilIfEmpty ?? "none")
         """
         diagnosticsRefresh.isEnabled = true
+    }
+
+    private func privacyControls() -> [UIView] {
+        let consent = AIDataConsent()
+        let note = UILabel()
+        let decided = consent.decidedAt.map { " on \($0.formatted(date: .abbreviated, time: .omitted))" } ?? ""
+        note.text = "AI processing by \(AIDataConsent.providerName): allowed\(decided). " + AIDataConsent.summary
+        note.font = UIFont.preferredFont(forTextStyle: .footnote)
+        note.adjustsFontForContentSizeCategory = true
+        note.textColor = Theme.textSecondary
+        note.numberOfLines = 0
+
+        let policy = UIButton(type: .system)
+        policy.setTitle("Privacy policy", for: .normal)
+        policy.setTitleColor(Theme.signal, for: .normal)
+        policy.backgroundColor = Theme.surfaceHi
+        policy.layer.cornerRadius = 12
+        policy.addAction(UIAction { _ in UIApplication.shared.open(AIDataConsent.privacyPolicyURL) }, for: .touchUpInside)
+
+        let withdraw = UIButton(type: .system)
+        withdraw.setTitle("Withdraw AI consent", for: .normal)
+        withdraw.setTitleColor(Theme.danger, for: .normal)
+        withdraw.backgroundColor = Theme.surfaceHi
+        withdraw.layer.cornerRadius = 12
+        withdraw.addAction(UIAction { _ in
+            consent.revoke()
+            NotificationCenter.default.post(name: .captureAIConsentChanged, object: nil)
+        }, for: .touchUpInside)
+
+        NSLayoutConstraint.activate([
+            policy.heightAnchor.constraint(equalToConstant: 44),
+            withdraw.heightAnchor.constraint(equalToConstant: 44)
+        ])
+        return [note, policy, withdraw]
+    }
+
+    private func confirmDeleteAccount() {
+        let alert = UIAlertController(
+            title: "Delete your Capture account?",
+            message: "This permanently deletes your account, tasks, history, attachments and memories on every device. It can't be undone.",
+            preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Delete Account", style: .destructive) { [weak self] _ in
+            self?.deleteAccount()
+        })
+        present(alert, animated: true)
+    }
+
+    private func deleteAccount() {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await viewModel.auth.deleteAccount()
+                await viewModel.store.clearActiveUser()
+            } catch {
+                await MainActor.run {
+                    let failure = UIAlertController(
+                        title: "Couldn't delete account",
+                        message: (error as? CaptureError)?.message ?? error.localizedDescription,
+                        preferredStyle: .alert)
+                    failure.addAction(UIAlertAction(title: "OK", style: .default))
+                    self.present(failure, animated: true)
+                }
+            }
+        }
     }
 
     private func signOut() {

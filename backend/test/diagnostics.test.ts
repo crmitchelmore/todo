@@ -14,3 +14,12 @@ test('sync diagnostics is authenticated and owner scoped', () => {
   assert.doesNotMatch(route, /session_token/);
   assert.doesNotMatch(route, /token_hash:/);
 });
+
+test('account deletion is authenticated and scoped to the signed-in owner', () => {
+  const routeStart = source.indexOf("app.delete('/api/auth/account', requireAuth");
+  assert.notEqual(routeStart, -1);
+  const nextRoute = source.indexOf('\napp.', routeStart + 1);
+  const route = source.slice(routeStart, nextRoute);
+  assert.match(route, /DELETE FROM public\.users WHERE id = \$1', \[req\.ownerId\]/);
+  assert.doesNotMatch(route, /req\.body/);
+});
