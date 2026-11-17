@@ -7,7 +7,11 @@ import CaptureCore
 // Requires the local stack (docker compose) to be running.
 
 let marker = "probe-\(Int(Date().timeIntervalSince1970))"
+#if DEBUG
 let store = TaskStore(config: .localDev)
+#else
+let store = TaskStore(config: .fromEnvironment())
+#endif
 do {
     try await store.connect()
     print("connected")
